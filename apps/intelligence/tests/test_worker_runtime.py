@@ -67,11 +67,13 @@ def test_uncertain_ack_retries_same_durable_payload_after_restart(tmp_path):
         def run(self, request, checkpoint=None): self.calls+=1; return {"status":"ready", "tenant_id":request.tenant_id, "company_id":request.company_id, "request_id":request.request_id}
     class Uncertain(Core):
         def submit_result(self, payload): self.results.append(payload); raise TimeoutError()
-    p=Pipeline(); c=Uncertain(job())
-    assert Worker(c,p,store,tenant_ids={"tenant-a"}).run_once()["status"]=="pending"
+    p=Pipeline(); c=Uncertain(job()); now=[time.time()]
+    options={"tenant_ids":{"tenant-a"}, "clock":lambda:now[0], "jitter":lambda low,high:1}
+    assert Worker(c,p,store,**options).run_once()["status"]=="pending"
     original=c.results[0]
+    now[0]+=2
     c2=Core(None)
-    assert Worker(c2,p,ArtifactStore(tmp_path/"a.db"),tenant_ids={"tenant-a"}).run_once()["status"]=="retransmitted"
+    assert Worker(c2,p,ArtifactStore(tmp_path/"a.db"),**options).run_once()["status"]=="retransmitted"
     assert c2.results[0]==original and p.calls==1
 
 

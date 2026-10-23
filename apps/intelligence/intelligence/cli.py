@@ -159,7 +159,8 @@ def main(argv=None):
             from .artifacts import ArtifactStore
             artifacts=ArtifactStore(Path(args.state_dir)/'artifacts.sqlite3')
             if args.command=='inspect':
-                write_json({'requests':artifacts.list_reservations(),'jobs':artifacts.list_job_runs()})
+                write_json({'requests':artifacts.list_reservations(),'jobs':artifacts.list_job_runs(),
+                            'pending_deliveries':artifacts.pending(),'dead_deliveries':artifacts.dead_letters()})
             elif args.command=='reset-request':
                 artifacts.reset_candidate(args.tenant,args.request_id,force=args.confirm_stopped)
                 write_json({'status':'reset'})

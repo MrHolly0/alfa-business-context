@@ -92,15 +92,26 @@ def parse_content(content: str, content_type: str) -> ParseResult:
             for child in node:
                 key = child.tag.rsplit("}", 1)[-1].lower()
                 if key in {"title", "description", "summary", "content", "pubdate", "published", "updated", "link", "guid", "id"}:
-                    fields[key] = child.attrib.get("href", "") if key == "link" else " ".join(child.itertext()).strip()
+                    fields[key] = child.attrib.get("href", "") if key == "link" and child.attrib.get("href") else " ".join(child.itertext()).strip()
             body = fields.get("description") or fields.get("summary") or fields.get("content") or ""
-            items.append(ParsedItem(fields.get("title", ""), _clean(body), fields.get("pubdate") or fields.get("published") or fields.get("updated"), fields.get("link") or fields.get("guid") or fields.get("id")))
+            # Atom may provide several links; prefer an explicit canonical link,
+            # then the alternate link. RSS's ordinary text-valued <link> is read
+            # from itertext above, just like Atom's href value.
+            links = [child for child in node if child.tag.rsplit("}", 1)[-1].lower() == "link"]
+            canonical_link = next((link.attrib.get("href", "").strip() for link in links if link.attrib.get("href", "").strip() and link.attrib.get("rel", "").lower() == "canonical"), "")
+            alternate_link = next((link.attrib.get("href", "").strip() for link in links if link.attrib.get("href", "").strip() and link.attrib.get("rel", "alternate").lower() == "alternate"), "")
+            uri = canonical_link or alternate_link or fields.get("link") or fields.get("guid") or fields.get("id")
+            items.append(ParsedItem(fields.get("title", ""), _clean(body), fields.get("pubdate") or fields.get("published") or fields.get("updated"), uri))
             if len(items) >= 500:
                 return ParseResult("", tuple(items), ("RSS item limit reached (500)",))
         return ParseResult("", tuple(items))
     if content_type == "application/pdf":
+        if not isinstance(content, str):
+            raise ValueError("PDF content must be a string")
+        if len(content) > MAX_PDF_BASE64_CHARS:
+            raise ValueError(f"PDF base64 exceeds {MAX_PDF_BASE64_CHARS} characters")
         try:
-            payload = base64.b64decode(_bounded_text(content), validate=True)
+            payload = base64.b64decode(content, validate=True)
         except (binascii.Error, ValueError) as exc:
             raise ValueError("PDF content must be valid base64") from exc
         if len(payload) > MAX_PDF_BYTES:

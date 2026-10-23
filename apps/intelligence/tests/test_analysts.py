@@ -9,6 +9,14 @@ from intelligence.pipeline import AnalysisPipeline
 from test_pipeline import FakeLLM, req, store
 
 
+def eligible_report(registry,scope,ref,reviewer="alice"):
+    baseline=registry.snapshot(scope)
+    return {"schema_version":"tournament-report-v1","winner_ref":ref,"baseline_ref":baseline["ref"],
+            "baseline_snapshot":baseline,"mode":"model","shadow":False,"promotion_eligible":True,
+            "synthetic":False,"holdout":{"passed":True,"fresh_for_selection":True},
+            "human_review":{"approved":True,"reviewer":reviewer}}
+
+
 def test_config_is_closed_and_assignment_frozen():
     config = AnalystConfig(config_id="baseline")
     with pytest.raises(ValidationError): AnalystConfig(config_id="bad", system_prompt="do anything")
@@ -52,6 +60,8 @@ def test_promotion_gates_history_conflict_and_rollback(tmp_path):
     scope = "impact:finance:*"
     report = {"schema_version":"tournament-report-v1", "winner_ref":config.ref, "mode":"model", "shadow":False, "promotion_eligible":True,
               "synthetic":False, "holdout":{"passed":True}, "human_review":{"approved":True,"reviewer":"alice"}}
+    report.update(baseline_ref="baseline@1",baseline_snapshot=registry.snapshot(scope))
+    report["holdout"]["fresh_for_selection"]=True
     assert registry.promote(scope=scope, ref=config.ref, report=report, reviewer="alice")["revision"] == 1
     with pytest.raises(ValueError): registry.promote(scope=scope, ref=config.ref, report=report, reviewer="alice")
     assert registry.select(role="financial controller", industry="transport").ref == config.ref
@@ -89,8 +99,10 @@ def test_any_scope_exact_and_wildcard_fallback_and_case_normalization(tmp_path):
     report = {"schema_version":"tournament-report-v1", "winner_ref":any_logistics.ref, "mode":"model", "shadow":False, "promotion_eligible":True,
               "synthetic":False, "holdout":{"passed":True}, "human_review":{"approved":True,"reviewer":"alice"}}
     with pytest.raises(ValueError): registry.promote(scope="impact:any:*", ref=any_logistics.ref, report=report, reviewer="alice")
+    report.update(baseline_ref="baseline@1",baseline_snapshot=registry.snapshot("impact:any:logistics"))
+    report["holdout"]["fresh_for_selection"]=True
     registry.promote(scope="impact:ANY:LOGISTICS", ref=any_logistics.ref, report=report, reviewer="alice")
-    general_report = {**report, "winner_ref":any_general.ref}
+    general_report = eligible_report(registry,"impact:any:*",any_general.ref)
     registry.promote(scope="impact:any:*", ref=any_general.ref, report=general_report, reviewer="alice")
     assert registry.select(role="unknown role", industry="logistics").ref == any_logistics.ref
     assert registry.select(role="unknown role", industry="transport").ref == any_general.ref

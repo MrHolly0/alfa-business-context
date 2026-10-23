@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -74,6 +75,84 @@ class CorpusStoreTests(unittest.TestCase):
         rows = self.store.search(tenant_id="t1", source_ids=["news"], as_of="2026-01-15T00:00:00Z", query="рынок", limit=10)
         self.assertEqual(["Old"], [r["title"] for r in rows])
         self.assertEqual("2025-12-01T00:00:00.000000Z", rows[0]["published_at"])
+
+    def test_rss_text_link_keeps_document_identity_across_corrected_content(self):
+        feed = self.doc(uri="https://example.test/feed", title="Feed", text="", published="2026-01-01T00:00:00Z")
+        feed["content_type"] = "application/rss+xml"
+        feed["content"] = "<rss><channel><item><title>First</title><link>https://example.test/article</link><description>Текст первоначальный</description></item></channel></rss>"
+        first = self.store.ingest(feed)["items"][0]
+        feed["content"] = "<rss><channel><item><title>Corrected</title><link>https://example.test/article</link><description>Исправленный текст</description></item></channel></rss>"
+        second = self.store.ingest({**feed, "fetched_at": "2026-02-01T00:00:00Z"})["items"][0]
+        self.assertEqual(first["document_id"], second["document_id"])
+        self.assertEqual([1, 2], [first["revision"], second["revision"]])
+
+    def test_metadata_correction_is_versioned_and_same_observation_is_immutable(self):
+        first_doc = self.doc(text="Стабильный материал о поставках.")
+        first_doc.update(title="Первый заголовок", publisher="Первое издание", language="ru")
+        first = self.store.ingest(first_doc)
+        corrected = {**first_doc, "title": "Исправленный заголовок", "published_at": "2026-01-01T00:00:00Z", "publisher": "Второе издание", "language": "en", "fetched_at": "2026-02-01T00:00:00Z"}
+        second = self.store.ingest(corrected)
+        self.assertEqual(2, second["revision"])
+        old = self.store.search(tenant_id="t1", source_ids=["news"], as_of="2026-01-15T00:00:00Z", query="поставках")[0]
+        new = self.store.search(tenant_id="t1", source_ids=["news"], as_of="2026-03-01T00:00:00Z", query="поставках")[0]
+        self.assertEqual("Первый заголовок", old["title"])
+        self.assertEqual("Исправленный заголовок", new["title"])
+        def metadata_as_of(as_of):
+            with self.store._connect() as db:
+                return db.execute("""SELECT r.publisher,r.language FROM revisions r
+                    WHERE r.document_id=? AND r.fetched_at<=? AND r.published_at<=?
+                    ORDER BY r.revision DESC LIMIT 1""", (first["document_id"], as_of, as_of)).fetchone()
+        old_metadata = metadata_as_of("2026-01-15T00:00:00.000000Z")
+        new_metadata = metadata_as_of("2026-03-01T00:00:00.000000Z")
+        self.assertEqual(("Первое издание", "ru"), (old_metadata["publisher"], old_metadata["language"]))
+        self.assertEqual(("Второе издание", "en"), (new_metadata["publisher"], new_metadata["language"]))
+        repeated = self.store.ingest({**corrected, "fetched_at": "2026-02-05T00:00:00Z"})
+        self.assertEqual(2, repeated["revision"])
+        same = self.store.search(tenant_id="t1", source_ids=["news"], as_of="2026-03-01T00:00:00Z", query="поставках")[0]
+        self.assertEqual("2026-02-01T00:00:00.000000Z", same["fetched_at"])
+        backdated = self.store.ingest({**corrected, "title": "Backdated", "fetched_at": "2026-01-10T00:00:00Z"})
+        self.assertEqual(3, backdated["revision"])
+        backdated_result = self.store.search(tenant_id="t1", source_ids=["news"], as_of="2026-03-01T00:00:00Z", query="поставках")[0]
+        self.assertEqual("2026-02-01T00:00:00.000001Z", backdated_result["fetched_at"])
+        at_prior_known_at = self.store.search(tenant_id="t1", source_ids=["news"], as_of="2026-02-01T00:00:00Z", query="поставках")[0]
+        self.assertEqual("Исправленный заголовок", at_prior_known_at["title"])
+
+    def test_legacy_revision_schema_is_migrated_additively(self):
+        path = Path(self.tmp.name) / "legacy.sqlite"
+        import sqlite3
+        with sqlite3.connect(path) as db:
+            db.executescript("""
+                CREATE TABLE documents (document_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, source_id TEXT NOT NULL, source_role TEXT NOT NULL, canonical_uri TEXT NOT NULL, title TEXT NOT NULL, publisher TEXT NOT NULL, language TEXT NOT NULL, synthetic INTEGER NOT NULL, created_at TEXT NOT NULL, UNIQUE(tenant_id,source_id,canonical_uri));
+                CREATE TABLE revisions (document_revision_ref TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(document_id), revision INTEGER NOT NULL, content_hash TEXT NOT NULL, title TEXT NOT NULL, published_at TEXT NOT NULL, fetched_at TEXT NOT NULL, content_type TEXT NOT NULL, extracted_text TEXT NOT NULL, warnings TEXT NOT NULL, UNIQUE(document_id,revision));
+                INSERT INTO documents VALUES ('doc_old','t1','news','external','https://example.test/old','Old','Old publisher','ru',0,'2026-01-01T00:00:00Z');
+                INSERT INTO revisions VALUES ('doc_old:1','doc_old',1,'hash','Old','2026-01-01T00:00:00Z','2026-01-02T00:00:00Z','text/plain','Old body','[]');
+            """)
+        migrated = CorpusStore(path)
+        with migrated._connect() as db:
+            row = db.execute("SELECT publisher,language FROM revisions WHERE document_revision_ref='doc_old:1'").fetchone()
+        self.assertEqual(("Old publisher", "ru"), (row["publisher"], row["language"]))
+
+    def test_concurrent_initializers_serialize_legacy_schema_migration(self):
+        path = Path(self.tmp.name) / "concurrent-legacy.sqlite"
+        import sqlite3
+        with sqlite3.connect(path) as db:
+            db.executescript("""
+                CREATE TABLE documents (document_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, source_id TEXT NOT NULL, source_role TEXT NOT NULL, canonical_uri TEXT NOT NULL, title TEXT NOT NULL, publisher TEXT NOT NULL, language TEXT NOT NULL, synthetic INTEGER NOT NULL, created_at TEXT NOT NULL, UNIQUE(tenant_id,source_id,canonical_uri));
+                CREATE TABLE revisions (document_revision_ref TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(document_id), revision INTEGER NOT NULL, content_hash TEXT NOT NULL, title TEXT NOT NULL, published_at TEXT NOT NULL, fetched_at TEXT NOT NULL, content_type TEXT NOT NULL, extracted_text TEXT NOT NULL, warnings TEXT NOT NULL, UNIQUE(document_id,revision));
+                INSERT INTO documents VALUES ('doc_old','t1','news','external','https://example.test/old','Old','Old publisher','ru',0,'2026-01-01T00:00:00Z');
+                INSERT INTO revisions VALUES ('doc_old:1','doc_old',1,'hash','Old','2026-01-01T00:00:00Z','2026-01-02T00:00:00Z','text/plain','Old body','[]');
+            """)
+        barrier = threading.Barrier(2)
+        def initialize(_):
+            barrier.wait()
+            return CorpusStore(path)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            stores = list(pool.map(initialize, range(2)))
+        with stores[0]._connect() as db:
+            columns = {row[1] for row in db.execute("PRAGMA table_info(revisions)")}
+            row = db.execute("SELECT publisher,language FROM revisions WHERE document_revision_ref='doc_old:1'").fetchone()
+        self.assertTrue({"publisher", "language"}.issubset(columns))
+        self.assertEqual(("Old publisher", "ru"), (row["publisher"], row["language"]))
 
     def test_canonical_uri_source_role_and_synthetic_are_immutable(self):
         self.store.ingest(self.doc())

@@ -147,6 +147,34 @@ def test_confirmed_model_influence_edge_is_rejected(tmp_path):
     assert result.status == "partial"
 
 
+def test_influence_edge_requires_primary_external_evidence_and_confirmed_context():
+    from intelligence.pipeline import AnalysisPipeline
+    request = req()
+    base = {"summary": "Conditional impact", "claims": [], "clarifications": [],
+        "influence_chain": [{"edge_id": "edge-1", "description": "The closure may delay this route.",
+            "evidence_refs": ["primary"], "context_refs": ["dep-port"], "provenance": "model",
+            "status": "hypothesis", "alternatives": ["A reserve route exists."],
+            "falsifiers": ["The route does not use this port."]}]}
+    evidence = [{"evidence_id": "primary", "source_role": "external", "source_id": "news",
+                 "quote": "Порт закрыт после шторма"},
+                {"evidence_id": "background", "source_role": "external", "source_id": "other",
+                 "quote": "Background material."},
+                {"evidence_id": "bank", "source_role": "bank", "source_id": "bank",
+                 "quote": "Bank analysis."}]
+    valid = json.loads(json.dumps(base))
+    AnalysisPipeline._check_model_payload(valid, request, evidence)
+
+    for evidence_refs in (["bank"], ["background"]):
+        invalid = json.loads(json.dumps(base))
+        invalid["influence_chain"][0]["evidence_refs"] = evidence_refs
+        try:
+            AnalysisPipeline._check_model_payload(invalid, request, evidence)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"edge unexpectedly accepted evidence_refs={evidence_refs}")
+
+
 def test_adaptation_merges_additional_evidence_without_dropping_primary():
     import hashlib
     class AdaptiveStore:

@@ -4,6 +4,8 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+import re
+import unicodedata
 import sqlite3
 import tempfile
 import time
@@ -32,8 +34,27 @@ EVALUATION_VERSION = "tournament-grounding-v1"
 
 def _runtime_hashes():
     return {name:hashlib.sha256(Path(__file__).with_name(name+'.py').read_bytes()).hexdigest()
-            for name in ('pipeline','tournament','experiments','schemas','analysts','corpus','evaluation')}
+            for name in ('pipeline','tournament','experiments','schemas','analysts','corpus','parsers','evaluation')}
 
+
+
+def _normalized(value):
+    return " ".join(re.findall(r"\w+",unicodedata.normalize("NFKC",value).casefold()))
+
+
+def _case_groups(case):
+    request=AnalysisRequest.model_validate(case["request"])
+    tenant=request.tenant_id
+    groups={"event:"+_digest([tenant,_normalized(request.event.text)]),
+            "company:"+_digest([tenant,_normalized(request.company.name)])}
+    if case.get("group_id"):
+        if not isinstance(case["group_id"],str) or len(case["group_id"])>256: raise ValueError("invalid_case_group")
+        groups.add("declared:"+_digest([tenant,case["group_id"]]))
+    for document in case.get("documents",[]):
+        if document.get("source_role")=="external":
+            if document.get("canonical_uri"): groups.add("uri:"+_digest([tenant,document["canonical_uri"]]))
+            if document.get("content"): groups.add("document:"+_digest([tenant,_normalized(document["content"])]))
+    return groups
 
 
 class TournamentStore:
@@ -44,6 +65,8 @@ class TournamentStore:
         with self._db() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS runs(run_id TEXT PRIMARY KEY, manifest TEXT NOT NULL, report TEXT);
+                CREATE TABLE IF NOT EXISTS holdout_exposures(group_hash TEXT NOT NULL,run_id TEXT NOT NULL,
+                    PRIMARY KEY(group_hash,run_id));
                 CREATE TABLE IF NOT EXISTS cells(cell_key TEXT PRIMARY KEY, run_id TEXT NOT NULL,
                     state TEXT NOT NULL, payload TEXT, reserved_at REAL NOT NULL);
             """)
@@ -67,6 +90,18 @@ class TournamentStore:
         if not row or row["report"] is None:
             raise ValueError("tournament_report_not_found")
         return json.loads(row["report"])
+
+    def expose_holdout(self, run_id, cases):
+        # Track content/origin groups, not mutable case IDs. Company overlap alone
+        # is expected between independent future holdouts, so track event groups.
+        groups={group for case in cases for group in _case_groups(case) if not group.startswith("company:")}
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            prior=set()
+            for group in groups:
+                prior.update(row[0] for row in db.execute("SELECT run_id FROM holdout_exposures WHERE group_hash=? AND run_id!=?",(group,run_id)))
+                db.execute("INSERT OR IGNORE INTO holdout_exposures VALUES(?,?)",(group,run_id))
+        return {"fresh_for_selection":not prior,"prior_run_count":len(prior)}
 
     def review_pack(self, run_id: str) -> list[dict]:
         """Return blind answers with their case context, never config identities."""
@@ -108,7 +143,9 @@ class TournamentStore:
             approved = human == report["winner_ref"]
             report["human_review"].update({"reviewer": reviewer, "ratings": ratings, "human_winner_ref": human, "approved": approved})
             ref = report["winner_ref"]
-            report["promotion_eligible"] = bool(approved and report["synthetic"] is False and ref != "baseline@1"
+            baseline_ref=report.get("baseline_ref","baseline@1")
+            report["promotion_eligible"] = bool(approved and report["synthetic"] is False and ref != baseline_ref and report.get("baseline_snapshot") is not None
+                and report["holdout"].get("fresh_for_selection") is True
                 and report.get("mode") == "model" and report.get("shadow") is False
                                 and report["holdout"]["passed"] and not report["hard_failures"]
                 and report["training"][ref]["wins"] > report["training"][ref]["losses"])
@@ -140,11 +177,15 @@ class TournamentRunner:
                 if dataset["synthetic"] is False and (req.synthetic or req.event.synthetic or any(d.get("synthetic") is True for d in docs)):
                     raise ValueError("synthetic_case_in_real_dataset")
         if events["train"] & events["holdout"] or companies["train"] & companies["holdout"]: raise ValueError("train_holdout_identity_leak")
+        train_groups={group for case in train for group in _case_groups(case)}
+        holdout_groups={group for case in holdout for group in _case_groups(case)}
+        if train_groups & holdout_groups: raise ValueError("train_holdout_content_or_origin_leak")
         return train, holdout
 
     @staticmethod
     def _blind(candidate):
-        return {k:candidate.get(k) for k in ("summary","claims","influence_chain","clarifications")}
+        from .experiments import blind_answer
+        return blind_answer(candidate)
 
     def _run_case(self, run_id, case, config, split, execution_identity, mode, shadow):
         req=AnalysisRequest.model_validate(case["request"])
@@ -234,16 +275,20 @@ class TournamentRunner:
         winner=first_identity if first_identity==second_identity else "tie"
         return {"winner":winner,"reason":"paired_advisory_judgment","advisory":True,"scores":[first.get("scores"),second.get("scores")],"flip_disagreement":first_identity!=second_identity}
 
-    def run(self, *, run_id: str, dataset: dict, candidate_refs: list[str], mode: str="baseline", shadow: bool=False, execution_identity: dict|None=None) -> dict:
+    def run(self, *, run_id: str, dataset: dict, candidate_refs: list[str], mode: str="baseline", shadow: bool=False, execution_identity: dict|None=None, target_scope: str|None=None, baseline_ref: str|None=None) -> dict:
         train,holdout=self._validate_dataset(dataset)
         if mode not in {"baseline","model"}: raise ValueError("invalid_tournament_mode")
         if mode=="model" and not execution_identity: raise ValueError("model_mode_requires_sanitized_execution_identity")
-        if len(candidate_refs)<2 or len(candidate_refs)>4 or "baseline@1" not in candidate_refs or len(set(candidate_refs))!=len(candidate_refs): raise ValueError("candidate_set_requires_baseline_and_2_to_4_configs")
+        snapshot=self.registry.snapshot(target_scope) if target_scope is not None else None
+        selected_ref=snapshot["ref"] if snapshot else "baseline@1"
+        if baseline_ref is not None and baseline_ref!=selected_ref: raise ValueError("baseline_must_match_active_scope")
+        baseline_ref=selected_ref
+        if len(candidate_refs)<2 or len(candidate_refs)>4 or baseline_ref not in candidate_refs or len(set(candidate_refs))!=len(candidate_refs): raise ValueError("candidate_set_requires_active_baseline_and_2_to_4_configs")
         configs={ref:self.registry.get(ref) for ref in candidate_refs}
         config_hashes={ref:_digest(config.model_dump(mode="json")) for ref,config in configs.items()}
         prompt_hashes={ref:hashlib.sha256(files("intelligence.prompts").joinpath(f"{config.template_version}.system.ru.txt").read_bytes()+files("intelligence.prompts").joinpath(f"{config.template_version}.user.ru.txt").read_bytes()).hexdigest() for ref,config in configs.items()}
         runtime_hashes=_runtime_hashes()
-        manifest={"dataset_hash":_digest(dataset),"refs":candidate_refs,"config_hashes":config_hashes,"prompt_hashes":prompt_hashes,"runtime_hashes":runtime_hashes,"evaluation_version":EVALUATION_VERSION,"mode":mode,"shadow":bool(shadow),"critic_enabled":self.critic is not None,"synthetic":dataset["synthetic"],"execution_identity":execution_identity or {}}
+        manifest={"dataset_hash":_digest(dataset),"baseline_ref":baseline_ref,"baseline_snapshot":snapshot,"refs":candidate_refs,"config_hashes":config_hashes,"prompt_hashes":prompt_hashes,"runtime_hashes":runtime_hashes,"evaluation_version":EVALUATION_VERSION,"mode":mode,"shadow":bool(shadow),"critic_enabled":self.critic is not None,"synthetic":dataset["synthetic"],"execution_identity":execution_identity or {}}
         # Provider identities may contain Decimal tariffs; compare their persisted JSON form.
         manifest=json.loads(_json(manifest))
         with self.store._db() as db:
@@ -256,29 +301,29 @@ class TournamentRunner:
             else: db.execute("INSERT INTO runs VALUES(?,?,NULL)",(run_id,_json({"input_manifest":manifest})))
         outputs={ref:{"train":[self._run_case(run_id,case,config,"train",execution_identity or {},mode,shadow) for case in train]} for ref,config in configs.items()}
         scores={ref:{"wins":0,"losses":0,"ties":0} for ref in candidate_refs}; pairings={}
-        base=outputs["baseline@1"]
+        base=outputs[baseline_ref]
         for ref in candidate_refs:
-            if ref=="baseline@1": continue
+            if ref==baseline_ref: continue
             judgments=[]
             for i,case in enumerate(train):
                 j=self._pair(case,outputs[ref]["train"][i],base["train"][i],execution_identity); judgments.append(j)
                 field="wins" if j["winner"]=="challenger" else "losses" if j["winner"]=="baseline" else "ties"
                 scores[ref][field]+=1
             pairings[ref]=judgments
-        leaders=[r for r in candidate_refs if r!="baseline@1" and scores[r]["wins"]>scores[r]["losses"]]
+        leaders=[r for r in candidate_refs if r!=baseline_ref and scores[r]["wins"]>scores[r]["losses"]]
         margins={r:scores[r]["wins"]-scores[r]["losses"] for r in leaders}
         best_margin=max(margins.values(),default=0)
         top=[r for r,value in margins.items() if value==best_margin]
-        provisional=top[0] if len(top)==1 else "baseline@1"
+        provisional=top[0] if len(top)==1 else baseline_ref
         critique_result={"used":False,"note":"Critique/refinement hook unavailable; no refinement claimed."}
         if self.critic is not None and train:
             from .experiments import critic_round
             critique_ref=provisional
-            if critique_ref=="baseline@1":
-                critique_ref=max((r for r in candidate_refs if r!="baseline@1"),key=lambda x:scores[x]["wins"]-scores[x]["losses"],default="baseline@1")
+            if critique_ref==baseline_ref:
+                critique_ref=max((r for r in candidate_refs if r!=baseline_ref),key=lambda x:scores[x]["wins"]-scores[x]["losses"],default=baseline_ref)
             case=train[0]
             candidate_output=outputs[critique_ref]["train"][0]["candidate"]
-            opponent_output=base["train"][0]["candidate"] if critique_ref!="baseline@1" else outputs["baseline@1"]["train"][0]["candidate"]
+            opponent_output=base["train"][0]["candidate"] if critique_ref!=baseline_ref else outputs[baseline_ref]["train"][0]["candidate"]
             critique_case={"context":case["request"].get("company"),"question":case["request"].get("event"),
                            "evidence":[{"id":e["evidence_id"],**e} for e in candidate_output.get("evidence",[])]}
             critic_key=_digest({"kind":"critic","version":"critic-v1","runtime":_runtime_hashes(),"case":critique_case,"answer":self._blind(candidate_output),"opponent":self._blind(opponent_output),"execution_identity":execution_identity or {}})
@@ -290,26 +335,27 @@ class TournamentRunner:
                 critique_result={"used":True,"refinement":"not_available","critiques":critiques}
             except Exception:
                 critique_result={"used":True,"refinement":"not_available","error":"critic_failed_closed"}
-        outputs["baseline@1"]["holdout"]=[self._run_case(run_id,case,configs["baseline@1"],"holdout",execution_identity or {},mode,shadow) for case in holdout]
-        if provisional != "baseline@1": outputs[provisional]["holdout"]=[self._run_case(run_id,case,configs[provisional],"holdout",execution_identity or {},mode,shadow) for case in holdout]
-        winner_cases=outputs[provisional]["holdout"] if provisional != "baseline@1" else outputs["baseline@1"]["holdout"]
-        base_cases=outputs["baseline@1"]["holdout"]
+        exposure=self.store.expose_holdout(run_id,holdout) if mode=="model" else {"fresh_for_selection":False,"prior_run_count":0}
+        outputs[baseline_ref]["holdout"]=[self._run_case(run_id,case,configs[baseline_ref],"holdout",execution_identity or {},mode,shadow) for case in holdout]
+        if provisional != baseline_ref: outputs[provisional]["holdout"]=[self._run_case(run_id,case,configs[provisional],"holdout",execution_identity or {},mode,shadow) for case in holdout]
+        winner_cases=outputs[provisional]["holdout"] if provisional != baseline_ref else outputs[baseline_ref]["holdout"]
+        base_cases=outputs[baseline_ref]["holdout"]
         holdout_judgments=[]
-        if provisional!="baseline@1":
+        if provisional!=baseline_ref:
             for i,case in enumerate(holdout):
                 holdout_judgments.append(self._pair(case,winner_cases[i],base_cases[i],execution_identity))
         hold_no_regression=all(j["winner"]!="baseline" and j.get("reason")!="judge_failed_or_interrupted" for j in holdout_judgments)
-        hold_pass=all(x["passed"] for x in winner_cases) and (provisional=="baseline@1" or all(x["passed"] for x in base_cases)) and hold_no_regression
-        failures=[f"{r}:{x['case_id']}" for r in [provisional,"baseline@1"]
+        hold_pass=all(x["passed"] for x in winner_cases) and (provisional==baseline_ref or all(x["passed"] for x in base_cases)) and hold_no_regression
+        failures=[f"{r}:{x['case_id']}" for r in dict.fromkeys([provisional,baseline_ref])
                   for x in outputs[r].get("train",[])+outputs[r].get("holdout",[]) if not x["passed"]]
-        winner="baseline@1" if provisional!="baseline@1" and (not hold_pass or failures) else provisional
-        if winner=="baseline@1":
-            challenger=max((r for r in candidate_refs if r!="baseline@1"),key=lambda x:scores[x]["wins"]-scores[x]["losses"],default="baseline@1")
+        winner=baseline_ref if provisional!=baseline_ref and (not hold_pass or failures) else provisional
+        if winner==baseline_ref:
+            challenger=max((r for r in candidate_refs if r!=baseline_ref),key=lambda x:scores[x]["wins"]-scores[x]["losses"],default=baseline_ref)
             review_split="train"
             other=challenger
             review_cases=train
         else:
-            review_split="holdout"; other="baseline@1"; review_cases=holdout
+            review_split="holdout"; other=baseline_ref; review_cases=holdout
         label_map={}
         pack=[]
         for i,case in enumerate(review_cases):
@@ -320,9 +366,9 @@ class TournamentRunner:
             b=outputs[labels["B"]][review_split][i]["candidate"]
             evidence={e["evidence_id"]:e for out in (a,b) for e in out.get("evidence",[])}
             pack.append({"blind_id":blind_id,"case_id":case["case_id"],"company":case["request"].get("company"),"question":case["request"].get("event"),"evidence":list(evidence.values()),"A":self._blind(a),"B":self._blind(b)})
-        report={"schema_version":"tournament-report-v1","run_id":run_id,"winner_ref":winner,"synthetic":dataset["synthetic"],"mode":mode,"shadow":bool(shadow),"measured_quality":False,"training":scores,"pairings":pairings,
+        report={"schema_version":"tournament-report-v1","run_id":run_id,"baseline_ref":baseline_ref,"baseline_snapshot":snapshot,"winner_ref":winner,"synthetic":dataset["synthetic"],"mode":mode,"shadow":bool(shadow),"measured_quality":False,"training":scores,"pairings":pairings,
                 "candidate_metrics":{r:[{"case_id":x["case_id"],"cost":x["measured_cost"],"known_partial_cost":x["known_partial_cost"],"cost_currency":x["cost_currency"],"cost_complete":x["cost_complete"],"latency_ms":x["latency_ms"]} for x in outputs[r]["train"]] for r in candidate_refs},
-                "holdout":{"passed":bool(hold_pass),"case_count":len(holdout),"judgments":holdout_judgments,"winner_cases":winner_cases,"baseline_cases":base_cases},"hard_failures":failures,
+                "holdout":{**exposure,"passed":bool(hold_pass),"case_count":len(holdout),"judgments":holdout_judgments,"winner_cases":winner_cases,"baseline_cases":base_cases},"hard_failures":failures,
                 "critic":critique_result,
                 "human_review":{"approved":False,"reviewer":None,"ratings":None,"pack":pack},"promotion_eligible":False}
         report["report_hash"]=_digest(report)

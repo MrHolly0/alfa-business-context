@@ -348,16 +348,24 @@ class AnalysisPipeline:
                     raise ValueError("recommendation_uses_unconfirmed_context")
             if claim["kind"] == "unknown" and claim.get("origin") == "bank" and claim["evidence_refs"]:
                 raise ValueError("bank_unknown_must_not_cite_evidence")
-        for item in payload["influence_chain"]:
+        for edge_index, item in enumerate(payload["influence_chain"]):
             normalized = InfluenceEdge.model_validate(item)
             item.update(normalized.model_dump(mode="json"))
             if item["status"] != "hypothesis":
                 raise ValueError("model_influence_edge_must_be_hypothesis")
             if not item["evidence_refs"] or not item["context_refs"] or not item["alternatives"] or not item["falsifiers"]:
                 raise ValueError("hypothesis_chain_missing_basis_or_checks")
+            if len(set(item["evidence_refs"])) != len(item["evidence_refs"]):
+                raise ValueError("duplicate_chain_evidence_ref")
+            if len(set(item["context_refs"])) != len(item["context_refs"]):
+                raise ValueError("duplicate_chain_context_ref")
             for ref in item.get("evidence_refs", []):
                 if ref not in refs:
                     raise ValueError("unknown_chain_evidence")
+                if refs[ref]["source_role"] != "external":
+                    raise _GroundingError("influence_edge_requires_external_evidence", ["influence_chain", edge_index, "evidence_refs"])
+            if not primary_ids.intersection(item["evidence_refs"]):
+                raise _GroundingError("influence_edge_requires_primary_event_evidence", ["influence_chain", edge_index, "evidence_refs"])
             for ref in item.get("context_refs", []):
                 if ref not in contexts:
                     raise ValueError("unknown_chain_context")

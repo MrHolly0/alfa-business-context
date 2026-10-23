@@ -132,7 +132,34 @@ class PromptRegistry:
                 if row and row["ref"]: return self.get(row["ref"])
         return self.get("baseline@1")
 
-    def _activate(self, scope, ref, reviewer, action, report_digest, expected_revision):
+    @staticmethod
+    def _canonical_scope(scope):
+        if not isinstance(scope,str) or not re.fullmatch(r"impact:(any|finance|procurement|executive):([^:]+|\*)",scope,flags=re.IGNORECASE):
+            raise ValueError("invalid scope")
+        _,role,industry=scope.split(":")
+        return f"impact:{role.casefold()}:{_industry_key(industry) if industry!='*' else '*'}"
+
+    @staticmethod
+    def _snapshot(db, scope):
+        _,role,industry=scope.split(":")
+        scopes=list(dict.fromkeys([scope,f"impact:{role}:*",f"impact:any:{industry}","impact:any:*"]))
+        rows={key:db.execute("SELECT revision,ref FROM activations WHERE scope=? ORDER BY revision DESC LIMIT 1",(key,)).fetchone() for key in scopes}
+        current=rows[scope]
+        snapshot={"scope":scope,"activation_revision":current["revision"] if current else 0,
+                  "ref":"baseline@1","effective_scope":None,"effective_revision":0}
+        for key in scopes:
+            row=rows[key]
+            if row and row["ref"]:
+                snapshot.update(ref=row["ref"],effective_scope=key,effective_revision=row["revision"])
+                break
+        return snapshot
+
+    def snapshot(self, scope):
+        scope=self._canonical_scope(scope)
+        with self._db() as db:
+            return self._snapshot(db,scope)
+
+    def _activate(self, scope, ref, reviewer, action, report_digest, expected_revision, expected_baseline=None):
         if not isinstance(reviewer, str) or not reviewer.strip() or len(reviewer) > 128: raise ValueError("reviewer must be non-empty and at most 128 characters")
         if isinstance(expected_revision, bool) or not isinstance(expected_revision, int) or expected_revision < 0: raise ValueError("expected_revision must be a non-negative integer")
         if not isinstance(scope, str) or not re.fullmatch(r"impact:(any|finance|procurement|executive):([^:]+|\*)", scope, flags=re.IGNORECASE): raise ValueError("invalid scope")
@@ -144,6 +171,8 @@ class PromptRegistry:
         if config and config.industry_scope and (industry == "*" or _industry_key(industry) not in config.industry_scope): raise ValueError("config industry scope does not match activation")
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
+            if expected_baseline is not None and self._snapshot(db,scope)!=expected_baseline:
+                raise ValueError("active baseline changed; new comparison required")
             row = db.execute("SELECT COALESCE(MAX(revision),0) n FROM activations WHERE scope=?", (scope,)).fetchone(); current=row["n"]
             if current != expected_revision: raise ValueError("activation revision conflict")
             revision=current+1
@@ -153,9 +182,16 @@ class PromptRegistry:
     def promote(self, *, scope, ref, report: dict, reviewer, expected_revision=0):
         if (report.get("schema_version")!="tournament-report-v1" or report.get("winner_ref")!=ref or report.get("mode")!="model" or report.get("shadow") is not False or report.get("promotion_eligible") is not True or report.get("synthetic") is not False or report.get("holdout",{}).get("passed") is not True or report.get("human_review",{}).get("approved") is not True or report.get("human_review",{}).get("reviewer")!=reviewer):
             raise ValueError("promotion report gates not satisfied")
-        return self._activate(scope,ref,reviewer,"promote",hashlib.sha256(json.dumps(report,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest(),expected_revision)
+        baseline=report.get("baseline_snapshot")
+        if (not isinstance(baseline,dict) or baseline.get("scope")!=self._canonical_scope(scope)
+                or report.get("baseline_ref")!=baseline.get("ref") or baseline.get("activation_revision")!=expected_revision):
+            raise ValueError("promotion requires comparison against active scope baseline")
+        if report.get("holdout",{}).get("fresh_for_selection") is not True:
+            raise ValueError("holdout already used for selection")
+        return self._activate(scope,ref,reviewer,"promote",hashlib.sha256(json.dumps(report,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest(),expected_revision,expected_baseline=baseline)
 
     def rollback(self, *, scope, reviewer, expected_revision):
+        scope=self._canonical_scope(scope)
         with self._db() as db:
             current=db.execute("SELECT MAX(revision) n FROM activations WHERE scope=?",(scope,)).fetchone()["n"] or 0
             previous=db.execute("SELECT ref FROM activations WHERE scope=? AND revision<? AND ref IS NOT NULL ORDER BY revision DESC LIMIT 1",(scope,current)).fetchone()

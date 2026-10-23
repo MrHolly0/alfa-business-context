@@ -50,3 +50,5 @@ docker compose up --build intelligence-worker
 При прерванном запросе: `docker compose run --rm intelligence inspect`. Сначала остановите API/worker и проверьте неопределённый расход; только затем при необходимости `reset-request --tenant demo --request-id <ID> --confirm-stopped` или `reset-job --job-id <ID> --generation <N> --confirm-stopped`. Сброс не закрывает неопределённые записи денежного журнала и не гарантирует отсутствие повторного списания.
 
 Турнир настроек использует тот же образ и volume Python: `docker compose run --build --rm intelligence arena run --run-id demo-1`. По умолчанию работает без сети; отчёты и реестр остаются в `.state` внутри volume. [Команды и модельный режим](../apps/intelligence/README.md#подбор-настроек-и-турнир).
+
+Просмотр очереди доставки: `docker compose run --rm intelligence inspect`. Новые поля ревизий корпуса и повторов доставки добавляются в существующую SQLite автоматически, без очистки volume и сохранённых сообщений. Параллельные миграции сериализуются. `.env` для обновления не меняется.

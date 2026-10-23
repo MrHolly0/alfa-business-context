@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import random
 import threading
 import time
 from datetime import datetime, timezone
@@ -20,10 +21,17 @@ class InvalidJob(ValueError): pass
 
 class Worker:
     def __init__(self, core, pipeline, artifact_store: ArtifactStore, *, heartbeat_interval: float = 10.0,
-                 clock=time.time, tenant_ids: set[str] | None = None):
+                 clock=time.time, tenant_ids: set[str] | None = None, max_delivery_attempts: int = 8,
+                 delivery_batch_size: int = 10, retry_base_seconds: float = 1.0,
+                 retry_cap_seconds: float = 3600.0, jitter=random.uniform):
         self.core, self.pipeline, self.artifacts = core, pipeline, artifact_store
         self.heartbeat_interval = max(.05, float(heartbeat_interval))
         self.clock = clock
+        self.max_delivery_attempts = max(1, min(8, int(max_delivery_attempts)))
+        self.delivery_batch_size = max(1, min(10, int(delivery_batch_size)))
+        self.retry_base_seconds = max(.01, float(retry_base_seconds))
+        self.retry_cap_seconds = max(self.retry_base_seconds, float(retry_cap_seconds))
+        self.jitter = jitter
         self.tenant_ids = set(tenant_ids if tenant_ids is not None else (v.strip() for v in os.getenv("INTELLIGENCE_TENANTS", "").split(",") if v.strip()))
 
     def _check(self, job):
@@ -148,38 +156,86 @@ class Worker:
             except Exception:
                 lost.set(); return
 
-    def run_once(self):
-        """Process a claimed job, or retransmit durable pending outcomes before claiming."""
-        for entry in self.artifacts.pending():
+    def _delivery_failure(self, entry, reason):
+        delay = self.retry_base_seconds * (2 ** max(0, entry["attempts"]-1))
+        delay = min(self.retry_cap_seconds, max(0.0, delay * self.jitter(.5, 1.5)))
+        self.artifacts.retry_delivery(entry["message_id"], next_attempt_at=self.clock()+delay,
+                                      error=reason, max_attempts=self.max_delivery_attempts,
+                                      claim_token=entry["claim_token"], now=self.clock())
+        return {"status":"pending", "message_id":entry["message_id"]}
+
+    def _deliver_due(self, limit=None):
+        delivered, quarantined, pending = [], [], []
+        dead_before = {item["message_id"] for item in self.artifacts.dead_letters()}
+        limit = self.delivery_batch_size if limit is None else max(0, min(self.delivery_batch_size, int(limit)))
+        attempted = set()
+        for _ in range(limit):
+            entries = self.artifacts.due_pending(self.clock(), 1, self.max_delivery_attempts,
+                                                 exclude_ids=attempted, claim_seconds=60)
+            if not entries:
+                break
+            entry = entries[0]
             payload = __import__("json").loads(entry["payload"])
+            message_id, claim_token = entry["message_id"], entry["claim_token"]
+            attempted.add(message_id)
             if not self.tenant_ids or payload.get("tenant_scope") not in self.tenant_ids:
-                self.artifacts.quarantine(entry["message_id"], "tenant_scope_denied")
-                return {"status":"quarantined", "message_id":entry["message_id"]}
+                if self.artifacts.quarantine(message_id, "tenant_scope_denied", claim_token):
+                    quarantined.append(message_id)
+                else:
+                    pending.append(message_id)
+                continue
             try:
                 ack = self.core.submit_result(payload)
-                if isinstance(ack, dict) and ack.get("accepted") is True and ack.get("message_id") == entry["message_id"]:
-                    self.artifacts.acknowledge(entry["message_id"])
-                    return {"status": "retransmitted", "message_id": entry["message_id"]}
-                if isinstance(ack, dict) and ack.get("accepted") is False and ack.get("code") == "stale_lease":
-                    self.artifacts.quarantine(entry["message_id"], "stale_lease")
-                    return {"status":"quarantined", "message_id":entry["message_id"]}
-                if isinstance(ack, dict) and ack.get("accepted") is False and ack.get("code") == "authorization_denied":
-                    self.artifacts.quarantine(entry["message_id"], "authorization_denied")
-                    return {"status":"quarantined", "message_id":entry["message_id"]}
-                return {"status": "pending", "message_id": entry["message_id"]}
             except Exception as exc:
                 status = getattr(getattr(exc, "response", None), "status_code", None)
                 if status == 409:
-                    self.artifacts.quarantine(entry["message_id"], "core_conflict")
-                    return {"status":"quarantined", "message_id":entry["message_id"]}
-                if status in (401, 403):
-                    self.artifacts.quarantine(entry["message_id"], "authorization_denied")
-                    return {"status":"quarantined", "message_id":entry["message_id"]}
-                return {"status": "pending", "message_id": entry["message_id"]}
+                    changed = self.artifacts.quarantine(message_id, "core_conflict", claim_token)
+                    (quarantined if changed else pending).append(message_id)
+                elif status in (401, 403):
+                    changed = self.artifacts.quarantine(message_id, "authorization_denied", claim_token)
+                    (quarantined if changed else pending).append(message_id)
+                else:
+                    self._delivery_failure(entry, f"transport_{status or type(exc).__name__}")
+                    pending.append(message_id)
+                continue
+            if isinstance(ack, dict) and ack.get("accepted") is True and ack.get("message_id") == message_id:
+                if self.artifacts.acknowledge(message_id, claim_token):
+                    delivered.append(message_id)
+                else:
+                    pending.append(message_id)
+            elif isinstance(ack, dict) and ack.get("accepted") is False and ack.get("code") in ("stale_lease", "conflict"):
+                reason = "stale_lease" if ack.get("code")=="stale_lease" else "core_conflict"
+                changed = self.artifacts.quarantine(message_id, reason, claim_token)
+                (quarantined if changed else pending).append(message_id)
+            elif isinstance(ack, dict) and ack.get("accepted") is False and ack.get("code") == "authorization_denied":
+                changed = self.artifacts.quarantine(message_id, "authorization_denied", claim_token)
+                (quarantined if changed else pending).append(message_id)
+            else:
+                self._delivery_failure(entry, "unconfirmed_ack")
+                pending.append(message_id)
+        dead_after = {item["message_id"] for item in self.artifacts.dead_letters()}
+        quarantined.extend(sorted(dead_after - dead_before - set(quarantined)))
+        return {"delivered":delivered, "quarantined":quarantined, "pending":pending}
+
+    def run_once(self):
+        """Deliver a bounded due batch, then claim and process a new job if available."""
+        delivery = self._deliver_due()
         envelope = self.core.claim()
-        if not envelope: return None
+        if not envelope:
+            if self.artifacts.has_pending() and not delivery["pending"]:
+                delivery["pending"] = self.artifacts.pending_ids(self.delivery_batch_size)
+            if delivery["delivered"] or delivery["quarantined"] or delivery["pending"]:
+                if delivery["pending"]: status = "pending"
+                elif delivery["quarantined"]: status = "quarantined"
+                else: status = "retransmitted"
+                return {"status":status, "delivery_summary":delivery}
+            return None
         job = envelope.get("job") if "job" in envelope else envelope
-        if not isinstance(job, dict): return None
+        if not isinstance(job, dict):
+            if delivery["delivered"] or delivery["quarantined"] or delivery["pending"]:
+                status = "pending" if delivery["pending"] else ("quarantined" if delivery["quarantined"] else "retransmitted")
+                return {"status":status, "delivery_summary":delivery}
+            return None
         try:
             request, deadline, lease_until = self._check(job)
         except Exception as exc:
@@ -237,16 +293,14 @@ class Worker:
             self.artifacts.quarantine(message_id, "lease_lost_before_submit")
             self.artifacts.quarantine_job_run(job["job_id"], job["lease_generation"], "lease_lost_before_submit")
             return {"status":"lease_lost"}
-        try: ack = self.core.submit_result(payload)
-        except Exception: return {"status": "pending", "message_id": message_id}
-        if not isinstance(ack, dict) or ack.get("accepted") is not True or ack.get("message_id") != message_id:
-            if isinstance(ack, dict) and ack.get("accepted") is False and ack.get("code") in ("stale_lease", "conflict"):
-                reason = "stale_lease" if ack.get("code") == "stale_lease" else "core_conflict"
-                self.artifacts.quarantine(message_id, reason)
-                return {"status":"quarantined", "message_id":message_id}
-            if isinstance(ack, dict) and ack.get("accepted") is False and ack.get("code") == "authorization_denied":
-                self.artifacts.quarantine(message_id, "authorization_denied")
-                return {"status":"quarantined", "message_id":message_id}
-            return {"status": "pending", "message_id": message_id}
-        self.artifacts.acknowledge(message_id)
-        return {"status": "submitted", "message_id": message_id}
+        attempted_before = sum(len(delivery[key]) for key in ("delivered", "quarantined", "pending"))
+        current_delivery = self._deliver_due(self.delivery_batch_size-attempted_before)
+        for key in ("delivered", "quarantined", "pending"):
+            delivery[key].extend(current_delivery[key])
+        if message_id in delivery["delivered"]:
+            status = "submitted"
+        elif message_id in delivery["quarantined"]:
+            status = "quarantined"
+        else:
+            status = "pending"
+        return {"status":status, "message_id":message_id, "delivery_summary":delivery}

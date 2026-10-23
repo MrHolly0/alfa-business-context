@@ -39,6 +39,7 @@ def main(argv=None):
             cmd.add_argument('--candidates', help='Через запятую; по умолчанию четыре встроенные версии')
             cmd.add_argument('--judge-config', help='Отдельный профиль судьи; тот же общий счёт расходов')
             cmd.add_argument('--judge-profile', choices=['openrouter', 'hackathon'])
+            cmd.add_argument('--scope', help='Область публикации; сравнение с её текущей активной версией')
             cmd.add_argument('--shadow', action='store_true')
             cmd.add_argument('--critic', action='store_true', help='Один дополнительный разбор оснований перед holdout; без автопереписывания')
     budget = commands.add_parser('budget', help='Расходы общего счёта и экспериментального пула, без сетевых вызовов')
@@ -126,13 +127,14 @@ def main(argv=None):
                     'costs':[s.stats() for s in services]},args.output)
             else:
                 from .pipeline import AnalysisPipeline
-                refs = args.candidates.split(',') if args.candidates else [c.ref for c in builtin_configs()]
+                baseline = registry.snapshot(args.scope)['ref'] if args.scope else 'baseline@1'
+                refs = args.candidates.split(',') if args.candidates else [baseline]+[c.ref for c in builtin_configs() if c.ref!=baseline][:3]
                 report = TournamentRunner(arena, registry,
                     pipeline_factory=lambda corpus, config: AnalysisPipeline(corpus, services[0] if services else None, analyst_config=config),
                     judge=PairJudge(services[-1] if services else None),
                     critic=services[-1] if args.critic and services else None).run(
                         run_id=args.run_id, dataset=read_json(args.dataset), candidate_refs=refs,
-                        mode=args.mode, shadow=args.shadow, execution_identity=identities)
+                        mode=args.mode, shadow=args.shadow, execution_identity=identities, target_scope=args.scope)
                 write_json(report,args.output)
         return 0
     except Exception as exc:

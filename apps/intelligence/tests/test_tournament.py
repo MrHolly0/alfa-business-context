@@ -16,6 +16,13 @@ def case(case_id, event_id, company_id, *, synthetic=True):
     request["event"]["event_id"] = event_id
     request["synthetic"] = synthetic
     request["event"]["synthetic"] = synthetic
+    if case_id.startswith(("h","hold")):
+        request["company"]["name"]="Ритейл Восток (fixture)"
+        request["company"]["industry"]="Торговля"
+        request["event"]["title"]="Изменение правил маркировки"
+        request["event"]["text"]="Регулятор перенёс срок введения маркировки товаров на следующий год. Действующие требования сохраняются."
+    else:
+        request["company"]["name"]="Производство Север (fixture)"
     return {"case_id": case_id, "request": request, "documents": [], "expected": {}}
 
 
@@ -79,7 +86,7 @@ def test_model_tournament_evaluates_only_finalist_on_holdout_and_can_promote(tmp
         "holdout":[case("hold1","hold-event","hold-company",synthetic=False)]}
     factory=lambda corpus,config:AnalysisPipeline(corpus,llm=FakeLLM(),analyst_config=config)
     report=TournamentRunner(store,registry,pipeline_factory=factory,judge=judge).run(
-        run_id="model-run",dataset=dataset,candidate_refs=["baseline@1","candidate@1"],mode="model",execution_identity={"model":"fake-model"})
+        run_id="model-run",dataset=dataset,candidate_refs=["baseline@1","candidate@1"],mode="model",execution_identity={"model":"fake-model"},target_scope="impact:any:*")
     assert report["winner_ref"]=="candidate@1"
     assert report["holdout"]["passed"] is True
     assert len(judge.calls)==4 and all("evidence" in call[0] for call in judge.calls)

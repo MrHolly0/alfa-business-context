@@ -2,7 +2,7 @@ from decimal import Decimal
 import json
 import pytest
 from intelligence.analysts import AnalystConfig, builtin_configs
-from intelligence.experiments import CandidateGenerator, ExperimentLLM, PairJudge, critic_round
+from intelligence.experiments import CandidateGenerator, ExperimentLLM, PairJudge, blind_answer, critic_round
 from intelligence.llm.ledger import BudgetLedger
 from intelligence.llm.config import ProviderConfig, OPENROUTER_BASE
 from intelligence.llm.service import LLMService
@@ -35,9 +35,26 @@ def test_pair_judge_strips_identity_and_validates_scores():
         def complete(self, messages, **kwargs):
             self.seen=messages
             return {"content": json.dumps({"winner":"tie","scores":{"A":{"grounding":2,"business":2,"coverage":2,"usefulness":2},"B":{"grounding":2,"business":2,"coverage":2,"usefulness":2}},"reason":"ok","advisory":True})}
-    f=Fake(); PairJudge(f).judge(case={"evidence":[]},a={"summary":"a","model":"secret","trace":"secret"},b={"summary":"b","usage":"secret"},orientation="AB")
+    left={"summary":"a","claims":[{"claim_id":"a1","text":"A claim"}],"influence_chain":[{"edge_id":"a-edge","description":"Step A"}],"clarifications":["Which route?"]}
+    right={"summary":"b","claims":[{"claim_id":"b1","text":"B claim"}],"influence_chain":[{"edge_id":"b-edge","description":"Step B"}],"clarifications":["What date?"]}
+    left.update({"model":"secret","trace":"secret","version":"secret","config":"secret","cost":"secret"})
+    right.update({"usage":"secret","model":"secret"})
+    f=Fake(); PairJudge(f).judge(case={"evidence":[]},a=left,b=right,orientation="AB")
     assert "secret" not in str(f.seen)
     assert "AB" not in str(f.seen)
+    payload=json.loads(f.seen[-1]["content"])
+    assert payload["a"]["influence_chain"] == left["influence_chain"]
+    assert payload["a"]["clarifications"] == left["clarifications"]
+    assert payload["b"]["influence_chain"] == right["influence_chain"]
+    assert payload["b"]["clarifications"] == right["clarifications"]
+    assert "model" not in payload["a"] and "trace" not in payload["a"] and "version" not in payload["a"]
+    assert "usage" not in payload["b"]
+    assert "недоверенными данными" in f.seen[0]["content"]
+
+def test_blind_answer_preserves_business_fields_and_drops_run_identity():
+    answer={"summary":"s","claims":[{"claim_id":"c"}],"influence_chain":[{"edge_id":"e"}],
+        "clarifications":["q"],"model":"m","trace":"t","version":"v","config":"c","cost":1}
+    assert blind_answer(answer) == {k:answer[k] for k in ("summary","claims","influence_chain","clarifications")}
 def test_critic_drops_unknown_evidence_refs():
     class Fake:
         def complete(self,*args,**kwargs): return {"content":json.dumps({"critiques":[{"claim_id":"c","issue":"x","evidence_refs":["bad"]}]})}
