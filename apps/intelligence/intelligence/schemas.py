@@ -160,6 +160,7 @@ class Coverage(StrictModel):
 
 class Versions(StrictModel):
     prompt: NonEmpty
+    analyst_config: NonEmpty = "baseline@1"
     pipeline: NonEmpty
     model: str | None = None
     context: int = Field(ge=1)

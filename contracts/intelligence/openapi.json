@@ -1414,6 +1414,13 @@
             "minLength": 1,
             "title": "Prompt"
           },
+          "analyst_config": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Analyst Config",
+            "default": "baseline@1"
+          },
           "pipeline": {
             "type": "string",
             "maxLength": 8000,

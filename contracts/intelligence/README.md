@@ -41,3 +41,5 @@ Core сначала проверяет сервисную идентичност
 ## Обновление схем
 
 Из `apps/intelligence`: `uv run python scripts/export_contracts.py`. Проверка актуальности: та же команда с `--check`. JSON Schema ответа модели экспортируется отдельно в [model-answer.schema.json](model-answer.schema.json) и передаётся модели в prompt; это не гарантия провайдера, Python проверяет ответ самостоятельно.
+
+`analyst-config.schema.json` описывает разрешённые настройки поверх фиксированных системных правил. Версия выбранной конфигурации приходит в `candidate.versions.analyst_config`; Backend может сохранять её вместе с остальными версиями, без исполнения инструкций из настроек.

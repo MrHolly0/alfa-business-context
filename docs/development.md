@@ -49,3 +49,5 @@ npm --prefix apps/web run validate
 ## Передача работы
 
 Форматы Python-запросов и кандидата — в [contracts/intelligence](../contracts/intelligence/README.md). Backend реализует выдачу задания и сохранение результата на своей стороне; Frontend подключается к Core. Вместе проверяем пример с двумя компаниями и двумя ролями. Без реальных данных и прогонов модели не объявляем метрики качества достигнутыми.
+
+Промпты и настройки: `docker compose run --build --rm intelligence arena list`; учебный турнир без сети — `docker compose run --rm intelligence arena run --run-id demo-1`. [Порядок работы и ручная оценка](../apps/intelligence/docs/tournament.md).

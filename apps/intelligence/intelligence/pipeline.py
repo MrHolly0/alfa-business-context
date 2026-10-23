@@ -13,11 +13,23 @@ from pydantic import ValidationError
 from .llm.service import estimate_text_tokens
 from .parsers import parse_content
 from .schemas import AnalysisRequest, CandidateAssessment, CandidateClaim, InfluenceEdge, ModelAnswer
+from .analysts import AnalystConfig, PromptRegistry
 
 PROMPT_VERSION = "analysis-v2"
 PIPELINE_VERSION = "bounded-pipeline-v1"
 MAX_QUERY_CHARS = 320
 MAX_EVIDENCE = 16
+ANALYST_PREFERENCE_GUIDANCE = (
+    "Bounded analyst preference meanings (fixed application guidance): focus values are review lenses, "
+    "not claims or evidence requirements; costs means operating/input costs, liquidity means cash and financing, "
+    "supply means suppliers/routes/availability, regulation means rules and compliance, growth means demand/capacity, "
+    "uncertainty means explicitly state unknowns. retrieval_strategy event_first means search the event channel before company context, "
+    "dependencies_first means search company context before the event channel, balanced means search both channels with a balanced evidence allowance. "
+    "answer_style concise means prioritize the main finding and one check, "
+    "balanced means explain finding, basis, and uncertainty, detailed means include material alternatives and checks. "
+    "horizon short means immediate to 30 days, quarter means up to 3 months, long means beyond 3 months. "
+    "These preferences never relax grounding, evidence, uncertainty, JSON-schema, or safety requirements."
+)
 
 
 def _json(value: Any) -> str:
@@ -25,13 +37,19 @@ def _json(value: Any) -> str:
 
 
 class AnalysisPipeline:
-    def __init__(self, store, llm=None):
+    def __init__(self, store, llm=None, *, analyst_config=None, registry=None):
         self.store = store
         self.llm = llm
+        self.analyst_config = (analyst_config if isinstance(analyst_config, AnalystConfig)
+                               else AnalystConfig.model_validate(analyst_config) if analyst_config is not None
+                               else None)
+        self.registry = registry
 
     def run(self, request: AnalysisRequest, checkpoint: Callable[[str], None] | None = None) -> CandidateAssessment:
         if not isinstance(request, AnalysisRequest):
             request = AnalysisRequest.model_validate(request)
+        config = self.analyst_config or (self.registry.select(role=request.company.role, industry=request.company.industry)
+                                         if self.registry else AnalystConfig(config_id="baseline"))
         trace: list[dict] = []
         usage: dict[str, Any] = {"model_calls": 0, "input_tokens": 0, "output_tokens": 0,
                                  "total_tokens": 0, "accounting_basis": "provider_reported",
@@ -56,7 +74,7 @@ class AnalysisPipeline:
             trace.append({"stage": "event_ingested", "revision": event_ingest.get("document_revision_ref")})
             trace.append({"stage": "plan_created", "tools": ["search_external", "search_bank"],
                           "max_steps": request.budget.max_steps})
-            evidence = self._retrieve(request, step, trace=trace, event_ref=event_ingest["document_revision_ref"])
+            evidence = self._retrieve(request, step, trace=trace, event_ref=event_ingest["document_revision_ref"], config=config)
             step("check")
             supported_context = (any(d.status == "confirmed" for d in request.company.dependencies)
                                  or bool(request.company.facts))
@@ -71,10 +89,10 @@ class AnalysisPipeline:
                               "missing_bank_material" if not bank_found else "missing_confirmed_company_context"),
                               "strategy": "broaden_bank_context_query"})
                 primary_count = len(evidence)
-                adapted = self._retrieve(request, step, broad=True, trace=trace)
+                adapted = self._retrieve(request, step, broad=True, trace=trace, config=config)
                 by_id = {item["evidence_id"]: item for item in evidence}
                 by_id.update({item["evidence_id"]: item for item in adapted})
-                evidence = list(by_id.values())[:MAX_EVIDENCE]
+                evidence = list(by_id.values())[:config.evidence_limit]
                 trace.append({"stage": "adapt_result", "primary_count": primary_count,
                               "additional_count": len(adapted), "evidence_count": len(evidence),
                               "external_evidence": sum(e["source_role"] == "external" for e in evidence),
@@ -82,18 +100,18 @@ class AnalysisPipeline:
             if self.llm is None:
                 candidate = self._baseline(request, evidence, trace, usage)
             else:
-                candidate = self._model_candidate(request, evidence, trace, usage, step)
-            candidate = self._validate_candidate(candidate, request, evidence, usage, trace, event_ingest)
+                candidate = self._model_candidate(request, evidence, trace, usage, step, config)
+            candidate = self._validate_candidate(candidate, request, evidence, usage, trace, event_ingest, config)
             return candidate
         except _CheckpointAbort as abort:
             raise abort.original
         except _StepLimit:
             usage["errors"].append("step_budget_exhausted")
-            return self._unknown(request, trace, usage, "partial")
+            return self._unknown(request, trace, usage, "partial", config=config)
         except Exception as exc:
             # Avoid returning exception text, which may include untrusted/provider content.
             usage["errors"].append(type(exc).__name__)
-            return self._unknown(request, trace, usage, "partial")
+            return self._unknown(request, trace, usage, "partial", config=config)
 
     def _ingest_event(self, request: AnalysisRequest) -> dict:
         as_of = request.as_of.isoformat()
@@ -112,10 +130,12 @@ class AnalysisPipeline:
             "language": "ru",
         })
 
-    def _retrieve(self, request: AnalysisRequest, step, broad: bool = False, trace=None, event_ref=None) -> list[dict]:
+    def _retrieve(self, request: AnalysisRequest, step, broad: bool = False, trace=None, event_ref=None, config=None) -> list[dict]:
         # A small, deterministic plan: external and bank channels are queried separately.
         results: list[dict] = []
-        for role in ("external", "bank"):
+        primary_event_ids: set[str] = set()
+        order = ("external", "bank") if config is None or config.retrieval_strategy != "dependencies_first" else ("bank", "external")
+        for role in order:
             step("tool_search_" + role)
             if role == "external":
                 terms = [request.event.title]
@@ -134,6 +154,7 @@ class AnalysisPipeline:
                 pinned = self.store.search(tenant_id=request.tenant_id, source_ids=[request.event.source_id],
                     as_of=request.as_of.isoformat(), query=request.event.text[:MAX_QUERY_CHARS],
                     document_revision_refs=[event_ref], role="external", limit=4)
+                primary_event_ids.update(str(item.get("evidence_id")) for item in pinned if item.get("evidence_id"))
             found = self.store.search(
                 tenant_id=request.tenant_id,
                 source_ids=request.source_ids,
@@ -141,7 +162,7 @@ class AnalysisPipeline:
                 query=query,
                 document_revision_refs=request.document_revision_refs or None,
                 role=role,
-                limit=8,
+                limit=min(8, config.evidence_limit if config else MAX_EVIDENCE),
             )
             found = pinned + found
             trace_ids = [item.get("evidence_id") for item in found if isinstance(item, dict) and item.get("evidence_id")]
@@ -165,7 +186,8 @@ class AnalysisPipeline:
                 if published > request.as_of or fetched > request.as_of:
                     continue
                 unique[str(item["evidence_id"])] = item
-        return list(unique.values())[:MAX_EVIDENCE]
+        ordered = sorted(unique.values(), key=lambda item: (item["evidence_id"] not in primary_event_ids,))
+        return ordered[:(config.evidence_limit if config else MAX_EVIDENCE)]
 
     @staticmethod
     def _primary_ids(request, evidence):
@@ -173,7 +195,7 @@ class AnalysisPipeline:
         return {e["evidence_id"] for e in evidence if e["source_role"] == "external"
                 and e["source_id"] == request.event.source_id and e["quote"] in original}
 
-    def _model_candidate(self, request, evidence, trace, usage, step) -> dict:
+    def _model_candidate(self, request, evidence, trace, usage, step, config=None) -> dict:
         if not self._primary_ids(request, evidence):
             usage["errors"].append("primary_event_evidence_missing")
             return self._empty_payload(evidence)
@@ -187,10 +209,12 @@ class AnalysisPipeline:
         user_base = files("intelligence.prompts").joinpath(f"{PROMPT_VERSION}.user.ru.txt").read_text("utf-8")
         system = files("intelligence.prompts").joinpath(f"{PROMPT_VERSION}.system.ru.txt").read_text("utf-8")
         payload = {"REQUEST_CONTEXT": context, "RETRIEVED_EVIDENCE": evidence,
+                   "ANALYST_PREFERENCES": {"focus": config.focus, "answer_style": config.answer_style,
+                      "horizon": config.horizon, "retrieval_strategy": config.retrieval_strategy},
                    "OUTPUT_JSON_SCHEMA": ModelAnswer.model_json_schema(),
                    "CONTEXT_REFERENCE_RULE": "context_refs contains only dependency_id or fact_id; model_hypothesis and recommendation may cite confirmed dependencies/facts only."}
         messages = [{"role": "system", "content": system},
-                    {"role": "user", "content": user_base + "\n" + _json(payload)}]
+                    {"role": "user", "content": user_base + "\n" + ANALYST_PREFERENCE_GUIDANCE + "\n" + _json(payload)}]
         repair = False
         reserved_total = 0
         for attempt in range(max_calls):
@@ -379,7 +403,7 @@ class AnalysisPipeline:
                 "claims": claims, "influence_chain": [],
                 "clarifications": [] if supported else ["Подтвердите зависимости или факты компании, связанные с событием."]}, status
 
-    def _validate_candidate(self, payload, request, evidence, usage, trace, event_ingest):
+    def _validate_candidate(self, payload, request, evidence, usage, trace, event_ingest, config=None):
         status = "partial"
         if isinstance(payload, tuple):
             payload, status = payload
@@ -390,7 +414,7 @@ class AnalysisPipeline:
             claims = [CandidateClaim.model_validate(c) for c in payload["claims"]]
         except Exception as exc:
             usage["errors"].append("candidate_validation:" + type(exc).__name__)
-            return self._unknown(request, trace, usage, "partial", evidence)
+            return self._unknown(request, trace, usage, "partial", evidence, config)
         if (self.llm is not None and not usage["errors"]
                 and any(e["source_role"] == "external" for e in evidence)
                 and (any(d.status == "confirmed" for d in request.company.dependencies) or request.company.facts)
@@ -425,7 +449,7 @@ class AnalysisPipeline:
                       "bank": sum(e["source_role"] == "bank" for e in evidence),
                       "confirmed_dependencies": sum(d.status == "confirmed" for d in request.company.dependencies),
                       "company_facts": len(request.company.facts)},
-            versions={"prompt": PROMPT_VERSION, "pipeline": PIPELINE_VERSION,
+            versions={"prompt": PROMPT_VERSION, "analyst_config": config.ref if config else "baseline@1", "pipeline": PIPELINE_VERSION,
                       "model": next((a.get("model") for a in reversed(usage["attempts"]) if a.get("model")), None),
                       "context": request.context_version, "source_policy": request.source_policy_version,
                       "as_of": request.as_of, "event_id": request.event.event_id,
@@ -446,7 +470,7 @@ class AnalysisPipeline:
         return {"summary": "Модель не вернула проверяемый разбор.", "claims": [],
                 "influence_chain": [], "clarifications": ["Проверьте исходные материалы и контекст компании."]}
 
-    def _unknown(self, request, trace, usage, status, evidence=None):
+    def _unknown(self, request, trace, usage, status, evidence=None, config=None):
         evidence = evidence or []
         bank_missing = not any(e.get("source_role") == "bank" for e in evidence)
         unknown_claim = CandidateClaim(claim_id="bank-unknown" if bank_missing else "analysis-unknown",
@@ -463,7 +487,7 @@ class AnalysisPipeline:
                       "bank": sum(e.get("source_role") == "bank" for e in evidence),
                       "confirmed_dependencies": sum(d.status == "confirmed" for d in request.company.dependencies),
                       "company_facts": len(request.company.facts)},
-            versions={"prompt": PROMPT_VERSION, "pipeline": PIPELINE_VERSION, "model": None,
+            versions={"prompt": PROMPT_VERSION, "analyst_config": config.ref if config else self.analyst_config.ref if self.analyst_config else "baseline@1", "pipeline": PIPELINE_VERSION, "model": None,
                       "context": request.context_version, "source_policy": request.source_policy_version,
                       "as_of": request.as_of, "event_id": request.event.event_id,
                       "event_revision": request.event.revision,

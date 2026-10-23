@@ -44,7 +44,7 @@ def write_json(value, output=None):
         sys.stdout.write(text)
 
 
-def make_pipeline(state_dir: str | Path, *, mode='baseline', config=None, profile=None, compare_hackathon=False):
+def make_pipeline(state_dir: str | Path, *, mode='baseline', config=None, profile=None, compare_hackathon=False, analyst=None):
     state = Path(state_dir)
     state.mkdir(parents=True, exist_ok=True)
     store = CorpusStore(state / 'corpus.sqlite3')
@@ -64,7 +64,10 @@ def make_pipeline(state_dir: str | Path, *, mode='baseline', config=None, profil
             comparison = {'projected_hackathon_pricing': Pricing(target.input_per_million,target.output_per_million,'RUB'),
                           'projected_hackathon_model':target.model}
         llm = LLMService(configured, ledger_path=state/'llm-budget.sqlite3', **comparison)
-    return store, AnalysisPipeline(store, llm)
+    from .analysts import PromptRegistry, builtin_configs
+    registry = PromptRegistry(state/'analysts.sqlite3')
+    for item in builtin_configs(): registry.register(item)
+    return store, AnalysisPipeline(store, llm, analyst_config=registry.get(analyst) if analyst else None, registry=registry)
 
 
 def _options(parser):
@@ -72,11 +75,15 @@ def _options(parser):
     parser.add_argument('--mode', choices=['baseline', 'model'], default='baseline')
     parser.add_argument('--config', help='Provider configuration, without credentials')
     parser.add_argument('--profile', choices=['openrouter', 'hackathon'])
+    parser.add_argument('--analyst', help='Explicit analyst configuration ref; otherwise select active role/industry configuration')
     parser.add_argument('--compare-hackathon', action='store_true', help='Project RUB cost with explicit hackathon tariffs; same model only')
 
 
 def main(argv=None):
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == 'arena':
+        from .arena_cli import main as arena_main
+        return arena_main(arguments[1:])
     if arguments and arguments[0] == 'llm':
         from .llm.cli import main as llm_main
         return llm_main(arguments[1:])
@@ -168,13 +175,13 @@ def main(argv=None):
             write_json(store.search(tenant_id=args.tenant,source_ids=args.sources.split(','),as_of=args.as_of,
                                    query=args.query,role=args.role,limit=args.limit))
         elif args.command in {'analyze','evaluate','serve','worker'}:
-            store, pipeline = make_pipeline(args.state_dir,mode=args.mode,config=args.config,profile=args.profile,compare_hackathon=args.compare_hackathon)
+            store, pipeline = make_pipeline(args.state_dir,mode=args.mode,config=args.config,profile=args.profile,compare_hackathon=args.compare_hackathon,analyst=args.analyst)
             if args.command == 'analyze':
                 request = AnalysisRequest.model_validate(read_json(args.input))
                 write_json(pipeline.run(request), args.output)
             elif args.command == 'evaluate':
                 from .evaluation import evaluate_dataset
-                report = evaluate_dataset(read_json(args.dataset), pipeline_factory=lambda corpus: AnalysisPipeline(corpus,pipeline.llm))
+                report = evaluate_dataset(read_json(args.dataset), pipeline_factory=lambda corpus: AnalysisPipeline(corpus,pipeline.llm,analyst_config=pipeline.analyst_config,registry=pipeline.registry))
                 write_json(report,args.output)
                 return 0 if report['passed'] else 1
             elif args.command == 'serve':

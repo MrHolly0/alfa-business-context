@@ -1,0 +1,316 @@
+{
+  "schema_version": "tournament-dataset-v1",
+  "synthetic": true,
+  "description": "Только проверка механики турнира. Не набор для измерения качества.",
+  "train": [
+    {
+      "case_id": "train-confirmed-dependency",
+      "description": "Подтверждённое сырьё и банковский фрагмент",
+      "request": {
+        "schema_version": "analysis-request-v1",
+        "request_id": "arena-train-confirmed-dependency",
+        "tenant_id": "demo",
+        "company_id": "train-0",
+        "as_of": "2026-10-24T12:00:00Z",
+        "context_version": 1,
+        "source_policy_version": 1,
+        "source_ids": [
+          "news-demo",
+          "bank-demo"
+        ],
+        "company": {
+          "name": "Упаковка Север (учебный пример)",
+          "industry": "Производство упаковки",
+          "description": "Синтетическая крупная компания, выручка 18 млрд рублей.",
+          "role": "Финансовый директор",
+          "dependencies": [
+            {
+              "dependency_id": "dep-aluminium",
+              "label": "алюминий",
+              "kind": "raw_material",
+              "status": "confirmed",
+              "provenance": "Синтетический ответ руководителя закупок от 2026-10-23; не платёжный граф"
+            }
+          ],
+          "facts": [
+            {
+              "fact_id": "fact-contract",
+              "text": "Цена по действующим договорам фиксирована до конца квартала.",
+              "provenance": "Синтетический профиль компании, версия 1"
+            }
+          ]
+        },
+        "event": {
+          "event_id": "demo-aluminium-event",
+          "title": "Учебная новость: поставки алюминия",
+          "text": "Синтетический пример. Поставщик объявил, что алюминий будет поставляться с задержкой в две недели. Изменение касается новых заказов. Цены действующих договоров в сообщении не указаны.",
+          "source_id": "news-demo",
+          "published_at": "2026-10-24T09:00:00Z",
+          "synthetic": true
+        },
+        "budget": {
+          "max_model_calls": 1,
+          "max_input_tokens": 24000,
+          "max_output_tokens": 2048,
+          "max_total_tokens": 60000,
+          "max_steps": 12
+        },
+        "synthetic": true
+      },
+      "documents": [
+        {
+          "tenant_id": "demo",
+          "source_id": "bank-demo",
+          "source_role": "bank",
+          "canonical_uri": "urn:synthetic:bank:aluminium:1",
+          "title": "Учебная аналитическая заметка, не позиция Альфа-Банка",
+          "content": "Синтетическая банковская заметка для теста. Алюминий и сроки поставки следует оценивать с учётом запасов и условий конкретного договора. Это учебный текст, он не является позицией какого-либо банка.",
+          "content_type": "text/plain",
+          "published_at": "2026-10-24T08:00:00Z",
+          "fetched_at": "2026-10-24T10:00:00Z",
+          "synthetic": true,
+          "publisher": "Учебный источник"
+        }
+      ],
+      "expected": {
+        "bank_unknown": false,
+        "require_hypothesis": true,
+        "require_context": true
+      }
+    },
+    {
+      "case_id": "train-unrelated-company",
+      "description": "Та же новость для другой компании",
+      "request": {
+        "schema_version": "analysis-request-v1",
+        "request_id": "arena-train-unrelated-company",
+        "tenant_id": "demo",
+        "company_id": "train-1",
+        "as_of": "2026-10-24T12:00:00Z",
+        "context_version": 1,
+        "source_policy_version": 1,
+        "source_ids": [
+          "news-demo",
+          "bank-demo"
+        ],
+        "company": {
+          "name": "Сервис Север (учебный пример)",
+          "industry": "Разработка ПО",
+          "description": "Синтетическая крупная компания",
+          "role": "Генеральный директор",
+          "dependencies": [
+            {
+              "dependency_id": "dep-hosting",
+              "label": "хостинг",
+              "kind": "service",
+              "status": "confirmed",
+              "provenance": "Синтетический профиль"
+            }
+          ],
+          "facts": []
+        },
+        "event": {
+          "event_id": "demo-aluminium-event",
+          "title": "Учебная новость: поставки алюминия",
+          "text": "Синтетический пример. Поставщик объявил, что алюминий будет поставляться с задержкой в две недели. Изменение касается новых заказов. Цены действующих договоров в сообщении не указаны.",
+          "source_id": "news-demo",
+          "published_at": "2026-10-24T09:00:00Z",
+          "synthetic": true
+        },
+        "budget": {
+          "max_model_calls": 1,
+          "max_input_tokens": 24000,
+          "max_output_tokens": 2048,
+          "max_total_tokens": 60000,
+          "max_steps": 12
+        },
+        "synthetic": true
+      },
+      "documents": [],
+      "expected": {
+        "bank_unknown": true,
+        "require_hypothesis": false,
+        "require_context": false
+      }
+    },
+    {
+      "case_id": "train-unconfirmed-dependency",
+      "description": "Неподтверждённая связь не становится фактом",
+      "request": {
+        "schema_version": "analysis-request-v1",
+        "request_id": "arena-train-unconfirmed-dependency",
+        "tenant_id": "demo",
+        "company_id": "train-2",
+        "as_of": "2026-10-24T12:00:00Z",
+        "context_version": 1,
+        "source_policy_version": 1,
+        "source_ids": [
+          "news-demo",
+          "bank-demo"
+        ],
+        "company": {
+          "name": "Упаковка Север (учебный пример)",
+          "industry": "Производство упаковки",
+          "description": "Синтетическая крупная компания, выручка 18 млрд рублей.",
+          "role": "Финансовый директор",
+          "dependencies": [
+            {
+              "dependency_id": "dep-aluminium",
+              "label": "алюминий",
+              "kind": "raw_material",
+              "status": "hypothesis",
+              "provenance": "Синтетический ответ руководителя закупок от 2026-10-23; не платёжный граф"
+            }
+          ],
+          "facts": []
+        },
+        "event": {
+          "event_id": "demo-aluminium-event",
+          "title": "Учебная новость: поставки алюминия",
+          "text": "Синтетический пример. Поставщик объявил, что алюминий будет поставляться с задержкой в две недели. Изменение касается новых заказов. Цены действующих договоров в сообщении не указаны.",
+          "source_id": "news-demo",
+          "published_at": "2026-10-24T09:00:00Z",
+          "synthetic": true
+        },
+        "budget": {
+          "max_model_calls": 1,
+          "max_input_tokens": 24000,
+          "max_output_tokens": 2048,
+          "max_total_tokens": 60000,
+          "max_steps": 12
+        },
+        "synthetic": true
+      },
+      "documents": [],
+      "expected": {
+        "bank_unknown": true,
+        "require_hypothesis": false,
+        "require_context": false
+      }
+    }
+  ],
+  "holdout": [
+    {
+      "case_id": "holdout-sugar-supply",
+      "description": "Учебный отложенный сценарий: sugar-supply",
+      "request": {
+        "schema_version": "analysis-request-v1",
+        "request_id": "arena-holdout-sugar-supply",
+        "tenant_id": "demo",
+        "company_id": "holdout-sugar-supply",
+        "as_of": "2026-10-24T12:00:00Z",
+        "context_version": 1,
+        "source_policy_version": 1,
+        "source_ids": [
+          "news-demo",
+          "bank-demo"
+        ],
+        "company": {
+          "name": "Пищевик Восток (учебный пример)",
+          "industry": "Пищевая промышленность",
+          "description": "У компании подтверждено использование сахара в производстве.",
+          "role": "Директор по закупкам",
+          "dependencies": [
+            {
+              "dependency_id": "dep-sugar-supply",
+              "label": "сахар",
+              "kind": "raw_material",
+              "status": "confirmed",
+              "provenance": "Синтетический профиль"
+            }
+          ],
+          "facts": [
+            {
+              "fact_id": "fact-sugar-supply",
+              "text": "Запас сахара рассчитан на месяц.",
+              "provenance": "Синтетический профиль"
+            }
+          ]
+        },
+        "event": {
+          "event_id": "event-sugar-supply",
+          "title": "Учебная новость: сахар",
+          "text": "Синтетический пример. Поставщик сообщил о задержке новых поставок сахара на неделю. По действующим заказам график не меняется.",
+          "source_id": "news-demo",
+          "published_at": "2026-10-24T09:00:00Z",
+          "synthetic": true
+        },
+        "budget": {
+          "max_model_calls": 1,
+          "max_input_tokens": 24000,
+          "max_output_tokens": 2048,
+          "max_total_tokens": 60000,
+          "max_steps": 12
+        },
+        "synthetic": true
+      },
+      "documents": [],
+      "expected": {
+        "bank_unknown": true,
+        "require_hypothesis": true,
+        "require_context": true
+      }
+    },
+    {
+      "case_id": "holdout-hosting-growth",
+      "description": "Учебный отложенный сценарий: hosting-growth",
+      "request": {
+        "schema_version": "analysis-request-v1",
+        "request_id": "arena-holdout-hosting-growth",
+        "tenant_id": "demo",
+        "company_id": "holdout-hosting-growth",
+        "as_of": "2026-10-24T12:00:00Z",
+        "context_version": 1,
+        "source_policy_version": 1,
+        "source_ids": [
+          "news-demo",
+          "bank-demo"
+        ],
+        "company": {
+          "name": "Облако Юг (учебный пример)",
+          "industry": "Разработка ПО",
+          "description": "Компания использует хостинг этого провайдера.",
+          "role": "Финансовый директор",
+          "dependencies": [
+            {
+              "dependency_id": "dep-hosting-growth",
+              "label": "хостинг",
+              "kind": "service",
+              "status": "confirmed",
+              "provenance": "Синтетический профиль"
+            }
+          ],
+          "facts": [
+            {
+              "fact_id": "fact-hosting-growth",
+              "text": "Новый договор пока не заключён.",
+              "provenance": "Синтетический профиль"
+            }
+          ]
+        },
+        "event": {
+          "event_id": "event-hosting-growth",
+          "title": "Учебная новость: хостинг",
+          "text": "Синтетический пример. Провайдер объявил скидку на новые годовые договоры хостинга. Условия текущих договоров не меняются.",
+          "source_id": "news-demo",
+          "published_at": "2026-10-24T09:00:00Z",
+          "synthetic": true
+        },
+        "budget": {
+          "max_model_calls": 1,
+          "max_input_tokens": 24000,
+          "max_output_tokens": 2048,
+          "max_total_tokens": 60000,
+          "max_steps": 12
+        },
+        "synthetic": true
+      },
+      "documents": [],
+      "expected": {
+        "bank_unknown": true,
+        "require_hypothesis": true,
+        "require_context": true
+      }
+    }
+  ]
+}

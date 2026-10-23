@@ -10,6 +10,7 @@ from intelligence.artifacts import ArtifactStore
 from intelligence.corpus import CorpusStore
 from intelligence.pipeline import AnalysisPipeline
 from intelligence.relevance import RankRequest,RankResult
+from intelligence.analysts import AnalystConfig
 from intelligence.schemas import AnalysisRequest,CandidateAssessment,ModelAnswer
 
 REPO=Path(__file__).resolve().parents[3]
@@ -18,7 +19,7 @@ DEST=REPO/'contracts/intelligence'
 
 def contracts():
     output={name: model.model_json_schema() for name,model in [
-        ('analysis-request.schema.json',AnalysisRequest),('candidate-assessment.schema.json',CandidateAssessment),
+        ('analyst-config.schema.json',AnalystConfig),('analysis-request.schema.json',AnalysisRequest),('candidate-assessment.schema.json',CandidateAssessment),
         ('model-answer.schema.json',ModelAnswer),('document.schema.json',DocumentInput),
         ('search.schema.json',SearchInput),('rank-request.schema.json',RankRequest),('rank-result.schema.json',RankResult)]}
     identifier={'type':'string','minLength':1,'maxLength':256}

@@ -1,0 +1,102 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "config_id": {
+      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+      "title": "Config Id",
+      "type": "string"
+    },
+    "revision": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Revision",
+      "type": "integer"
+    },
+    "template_version": {
+      "const": "analysis-v2",
+      "default": "analysis-v2",
+      "title": "Template Version",
+      "type": "string"
+    },
+    "focus": {
+      "items": {
+        "enum": [
+          "costs",
+          "liquidity",
+          "supply",
+          "regulation",
+          "growth",
+          "uncertainty"
+        ],
+        "type": "string"
+      },
+      "maxItems": 4,
+      "title": "Focus",
+      "type": "array"
+    },
+    "retrieval_strategy": {
+      "default": "balanced",
+      "enum": [
+        "event_first",
+        "dependencies_first",
+        "balanced"
+      ],
+      "title": "Retrieval Strategy",
+      "type": "string"
+    },
+    "answer_style": {
+      "default": "balanced",
+      "enum": [
+        "concise",
+        "balanced",
+        "detailed"
+      ],
+      "title": "Answer Style",
+      "type": "string"
+    },
+    "horizon": {
+      "default": "quarter",
+      "enum": [
+        "short",
+        "quarter",
+        "long"
+      ],
+      "title": "Horizon",
+      "type": "string"
+    },
+    "role_scope": {
+      "default": "any",
+      "enum": [
+        "any",
+        "finance",
+        "procurement",
+        "executive"
+      ],
+      "title": "Role Scope",
+      "type": "string"
+    },
+    "industry_scope": {
+      "items": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 10,
+      "title": "Industry Scope",
+      "type": "array"
+    },
+    "evidence_limit": {
+      "default": 16,
+      "maximum": 16,
+      "minimum": 4,
+      "title": "Evidence Limit",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "config_id"
+  ],
+  "title": "AnalystConfig",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

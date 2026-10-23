@@ -48,3 +48,5 @@ docker compose up --build intelligence-worker
 Тестовые контейнеры работают без сетевого доступа и не получают ключи. Веб-тесты: `docker compose run --build --rm web-test`.
 
 При прерванном запросе: `docker compose run --rm intelligence inspect`. Сначала остановите API/worker и проверьте неопределённый расход; только затем при необходимости `reset-request --tenant demo --request-id <ID> --confirm-stopped` или `reset-job --job-id <ID> --generation <N> --confirm-stopped`. Сброс не закрывает неопределённые записи денежного журнала и не гарантирует отсутствие повторного списания.
+
+Турнир настроек использует тот же образ и volume Python: `docker compose run --build --rm intelligence arena run --run-id demo-1`. По умолчанию работает без сети; отчёты и реестр остаются в `.state` внутри volume. [Команды и модельный режим](../apps/intelligence/README.md#подбор-настроек-и-турнир).
