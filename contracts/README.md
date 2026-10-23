@@ -1,17 +1,12 @@
 # API и сообщения: текущий прототип и проектный контракт
 
-Этот каталог — командный draft, не runtime schema. Реальные Symfony/Python сервисы пока не описаны как уже созданные. JSON в `examples/` синтетический. Источник истины для настоящих прототипных routes — `apps/prototype/worker`.
+Этот каталог — командный draft, не runtime schema. PHP API и полный Python-анализ ещё нужно реализовать. JSON в `examples/` синтетический. Веб-интерфейс не реализует backend API.
 
-## Сейчас: сохранённый Node-прототип
+## Текущее состояние
 
-| Route | Текущий смысл |
-|---|---|
-| `GET /api/status` | Статус Worker/configuration; не банковская готовность. |
-| `GET /api/news` | Доступная глубина двух RSS-лент ЦБ, кэш в памяти процесса. |
-| `POST /api/import` | URL-only allowlisted HTTPS page import; ручной текст сохраняется UI локально. |
-| `POST /api/analyze` | Синхронный LLM analysis от переданного context/sources; без настроенной модели возвращает HTTP 400, локальный rules mode UI не является ответом этого route. Нет persistent jobs. |
+Веб-контейнер раздаёт только статический интерфейс. Реализация PHP Core принадлежит Backend и пока не подключена. Запросы `/api/` получают `503`; Node backend удалён из рабочего приложения.
 
-Это не пользовательский API нового MVP; не переносить старые payloads как target contract без явного решения.
+Примеры ниже задают будущий формат обмена, а не работающие маршруты.
 
 ## Public user API `/api/v1` — canonical draft
 

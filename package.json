@@ -6,10 +6,10 @@
     "node": "22.15.x"
   },
   "scripts": {
-    "install:prototype": "npm ci --prefix apps/prototype",
-    "dev": "npm run build && npm --prefix apps/prototype run dev",
-    "build": "npm --prefix apps/prototype run build",
-    "validate": "npm --prefix apps/prototype run validate",
-    "test": "npm --prefix apps/prototype test"
+    "install:web": "npm ci --prefix apps/web",
+    "dev": "docker compose up --build --wait",
+    "build": "npm --prefix apps/web run build",
+    "validate": "npm --prefix apps/web run validate",
+    "test": "docker compose run --build --rm web-test && docker compose run --build --rm intelligence-test"
   }
 }

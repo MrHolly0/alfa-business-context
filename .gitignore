@@ -1,11 +1,11 @@
 node_modules/
-apps/prototype/node_modules/
+apps/web/node_modules/
 .env
 .env.*
 !.env.example
-apps/prototype/dist/
+apps/web/dist/
 .DS_Store
-/.local/agents/
+/.local/
 /AGENTS.md
 /.idea/
 

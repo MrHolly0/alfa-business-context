@@ -1,41 +1,40 @@
-# Локальный запуск
+# Docker
 
-Из корня репозитория:
+Все команды выполняются из корня репозитория. Нужны Docker и Docker Compose.
+
+## Веб-интерфейс
 
 ```sh
 docker compose up --build --wait
 ```
 
-Откройте <http://localhost:4173>. Для остановки используйте `Ctrl+C`; контейнер
-не содержит базу данных или отдельные сервисы — Compose запускает только
-интерактивный прототип.
+Открыть http://localhost:4173. В контейнере nginx раздаёт готовые файлы React; Node нужен только при сборке. PHP-ядро в этот запуск не входит — его создаёт Backend. До подключения Core API интерфейс использует демонстрационные данные, сетевые функции отключены.
 
-Чтобы подключить OpenAI-совместимый шлюз локально, скопируйте `.env.example` в
-`.env` в корне репозитория и заполните `LLM_BASE_URL`, `LLM_API_KEY`,
-`LLM_MODEL` и разрешённый `LLM_CASE_MODEL`. Compose передаст переменные в
-контейнер. Не храните ключи в Git. Без этих значений приложение работает в
-режиме правил.
+Остановка: `docker compose down`. Порт можно изменить через `WEB_PORT` в `.env`.
 
-Вне Docker установите Node.js 22.15.0 (`.nvmrc`), затем выполните:
+## Наша Python-часть
+
+Пример без сети и ключей:
 
 ```sh
-npm ci --prefix apps/prototype
-npm test
-npm run build
-npm run validate
-npm run dev
+docker compose run --build --rm intelligence
 ```
 
-`npm run dev` сначала собирает артефакт и затем запускает preview на порту
-4173. Нативный Node.js не загружает `.env` автоматически; для LLM задайте
-переменные в окружении процесса либо используйте `node --env-file=.env
-apps/prototype/scripts/dev.mjs` после сборки.
+Тесты без сетевого доступа:
 
+```sh
+docker compose run --build --rm intelligence-test
+docker compose run --build --rm web-test
+```
 
-## Целевой MVP и текущий запуск
+## Модели и расходы
 
-`docker compose up --build --wait` по-прежнему запускает только существующий React/Node прототип из `apps/prototype`. Этот npm/Compose путь не переходит на Symfony; `composer` для него не требуется.
+По умолчанию конфиг берётся из `apps/intelligence/examples/providers.template.json` и доступен в контейнере как `/config/providers.json`. Свой файл можно выбрать переменной `INTELLIGENCE_CONFIG_FILE` в `.env`. Ключи `OPENROUTER_API_KEY` и `HACKATHON_API_KEY` передаются только Python-контейнеру при запуске.
 
-Целевой MVP по новой редакции продуктового документа (стр. 11–19, 31, 52) предлагает React/Core UI и Symfony 7.4 / PHP 8.4 как Core modular monolith. HTTP API, PHP CLI workers и scheduler поставляются из одного Symfony-артефакта; Python/FastAPI отдельно выполняет ingest и анализ через внутренний Core API. PostgreSQL использует раздельные схемы и роли Core/AI, документы идут в объектное хранилище. SSE обслуживает Mercure либо согласованный канал банка. Node остаётся только технологией текущего демо: собственный Node BFF не является целевым Core и нужен лишь при контракте оболочки.
+Реальный запрос выполняется только явной командой `run`; [пример и тарифы](../docs/llm-providers.md). Обычный запуск и тесты модель не вызывают.
 
-Symfony/PHP, Composer-пакеты, Python-сервис, PostgreSQL jobs, object storage и Mercure пока не подключены этим Compose. Допуск PHP, платформенные версии, SSO и канал обновлений должны быть согласованы с банком; Kafka и Qdrant не обязательны для первой демонстрации.
+Журнал расходов хранится в volume `alfa-business-context-intelligence-state` и переживает удаление контейнера. Не используйте `docker compose down -v` для обычной остановки: это удаляет данные volume. Хостовый Python и контейнер используют разные журналы.
+
+## Добавление PHP
+
+Backend подключит собственное приложение и заменит ответ `503` для `/api/` в `apps/web/nginx.conf` на проксирование в PHP Core. Реализация ядра остаётся в его зоне.

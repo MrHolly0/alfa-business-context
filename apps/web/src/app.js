@@ -6,6 +6,7 @@ import * as C from "./catalog.js";
 import { contextualProduct } from "./bank-products.js";
 import { volumeSources } from "./volume-demo.js";
 import { renderMarkup } from "./core-ui.jsx";
+import { backendCapabilities } from "./capabilities.js";
 const $ = (s) => document.querySelector(s),
   esc = (s) =>
     String(s ?? "").replace(
@@ -137,7 +138,7 @@ let state,
   newsReturn = "events",
   digestPeriod = "day",
   lastResult = "",
-  integration = { llm: false },
+  integration = { news: false, import: false, analyze: false, llm: false },
   chatBusy = false;
 const UI = createUI({ I, esc, act: perform });
 const listMemory = new Map();
@@ -354,6 +355,7 @@ function updateAll(reason) {
   return activeChanges;
 }
 function refreshButton(id = "all") {
+  const unavailable = !integration.news;
   return B(
     busy
       ? "Проверяем…"
@@ -361,7 +363,9 @@ function refreshButton(id = "all") {
     "refresh:" + id,
     "quiet",
     busy ? "clock" : "refresh",
-    busy ? "disabled" : 'aria-label="Обновить оценки"',
+    busy || unavailable
+      ? `disabled title="${unavailable ? "Загрузка новостей сейчас недоступна." : ""}" aria-label="${unavailable ? "Загрузка новостей сейчас недоступна" : "Обновить оценки"}"`
+      : 'aria-label="Обновить оценки"',
   );
 }
 function jobBanner() {
@@ -1154,7 +1158,8 @@ function sourceDetail() {
 function sourceForm() {
   const reviewing = sourceStage !== "link";
   const missing = sourceImport ? [["title", "название"], ["publisher", "издание"], ["author", "автор"], ["publishedAt", "дата публикации"]].filter(([k]) => !draft[k]).map(([,label]) => label) : [];
-  return back("sources", "К источникам") + `<div class="form-page">${intro("Добавить материал", "По ссылке заполним найденные данные. Перед добавлением вы сможете их проверить.")}<form id="source-form" class="card source-import-form">${formError()}<div class="import-address">${textField("url", "Ссылка на публикацию", draft.url, "Автозагрузка: ЦБ, Альфа-Банк, Росстат и Минфин. Для других сайтов вставьте текст вручную.", "url", 'placeholder="https://…" maxlength="2000"')}${B(busy ? "Загружаем…" : sourceImport ? "Загрузить заново" : "Заполнить по ссылке", "import-url", "secondary", busy ? "clock" : "link", busy ? "disabled" : "")}</div>${busy ? '<div class="import-progress" role="status"><span class="spinner"></span>Получаем текст и сведения о публикации…</div>' : ""}${!reviewing ? `<div class="import-alternative"><span>Есть свой текст или сайт не поддерживается?</span>${B("Вставить текст вручную", "source-manual", "text")}</div>` : `<div class="import-review"><div class="import-review-heading"><h2>${sourceImport ? "Проверьте найденные данные" : "Сведения о материале"}</h2>${sourceImport ? badge("Загружено", "green") : ""}</div>${sourceImport ? `<p class="import-result" role="status">${missing.length ? "Не найдены: " + esc(missing.join(", ")) + ". Укажите дату; автора можно оставить пустым." : "Название, издание, автор и дата заполнены из публикации."} Характер утверждений определён предварительно.</p>` : ""}<div class="form-grid">${textField("title", "Название", draft.title, "", "text", 'required maxlength="240"')}${textField("publisher", "Издание / первоисточник", draft.publisher, "Материалы одного первоисточника не считаются независимыми подтверждениями.", "text", 'required maxlength="200"')}${textField("author", "Автор", draft.author, "Оставьте пустым, если не указан.", "text", 'maxlength="180"')}${dateField("publishedAt", "Дата публикации", draft.publishedAt)}${selectField("kind", "Характер материала", [["Не классифицирован", "Требует проверки"], ["Прогноз автора", "Прогноз автора"], ["Мнение", "Мнение"], ["Наблюдение", "Наблюдение / данные"]], draft.kind)}<div class="full">${textarea("text", "Текст материала", draft.text, "До 30 000 знаков.", 'required maxlength="30000"')}</div></div><div class="actions"><button type="submit" class="btn primary" ${busy ? "disabled" : ""}>Добавить в анализ</button>${B("Отмена", "form-cancel", "secondary")}</div></div>`}</form></div>`;
+  const importUnavailable = !integration.import;
+  return back("sources", "К источникам") + `<div class="form-page">${intro("Добавить материал", "Вставьте текст вручную или используйте ссылку, если загрузка источников доступна.")}<form id="source-form" class="card source-import-form">${formError()}<div class="import-address">${textField("url", "Ссылка на публикацию", draft.url, importUnavailable ? "Загрузка текста по ссылке сейчас недоступна. Можно вставить текст вручную." : "Проверьте загруженные данные перед добавлением.", "url", 'placeholder="https://…" maxlength="2000"')}${B(busy ? "Загружаем…" : sourceImport ? "Загрузить заново" : "Заполнить по ссылке", "import-url", "secondary", busy ? "clock" : "link", busy || importUnavailable ? `disabled title="${importUnavailable ? "Загрузка источников сейчас недоступна." : ""}"` : "")}</div>${importUnavailable ? '<p class="hint">Загрузка источников сейчас недоступна. Вы можете добавить материал, вставив текст вручную.</p>' : ""}${busy ? '<div class="import-progress" role="status"><span class="spinner"></span>Получаем текст и сведения о публикации…</div>' : ""}${!reviewing ? `<div class="import-alternative"><span>Есть свой текст или сайт не поддерживается?</span>${B("Вставить текст вручную", "source-manual", "text")}</div>` : `<div class="import-review"><div class="import-review-heading"><h2>${sourceImport ? "Проверьте найденные данные" : "Сведения о материале"}</h2>${sourceImport ? badge("Загружено", "green") : ""}</div>${sourceImport ? `<p class="import-result" role="status">${missing.length ? "Не найдены: " + esc(missing.join(", ")) + ". Укажите дату; автора можно оставить пустым." : "Название, издание, автор и дата заполнены из публикации."} Характер утверждений определён предварительно.</p>` : ""}<div class="form-grid">${textField("title", "Название", draft.title, "", "text", 'required maxlength="240"')}${textField("publisher", "Издание / первоисточник", draft.publisher, "Материалы одного первоисточника не считаются независимыми подтверждениями.", "text", 'required maxlength="200"')}${textField("author", "Автор", draft.author, "Оставьте пустым, если не указан.", "text", 'maxlength="180"')}${dateField("publishedAt", "Дата публикации", draft.publishedAt)}${selectField("kind", "Характер материала", [["Не классифицирован", "Требует проверки"], ["Прогноз автора", "Прогноз автора"], ["Мнение", "Мнение"], ["Наблюдение", "Наблюдение / данные"]], draft.kind)}<div class="full">${textarea("text", "Текст материала", draft.text, "До 30 000 знаков.", 'required maxlength="30000"')}</div></div><div class="actions"><button type="submit" class="btn primary" ${busy ? "disabled" : ""}>Добавить в анализ</button>${B("Отмена", "form-cancel", "secondary")}</div></div>`}</form></div>`;
 }
 
 function researchList() {
@@ -1323,7 +1328,7 @@ function settings() {
       "Настройки модуля",
       "Управляйте частотой проверок и рабочим контекстом.",
     ) +
-    `<div class="card form-page"><section class="section"><h2>Обновления</h2><label class="switch"><span>Проверять новости каждые 5 минут<div class="hint">Пока открыт сайт. Сбой источника не удаляет предыдущие оценки.</div></span><span class="row"><input type="checkbox" id="auto-check" ${root.auto ? "checked" : ""}><span class="track"></span></span></label></section><section class="section"><h2>Ваш фокус</h2>${selectField(
+    `<div class="card form-page"><section class="section"><h2>Обновления</h2><label class="switch"><span>Проверять новости каждые 5 минут<div class="hint">${integration.news ? "Пока открыт сайт. Сбой источника не удаляет предыдущие оценки." : "Загрузка новостей сейчас недоступна."}</div></span><span class="row"><input type="checkbox" id="auto-check" ${integration.news && root.auto ? "checked" : ""} ${integration.news ? "" : "disabled"}><span class="track"></span></span></label></section><section class="section"><h2>Ваш фокус</h2>${selectField(
       "role",
       "Показывать в первую очередь",
       [
@@ -1332,13 +1337,13 @@ function settings() {
         ["supply", "Закупки и поставки"],
       ],
       root.role,
-    )}<p class="hint" style="margin-top:12px">Меняет порядок ситуаций. Это приоритет просмотра, а не настройка прав доступа.</p></section><section class="section"><h2>Помощник</h2><label class="switch"><span>Показывать пиксельного персонажа</span><span class="row"><input type="checkbox" id="pet-check" ${root.pet ? "checked" : ""}><span class="track"></span></span></label></section><section class="section"><h2>Предложения банка</h2><label class="switch"><span>Показывать подходящие продукты<div class="hint">Предложения можно скрыть. На оценки ситуаций это не влияет.</div></span><span class="row"><input type="checkbox" id="bank-offers" ${state.bankOffers !== false ? "checked" : ""}><span class="track"></span></span></label></section><section class="section"><h2>Подключения</h2><div class="integration-list"><div class="row"><div><strong>Официальные новости ЦБ</strong><p>${root.lastFeed ? "Проверка: " + time(root.lastFeed.checkedAt) : "RSS загрузится при ручной проверке."}</p></div>${badge(root.lastFeed?.status === "ok" ? "Подключено" : root.lastFeed?.status === "partial" ? "Частично" : "Ожидает проверки", root.lastFeed?.status === "ok" ? "green" : "")}</div><div class="row"><div><strong>Банковская аналитика</strong><p>Два отчёта кейса: прочитаны первые страницы с ключевыми выводами.</p></div>${badge("Загружено", "blue")}</div><div class="row"><div><strong>Модель для глубокого анализа</strong><p>${integration.llm ? "Настроен серверный шлюз. Выводы проверяются по ссылкам на материалы." : "Ключ модели не настроен. Доступен расчётный режим с явными ограничениями."}</p></div>${badge(integration.llm ? "Шлюз настроен" : "Не подключена", integration.llm ? "green" : "")}</div></div></section><div class="actions">${B("Проверить сейчас", "refresh:all", "secondary", "refresh")}${B("О возможностях и данных", "nav:about", "text")}</div></div>`
+    )}<p class="hint" style="margin-top:12px">Меняет порядок ситуаций. Это приоритет просмотра, а не настройка прав доступа.</p></section><section class="section"><h2>Помощник</h2><label class="switch"><span>Показывать пиксельного персонажа</span><span class="row"><input type="checkbox" id="pet-check" ${root.pet ? "checked" : ""}><span class="track"></span></span></label></section><section class="section"><h2>Предложения банка</h2><label class="switch"><span>Показывать подходящие продукты<div class="hint">Предложения можно скрыть. На оценки ситуаций это не влияет.</div></span><span class="row"><input type="checkbox" id="bank-offers" ${state.bankOffers !== false ? "checked" : ""}><span class="track"></span></span></label></section><section class="section"><h2>Подключения</h2><div class="integration-list"><div class="row"><div><strong>Официальные новости ЦБ</strong><p>${integration.news && root.lastFeed ? "Проверка: " + time(root.lastFeed.checkedAt) : "Загрузка новостей сейчас недоступна в этой сборке."}</p></div>${badge(!integration.news ? "Не подключено" : root.lastFeed?.status === "ok" ? "Подключено" : root.lastFeed?.status === "partial" ? "Частично" : "Ожидает проверки", integration.news && root.lastFeed?.status === "ok" ? "green" : "")}</div><div class="row"><div><strong>Банковская аналитика</strong><p>Два отчёта кейса: прочитаны первые страницы с ключевыми выводами.</p></div>${badge("Загружено", "blue")}</div><div class="row"><div><strong>Модель для глубокого анализа</strong><p>${integration.llm ? "Настроен серверный шлюз. Выводы проверяются по ссылкам на материалы." : "Ключ модели не настроен. Доступен расчётный режим с явными ограничениями."}</p></div>${badge(integration.llm ? "Шлюз настроен" : "Не подключена", integration.llm ? "green" : "")}</div></div></section><div class="actions">${B("Проверить сейчас", "refresh:all", "secondary", "refresh", integration.news ? "" : 'disabled title="Загрузка новостей сейчас недоступна."')}${B("О возможностях и данных", "nav:about", "text")}</div></div>`
   );
 }
 function about() {
   return (
     intro("О прототипе", "Бизнес-контекст · версия 10") +
-    `<div class="card prose"><section class="section"><h2>Что уже работает</h2><p>Связанные ситуации, управление источниками, серверная загрузка официальных RSS и разрешённых URL, отдельные факты и допущения, пересмотр с версиями, статусы действий, сводки, исследования произвольных дней доступного периода, выгрузка и контекстный помощник.</p></section><section class="section"><h2>Какие данные используются</h2><p>Три обезличенных профиля из CSV кейса. Названия компаний вымышлены. Банковские выводы пересказаны с первых страниц двух оригинальных отчётов. Учебные отраслевые материалы и показатели отмечены как демоданные.</p><p>Исходные документы кейса описывают сценарий хакатона. Они не заменяют проверку актуального состояния рынка. Сайт не подключён к счетам, платежам и внутренним системам банка.</p></section><section class="section"><h2>Анализ и помощник</h2><p>Без настроенной модели используются воспроизводимые правила и расчёты. Шлюз LLM поддерживает план, ограниченный выбор материалов, проверку ссылок и один повтор при ошибке. ${integration.llm ? "Настройки шлюза есть; доступность проверяется при запросе." : "В этой публикации ключ LLM отсутствует; ответы по правилам не выдаются за ответ нейросети."}</p><p>Система не наблюдает за «всем миром»: полнота зависит от подключённых источников, доступа и периода. Слабые косвенные связи показываются как гипотезы с альтернативами и условиями опровержения.</p></section><section class="section"><h2>Хранение и границы</h2><p>Профиль, уточнения, история, задачи и переписка хранятся в этом браузере отдельно по компаниям. Это не многопользовательская банковская система. Роли меняют приоритет просмотра; серверные права банка не моделируются.</p><p>Автоматическая проверка действует только при открытой странице. Уведомления доступны внутри модуля; push, рассылки и отправка менеджеру не подключены.</p></section><div class="actions">${B("Проверить поток из 150 материалов", "nav:events/volume", "secondary", "file")}${B("Экспортировать состояние", "export-state", "secondary", "file")}${B("Сбросить демо", "reset-confirm", "danger")}</div></div>`
+    `<div class="card prose"><section class="section"><h2>Что уже работает</h2><p>Связанные ситуации, управление сохранёнными источниками, ручное добавление текста, отдельные факты и допущения, пересмотр с версиями, статусы действий, сводки, исследования произвольных дней доступного периода, выгрузка и контекстный помощник.</p></section><section class="section"><h2>Какие данные используются</h2><p>Три обезличенных профиля из CSV кейса. Названия компаний вымышлены. Банковские выводы пересказаны с первых страниц двух оригинальных отчётов. Учебные отраслевые материалы и показатели отмечены как демоданные.</p><p>Исходные документы кейса описывают сценарий хакатона. Они не заменяют проверку актуального состояния рынка. Сайт не подключён к счетам, платежам и внутренним системам банка.</p></section><section class="section"><h2>Анализ и помощник</h2><p>Без настроенной модели используются воспроизводимые правила и расчёты. Шлюз LLM поддерживает план, ограниченный выбор материалов, проверку ссылок и один повтор при ошибке. ${integration.llm ? "Настройки шлюза есть; доступность проверяется при запросе." : "В этой публикации ключ LLM отсутствует; ответы по правилам не выдаются за ответ нейросети."}</p><p>Система не наблюдает за «всем миром»: полнота зависит от подключённых источников, доступа и периода. Слабые косвенные связи показываются как гипотезы с альтернативами и условиями опровержения.</p></section><section class="section"><h2>Хранение и границы</h2><p>Профиль, уточнения, история, задачи и переписка хранятся в этом браузере отдельно по компаниям. Это не многопользовательская банковская система. Роли меняют приоритет просмотра; серверные права банка не моделируются.</p><p>Загрузка новостей и получение текста по ссылке сейчас не подключены. Автоматическая проверка недоступна. Уведомления доступны внутри модуля; push, рассылки и отправка менеджеру не подключены.</p></section><div class="actions">${B("Проверить поток из 150 материалов", "nav:events/volume", "secondary", "file")}${B("Экспортировать состояние", "export-state", "secondary", "file")}${B("Сбросить демо", "reset-confirm", "danger")}</div></div>`
   );
 }
 function feedbackForm() {
@@ -2029,6 +2034,10 @@ async function api(path, body, signal) {
   return data;
 }
 async function refresh(id = "all", automatic = false) {
+  if (!integration.news) {
+    if (!automatic) toast("Загрузка новостей сейчас недоступна. Сохранённые демоданные остаются доступны.");
+    return;
+  }
   if (busy) return;
   const controller = new AbortController(),
     token = Symbol("refresh");
@@ -2114,6 +2123,11 @@ async function refresh(id = "all", automatic = false) {
   }
 }
 async function importURL() {
+  if (!integration.import) {
+    error = "Загрузка источников сейчас недоступна. Вы можете добавить материал, вставив текст вручную.";
+    render();
+    return;
+  }
   const form = $("#source-form");
   if (!form || busy) return;
   Object.assign(draft, Object.fromEntries(new FormData(form)));
@@ -2474,12 +2488,14 @@ document.addEventListener("change", (e) => {
     toast("Приоритет ситуаций обновлён.");
   }
   if (el.id === "auto-check") {
-    root.auto = el.checked;
+    root.auto = integration.news && el.checked;
     persist();
     toast(
       root.auto
         ? "Автопроверка включена, пока открыт сайт."
-        : "Автопроверка выключена.",
+        : integration.news
+          ? "Автопроверка выключена."
+          : "Автопроверка недоступна: загрузка новостей не подключена.",
     );
   }
   if (el.id === "bank-offers") {
@@ -2655,12 +2671,13 @@ addEventListener("storage", (e) => {
   }
 });
 setInterval(() => {
-  if (root.auto && !document.hidden && !busy && !dirty) refresh("all", true);
+  if (integration.news && root.auto && !document.hidden && !busy && !dirty)
+    refresh("all", true);
 }, 300000);
 api("/api/status")
   .then((s) => {
-    integration = s;
-    if (view.page === "settings" || view.page === "about") render();
+    integration = backendCapabilities(s);
+    render();
   })
   .catch(() => {});
 if (location.hash.startsWith("#panel/context/"))

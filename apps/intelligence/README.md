@@ -14,6 +14,8 @@ python -m intelligence.llm
 PYTHONPATH=apps/intelligence python -m intelligence.llm
 ```
 
+То же offline demo в Docker из корня репозитория: `docker compose run --rm intelligence`. Профиль по умолчанию смонтирован только для чтения; SQLite-ledger хранится в именованном томе Compose.
+
 Настройте свой JSON на основе [`examples/providers.template.json`](examples/providers.template.json): шаблон содержит тарифы `0` только для Gemma `:free` на OpenRouter, а тарифы хакатонного профиля оставляет `null`. Задайте фактические тарифы хакатона до его live вызова; при выборе платной OpenRouter модели тоже укажите её фактические тарифы. Выберите один из шести разрешённых точных API model ID и экспортируйте имя ключа из `api_key_env` в environment своего shell. Поддерживаемые model ID зафиксированы и проверяются при загрузке профиля; фактическая доступность модели, тарифы и usage API шлюза требуют подтверждения. JSON профиль с `null` тарифами не проходит validation. Команда `validate` читает конфиг, но не ключ; `budget` показывает локальную SQLite запись; только `run` отправляет запрос. Укажите UTF-8 prompt через `--input file.txt` или stdin. Подробно: [`docs/llm-providers.md`](../../docs/llm-providers.md).
 
 Для smoke и unit tests (только offline):
@@ -24,7 +26,7 @@ PYTHONPATH=apps/intelligence python -m unittest discover -s apps/intelligence/te
 
 ## Целевой сервис (план)
 
-Полный целевой Python/FastAPI сервис включает пулы ingest, monitoring, research и experiments по v3 pp.12–19. Текущий продуктовый прототип использует Node Worker/JavaScript; Python provider adapter не означает, что service runtime уже создан.
+Полный целевой Python/FastAPI сервис включает пулы ingest, monitoring, research и experiments по v3 pp.12–19. Текущее веб-приложение использует Node Worker/JavaScript; Python provider adapter не означает, что service runtime уже создан.
 
 ## Граница и владение
 

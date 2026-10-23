@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import * as C from "../web/catalog.js";
-import * as E from "../web/engine.js";
-import { seed } from "../web/seed.js";
-import { volumeSources } from "../web/volume-demo.js";
-import { contextualProduct } from "../web/bank-products.js";
+import * as C from "../src/catalog.js";
+import * as E from "../src/engine.js";
+import { seed } from "../src/seed.js";
+import { volumeSources } from "../src/volume-demo.js";
+import { contextualProduct } from "../src/bank-products.js";
 
 function state() {
   const root = E.initial(seed);

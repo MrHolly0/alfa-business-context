@@ -1,19 +1,86 @@
 name: alfa-business-context
 
 services:
-  prototype:
+  web:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: apps/web/Dockerfile
+      target: runtime
+    init: true
     ports:
-      - "127.0.0.1:4173:4173"
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      PORT: 4173
+      - "127.0.0.1:${WEB_PORT:-4173}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173/api/status').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
       interval: 10s
       timeout: 3s
       retries: 5
+      start_period: 5s
+
+  web-test:
+    profiles: [test]
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: test
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    network_mode: none
+
+  intelligence:
+    profiles: [tools]
+    build:
+      context: .
+      dockerfile: apps/intelligence/Dockerfile
+      target: runtime
+    init: true
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      HACKATHON_API_KEY: ${HACKATHON_API_KEY:-}
+    volumes:
+      - intelligence-state:/app/.state
+      - type: bind
+        source: ${INTELLIGENCE_CONFIG_FILE:-./apps/intelligence/examples/providers.template.json}
+        target: /config/providers.json
+        read_only: true
+        bind:
+          create_host_path: false
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  intelligence-test:
+    profiles: [test]
+    build:
+      context: .
+      dockerfile: apps/intelligence/Dockerfile
+      target: test
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    network_mode: none
+
+volumes:
+  intelligence-state:
+    name: alfa-business-context-intelligence-state

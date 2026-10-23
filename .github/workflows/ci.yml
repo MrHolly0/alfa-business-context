@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  prototype:
+  web:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -13,9 +13,9 @@ jobs:
         with:
           node-version: 22.15.0
           cache: npm
-          cache-dependency-path: apps/prototype/package-lock.json
-      - run: npm ci --prefix apps/prototype
-      - run: npm test
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci --prefix apps/web
+      - run: npm --prefix apps/web test
       - run: npm run build
       - run: npm run validate
 
@@ -33,3 +33,17 @@ jobs:
         env:
           PYTHONPATH: apps/intelligence
         run: python -m unittest discover -s apps/intelligence/tests -v
+
+  containers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config --quiet
+      - run: docker compose build web intelligence web-test intelligence-test
+      - run: docker compose run --rm web-test
+      - run: docker compose run --rm intelligence-test
+      - run: docker compose run --rm intelligence
+      - run: docker compose up --wait web
+      - run: curl --fail --silent --show-error http://127.0.0.1:4173/healthz
+      - if: always()
+        run: docker compose down

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { seed } from "../web/seed.js";
-import * as E from "../web/engine.js";
+import { seed } from "../src/seed.js";
+import * as E from "../src/engine.js";
 function state(id) {
   const root = E.initial(seed),
     s = root.companies[id || root.active];
