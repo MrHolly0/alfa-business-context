@@ -1,0 +1,82 @@
+{
+  "method": "WCAG luminance ratio; APCA apca-w3 0.1.9 with polarity and font reference. Selected pairs, not a certification.",
+  "pairs": [
+    {
+      "name": "Основной текст",
+      "foreground": "#202126",
+      "background": "#ffffff",
+      "size": 16,
+      "weight": 400,
+      "wcagRatio": 16.07,
+      "apcaLc": 103.04,
+      "referenceMinimumPx": 15,
+      "meetsSelectedReference": true
+    },
+    {
+      "name": "Вторичный текст",
+      "foreground": "#525966",
+      "background": "#ffffff",
+      "size": 15,
+      "weight": 400,
+      "wcagRatio": 7.05,
+      "apcaLc": 84.44,
+      "referenceMinimumPx": 16.75,
+      "meetsSelectedReference": false
+    },
+    {
+      "name": "Метаданные на фоне",
+      "foreground": "#525966",
+      "background": "#f5f6f8",
+      "size": 15,
+      "weight": 400,
+      "wcagRatio": 6.52,
+      "apcaLc": 79.03,
+      "referenceMinimumPx": 17.5,
+      "meetsSelectedReference": false
+    },
+    {
+      "name": "Основная кнопка (оценка при весе 600)",
+      "foreground": "#ffffff",
+      "background": "#d92318",
+      "size": 15,
+      "weight": 600,
+      "wcagRatio": 5,
+      "apcaLc": -77.98,
+      "referenceMinimumPx": 15,
+      "meetsSelectedReference": true
+    },
+    {
+      "name": "Ссылка",
+      "foreground": "#205992",
+      "background": "#ffffff",
+      "size": 15,
+      "weight": 500,
+      "wcagRatio": 7.23,
+      "apcaLc": 84.75,
+      "referenceMinimumPx": 15.81,
+      "meetsSelectedReference": false
+    },
+    {
+      "name": "Статус",
+      "foreground": "#795000",
+      "background": "#fff2db",
+      "size": 14,
+      "weight": 700,
+      "wcagRatio": 6.41,
+      "apcaLc": 77.35,
+      "referenceMinimumPx": 14,
+      "meetsSelectedReference": true
+    },
+    {
+      "name": "Граница поля",
+      "foreground": "#858e9c",
+      "background": "#ffffff",
+      "size": null,
+      "weight": null,
+      "wcagRatio": 3.31,
+      "apcaLc": 60.49,
+      "referenceMinimumPx": null,
+      "meetsSelectedReference": null
+    }
+  ]
+}

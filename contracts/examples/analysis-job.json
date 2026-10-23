@@ -1,0 +1,33 @@
+{
+  "draft_note": "Synthetic contract sketch only. Internal route names and this JSON shape are a team proposal, not specified by product PDF and not runtime-validated.",
+  "schema_version": "analysis-job-draft-1",
+  "message_id": "msg-demo-001",
+  "job_id": "job-demo-001",
+  "tenant_scope": "tenant-demo-001",
+  "company_id": "company-demo-001",
+  "trace_id": "trace-demo-001",
+  "kind": "assessment_refresh",
+  "input_versions": {
+    "context_version": 7,
+    "source_policy_version": 2,
+    "event_versions": [
+      {"event_id": "event-demo-001", "revision": 3}
+    ]
+  },
+  "lease_generation": 4,
+  "deadline": "2026-10-23T12:05:00Z",
+  "lease_until": "2026-10-23T12:01:00Z",
+  "budget": {
+    "max_model_calls": 3,
+    "max_tokens": 5000,
+    "cost_reservation_rub": 4.5
+  },
+  "scope": {
+    "source_ids": ["source-demo-public"],
+    "document_revision_refs": ["ai-doc-demo-001@2"],
+    "context_snapshot_ref": "core-context-demo-001@7"
+  },
+  "requested_period": null,
+  "as_of": "2026-10-23T12:00:00Z",
+  "result_ref": null
+}

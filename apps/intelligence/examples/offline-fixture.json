@@ -1,0 +1,11 @@
+{
+  "mode": "offline_fixture",
+  "network": false,
+  "credentials_read": false,
+  "cost_is_synthetic": true,
+  "model": "offline-fixture",
+  "usage": {"prompt_tokens": 12, "completion_tokens": 18},
+  "provider_reported_cost": "0.000001",
+  "provider_cost_currency": "USD",
+  "projected_hackathon_cost_rub": null
+}

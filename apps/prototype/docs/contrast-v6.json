@@ -1,0 +1,93 @@
+{
+  "method": "WCAG luminance ratio; APCA apca-w3 0.1.9 with polarity and font reference. Selected pairs, not a certification.",
+  "pairs": [
+    {
+      "name": "Текст",
+      "foreground": "#17191e",
+      "background": "#ffffff",
+      "size": 16,
+      "weight": 400,
+      "wcagRatio": 17.58,
+      "apcaLc": 104.42,
+      "referenceMinimumPx": 15,
+      "meetsSelectedReference": true
+    },
+    {
+      "name": "Вторичный текст",
+      "foreground": "#434c59",
+      "background": "#ffffff",
+      "size": 15,
+      "weight": 600,
+      "wcagRatio": 8.69,
+      "apcaLc": 89.81,
+      "referenceMinimumPx": 14.625,
+      "meetsSelectedReference": true
+    },
+    {
+      "name": "Метаданные на фоне",
+      "foreground": "#434c59",
+      "background": "#f5f6f8",
+      "size": 15,
+      "weight": 600,
+      "wcagRatio": 8.04,
+      "apcaLc": 84.4,
+      "referenceMinimumPx": 14.81,
+      "meetsSelectedReference": true
+    },
+    {
+      "name": "Основная кнопка",
+      "foreground": "#ffffff",
+      "background": "#cf251b",
+      "size": 16,
+      "weight": 600,
+      "wcagRatio": 5.34,
+      "apcaLc": -80.1,
+      "referenceMinimumPx": 14.81,
+      "meetsSelectedReference": true
+    },
+    {
+      "name": "Мобильная основная кнопка",
+      "foreground": "#ffffff",
+      "background": "#cf251b",
+      "size": 15,
+      "weight": 600,
+      "wcagRatio": 5.34,
+      "apcaLc": -80.1,
+      "referenceMinimumPx": 14.81,
+      "meetsSelectedReference": true
+    },
+    {
+      "name": "Ссылка",
+      "foreground": "#155aab",
+      "background": "#ffffff",
+      "size": 15,
+      "weight": 600,
+      "wcagRatio": 6.81,
+      "apcaLc": 82.97,
+      "referenceMinimumPx": 14.81,
+      "meetsSelectedReference": true
+    },
+    {
+      "name": "Статус",
+      "foreground": "#795000",
+      "background": "#fff2db",
+      "size": 14,
+      "weight": 700,
+      "wcagRatio": 6.41,
+      "apcaLc": 77.35,
+      "referenceMinimumPx": 14,
+      "meetsSelectedReference": true
+    },
+    {
+      "name": "Граница поля",
+      "foreground": "#858f9d",
+      "background": "#ffffff",
+      "size": null,
+      "weight": null,
+      "wcagRatio": 3.27,
+      "apcaLc": 60.1,
+      "referenceMinimumPx": null,
+      "meetsSelectedReference": null
+    }
+  ]
+}

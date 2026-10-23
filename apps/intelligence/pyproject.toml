@@ -1,0 +1,6 @@
+[project]
+name = "alfa-business-context-intelligence"
+version = "0.1.0"
+description = "Offline-first OpenAI-compatible provider and budget adapters"
+requires-python = ">=3.12"
+dependencies = []

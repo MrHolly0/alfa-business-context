@@ -1,0 +1,86 @@
+{
+  "date": "2026-10-21",
+  "wcag": "WCAG 2.2 Recommendation 2024-12-12",
+  "wcag3": "Working Draft 2026-09-10; not a conformance claim",
+  "apca": "apca-w3 0.1.9; polarity retained",
+  "note": "Selected component palette, not a full accessibility certification. APCA font table is a reference; Inter rendering was also inspected in browser.",
+  "pairs": [
+    {
+      "use": "Основной текст карточки",
+      "fg": "17191e",
+      "bg": "ffffff",
+      "size": 16,
+      "weight": 400,
+      "wcagRatio": 17.58,
+      "apcaLc": 104.42,
+      "referenceMinimumPx": 15,
+      "meetsReferenceSize": true
+    },
+    {
+      "use": "Метаданные на карточке",
+      "fg": "4c5564",
+      "bg": "ffffff",
+      "size": 15,
+      "weight": 600,
+      "wcagRatio": 7.52,
+      "apcaLc": 86.16,
+      "referenceMinimumPx": 14.63,
+      "meetsReferenceSize": true
+    },
+    {
+      "use": "Метаданные на фоне приложения",
+      "fg": "4c5564",
+      "bg": "f5f6f8",
+      "size": 15,
+      "weight": 600,
+      "wcagRatio": 6.96,
+      "apcaLc": 80.75,
+      "referenceMinimumPx": 14.81,
+      "meetsReferenceSize": true
+    },
+    {
+      "use": "Основная кнопка",
+      "fg": "ffffff",
+      "bg": "d92318",
+      "size": 16,
+      "weight": 600,
+      "wcagRatio": 5,
+      "apcaLc": -77.98,
+      "referenceMinimumPx": 15,
+      "meetsReferenceSize": true
+    },
+    {
+      "use": "Предупреждающий статус",
+      "fg": "75450c",
+      "bg": "fff0d9",
+      "size": 15,
+      "weight": 650,
+      "wcagRatio": 7.16,
+      "apcaLc": 79.66,
+      "referenceMinimumPx": 14.5,
+      "meetsReferenceSize": true
+    },
+    {
+      "use": "Активный пункт банка",
+      "fg": "a41d14",
+      "bg": "fbe7e5",
+      "size": 15,
+      "weight": 650,
+      "wcagRatio": 6.39,
+      "apcaLc": 73.05,
+      "referenceMinimumPx": 15,
+      "meetsReferenceSize": true
+    },
+    {
+      "use": "Активная вкладка",
+      "fg": "ffffff",
+      "bg": "1a1c21",
+      "size": 15,
+      "weight": 650,
+      "wcagRatio": 17.05,
+      "apcaLc": -106.3,
+      "referenceMinimumPx": 12.5,
+      "meetsReferenceSize": true
+    }
+  ]
+}

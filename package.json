@@ -1,0 +1,15 @@
+{
+  "name": "alfa-business-context-hackathon",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": "22.15.x"
+  },
+  "scripts": {
+    "install:prototype": "npm ci --prefix apps/prototype",
+    "dev": "npm run build && npm --prefix apps/prototype run dev",
+    "build": "npm --prefix apps/prototype run build",
+    "validate": "npm --prefix apps/prototype run validate",
+    "test": "npm --prefix apps/prototype test"
+  }
+}

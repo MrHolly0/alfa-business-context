@@ -1,0 +1,20 @@
+node_modules/
+apps/prototype/node_modules/
+.env
+.env.*
+!.env.example
+apps/prototype/dist/
+.DS_Store
+/.local/agents/
+/AGENTS.md
+/.idea/
+
+# Python services and local billing state
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+apps/intelligence/.state/
+apps/intelligence/build/
+apps/intelligence/dist/
+apps/intelligence/*.local.json
