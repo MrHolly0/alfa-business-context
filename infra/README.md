@@ -29,7 +29,7 @@ docker compose up --build --wait intelligence-api
 curl --fail http://localhost:8081/health
 ```
 
-По умолчанию `INTELLIGENCE_MODE=baseline`. Значение `model` включает модель только для принятых запросов анализа. `INTELLIGENCE_PROFILE=openrouter` выбирает бесплатную Gemma `:free`; у хакатонного профиля предварительно заполняются тарифы. Пользовательский интерфейс обращается к PHP, внутренний Python API нужен Backend.
+По умолчанию `INTELLIGENCE_MODE=baseline`. Значение `model` включает модель только для принятых запросов анализа. `INTELLIGENCE_PROFILE=openrouter` использует выбранный конфиг Gemma: исходный бесплатный либо отдельный платный с лимитами; у хакатонного профиля предварительно заполняются тарифы. Пользовательский интерфейс обращается к PHP, внутренний Python API нужен Backend.
 
 ## Worker для Core
 

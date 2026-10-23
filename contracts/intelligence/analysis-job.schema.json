@@ -122,6 +122,11 @@
         "cost_reservation_rub": {
           "type": "number",
           "minimum": 0
+        },
+        "cost_reservation_usd": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Required for paid OpenRouter development jobs; independent of RUB reservation"
         }
       }
     },

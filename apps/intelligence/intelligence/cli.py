@@ -53,9 +53,8 @@ def make_pipeline(state_dir: str | Path, *, mode='baseline', config=None, profil
         from .llm.config import load_config
         from .llm.service import LLMService
         configured = load_config(config or APP_ROOT/'examples/providers.template.json', profile=profile)
-        # Our testing route is deliberately free-only. The competition route has its own RUB limit.
-        if configured.profile == 'openrouter' and not configured.model.endswith(':free'):
-            raise ValueError('openrouter_tests_require_free_model')
+        # Paid testing requires explicit consent and bounded prices in provider configuration.
+        configured.ensure_spend_allowed()
         comparison = {}
         if compare_hackathon:
             from .llm.pricing import Pricing

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import http.client
+import math
 import os
 import urllib.error
 import urllib.request
@@ -28,6 +29,7 @@ class ChatCompletionTransport:
 
     def complete(self, messages: Sequence[Mapping[str, str]], *, json_mode: bool = False,
                  max_output_tokens: int | None = None) -> Completion:
+        self.config.ensure_spend_allowed()
         if not isinstance(messages, Sequence) or isinstance(messages, (str, bytes)) or not messages:
             raise ValueError("messages must be a non-empty sequence")
         clean_messages = []
@@ -48,6 +50,16 @@ class ChatCompletionTransport:
             body["response_format"] = {"type": "json_object"}
         if self.config.profile == "openrouter":
             body["usage"] = {"include": True}
+            if self.config.is_paid_openrouter:
+                prices = (self.config.input_per_million, self.config.output_per_million)
+                caps = [float(price) for price in prices]
+                if any(not math.isfinite(cap) or cap <= 0 for cap in caps):
+                    raise ValueError("paid OpenRouter price caps must be representable as finite JSON numbers")
+                body["provider"] = {
+                    "sort": "price",
+                    "require_parameters": True,
+                    "max_price": {"prompt": caps[0], "completion": caps[1], "request": 0},
+                }
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "Accept": "application/json"}
         if self.config.base_url == OPENROUTER_BASE:
             headers["HTTP-Referer"] = "https://alfa-business-context.local"

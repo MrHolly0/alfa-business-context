@@ -82,8 +82,20 @@ class Worker:
             if config is None: raise InvalidJob("model pricing configuration unavailable")
             profile, model = getattr(config, "profile", None), getattr(config, "model", None)
             if profile == "openrouter":
-                if model != "google/gemma-4-26b-a4b-it:free" or config.input_per_million != 0 or config.output_per_million != 0:
-                    raise InvalidJob("paid OpenRouter is not permitted")
+                paid = not str(model).endswith(":free")
+                if paid:
+                    try:
+                        config.ensure_spend_allowed()
+                        usd = worker_budget.get("cost_reservation_usd")
+                        if isinstance(usd,bool) or not isinstance(usd,(int,float,Decimal)):
+                            raise ValueError("explicit USD reservation required")
+                        reservation_decimal = Decimal(str(usd))
+                        if not reservation_decimal.is_finite() or reservation_decimal < 0:
+                            raise ValueError("finite USD reservation required")
+                    except (AttributeError,ValueError,InvalidOperation) as exc:
+                        raise InvalidJob("paid OpenRouter requires consent and a USD reservation") from exc
+                elif config.input_per_million != 0 or config.output_per_million != 0:
+                    raise InvalidJob("free OpenRouter requires zero prices")
             elif profile != "hackathon" or getattr(config, "currency", None) != "RUB":
                 raise InvalidJob("model profile is not permitted")
             try:

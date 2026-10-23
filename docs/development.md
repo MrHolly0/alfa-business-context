@@ -21,6 +21,8 @@ uv run --frozen --env-file ../../.env python -m intelligence analyze \
   --input examples/analysis-request.json --mode model --profile openrouter
 ```
 
+Для разрешённого платного режима добавьте к команде анализа `--config examples/providers.paid.template.json`. [Ограничения и тарифы](llm-providers.md).
+
 После изменения зависимостей обновите lock и производные файлы контейнера:
 
 ```sh

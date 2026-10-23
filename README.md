@@ -45,3 +45,5 @@ docker compose run --build --rm intelligence-test
 - [Модели, ключи и расходы](docs/llm-providers.md).
 
 [Наша Python-часть: запуск, структура и реальные вызовы](apps/intelligence/README.md).
+
+Платные тесты Gemma включаются отдельным конфигом с локальными лимитами $0.20 в сутки и $0.01 на вызов; [настройка и учёт](docs/llm-providers.md).

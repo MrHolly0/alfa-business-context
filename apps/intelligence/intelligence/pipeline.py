@@ -14,7 +14,7 @@ from .llm.service import estimate_text_tokens
 from .parsers import parse_content
 from .schemas import AnalysisRequest, CandidateAssessment, CandidateClaim, InfluenceEdge, ModelAnswer
 
-PROMPT_VERSION = "analysis-v1"
+PROMPT_VERSION = "analysis-v2"
 PIPELINE_VERSION = "bounded-pipeline-v1"
 MAX_QUERY_CHARS = 320
 MAX_EVIDENCE = 16
@@ -184,8 +184,8 @@ class AnalysisPipeline:
             usage["errors"].append("model_call_budget_zero")
             return self._empty_payload(evidence)
         context = self._context_payload(request)
-        user_base = files("intelligence.prompts").joinpath("analysis-v1.user.ru.txt").read_text("utf-8")
-        system = files("intelligence.prompts").joinpath("analysis-v1.system.ru.txt").read_text("utf-8")
+        user_base = files("intelligence.prompts").joinpath(f"{PROMPT_VERSION}.user.ru.txt").read_text("utf-8")
+        system = files("intelligence.prompts").joinpath(f"{PROMPT_VERSION}.system.ru.txt").read_text("utf-8")
         payload = {"REQUEST_CONTEXT": context, "RETRIEVED_EVIDENCE": evidence,
                    "OUTPUT_JSON_SCHEMA": ModelAnswer.model_json_schema(),
                    "CONTEXT_REFERENCE_RULE": "context_refs contains only dependency_id or fact_id; model_hypothesis and recommendation may cite confirmed dependencies/facts only."}
@@ -271,7 +271,7 @@ class AnalysisPipeline:
                 return parsed
             except (ValueError, TypeError, ValidationError, json.JSONDecodeError) as exc:
                 errors = self._repair_diagnostics(exc)
-                trace.append({"stage": "model_output_rejected", "reason": type(exc).__name__})
+                trace.append({"stage": "model_output_rejected", "reason": type(exc).__name__, "diagnostics": errors})
                 if attempt + 1 >= max_calls:
                     usage["errors"].append("model_output_rejected:" + type(exc).__name__)
                     break
@@ -294,17 +294,17 @@ class AnalysisPipeline:
         primary_ids = AnalysisPipeline._primary_ids(request, evidence)
         contexts = {x.dependency_id: x for x in request.company.dependencies}
         contexts.update({x.fact_id: x for x in request.company.facts})
-        for claim in payload["claims"]:
+        for claim_index, claim in enumerate(payload["claims"]):
             # CandidateClaim validation above normalizes defaults before ref checking.
             if any(ref not in refs for ref in claim["evidence_refs"]):
                 raise ValueError("unknown_evidence_id")
             if any(ref not in contexts for ref in claim["context_refs"]):
                 raise ValueError("unknown_context_id")
             if claim["kind"] == "external_fact" and (not claim["evidence_refs"] or any(refs[r]["source_role"] != "external" for r in claim["evidence_refs"])):
-                raise ValueError("external_fact_requires_external_evidence")
+                raise _GroundingError("external_fact_requires_external_evidence", ["claims", claim_index, "evidence_refs"])
             if claim["kind"] == "bank_view":
                 if claim.get("origin") != "bank" or not claim["evidence_refs"] or any(refs[r]["source_role"] != "bank" for r in claim["evidence_refs"]):
-                    raise ValueError("bank_view_requires_bank_evidence")
+                    raise _GroundingError("bank_view_requires_bank_evidence", ["claims", claim_index, "evidence_refs"])
             if claim["kind"] in {"model_hypothesis", "recommendation"} and not primary_ids.intersection(claim["evidence_refs"]):
                 raise ValueError("impact_requires_primary_event_evidence")
             if claim["kind"] == "model_hypothesis":
@@ -346,6 +346,8 @@ class AnalysisPipeline:
     @staticmethod
     def _repair_diagnostics(exc: Exception) -> list[dict[str, Any]]:
         """Return validator codes and locations only; never echo untrusted input."""
+        if isinstance(exc, _GroundingError):
+            return [{"type": exc.code, "loc": exc.loc}]
         if isinstance(exc, ValidationError):
             return [{"type": str(item.get("type", "validation_error")),
                      "loc": list(item.get("loc", []))} for item in exc.errors(include_input=False)]
@@ -478,3 +480,10 @@ class _CheckpointAbort(Exception):
     def __init__(self, original: BaseException):
         super().__init__(type(original).__name__)
         self.original = original
+
+
+class _GroundingError(ValueError):
+    """A fixed validator code and location, without source text or model content."""
+    def __init__(self, code: str, loc: list):
+        super().__init__(code)
+        self.code, self.loc = code, loc

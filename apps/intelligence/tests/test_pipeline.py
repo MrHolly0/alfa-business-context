@@ -266,3 +266,15 @@ def test_retrieved_bank_material_without_bank_claim_is_unknown(tmp_path):
     assert result.coverage.bank > 0
     assert result.status=="partial"
     assert any(c.kind=="unknown" and c.origin=="bank" for c in result.claims)
+
+
+def test_profile_fact_is_not_external_fact_and_repair_gets_exact_location():
+    import pytest
+    answer={"summary":"Факт из профиля не внешняя новость.","claims":[
+        {"claim_id":"profile-fact","kind":"external_fact","text":"У компании есть автопарк.",
+         "evidence_refs":[],"context_refs":["fact-fleet"]}],"influence_chain":[],"clarifications":[]}
+    with pytest.raises(ValueError) as caught:
+        AnalysisPipeline._check_model_payload(answer,req(),[])
+    errors=AnalysisPipeline._repair_diagnostics(caught.value)
+    assert errors==[{"type":"external_fact_requires_external_evidence","loc":["claims",0,"evidence_refs"]}]
+    assert "автопарк" not in json.dumps(errors,ensure_ascii=False)

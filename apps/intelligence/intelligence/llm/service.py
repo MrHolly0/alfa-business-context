@@ -30,6 +30,7 @@ class LLMService:
                  ledger_path: str | Path | None = None, transport=None,
                  projected_hackathon_pricing: Pricing | None = None,
                  projected_hackathon_model: str | None = None):
+        config.ensure_spend_allowed()
         if ledger is not None and ledger_path is not None:
             raise ValueError("provide ledger or ledger_path, not both")
         if ledger is None:
@@ -64,6 +65,8 @@ class LLMService:
         # Reserve the full configured output cap before the network call. Token counts
         # are planning estimates; the configured cap also goes to the transport.
         reserve = self.pricing.estimate(max_input_tokens, output_cap)
+        if self.config.is_paid_openrouter and reserve > self.config.max_request_cost:
+            raise ValueError("estimated paid OpenRouter request cost exceeds max_request_cost")
         reservation_id = self.ledger.reserve(self.config.budget_scope, self.config.currency,
             self.config.daily_limit, reserve, request_id=str(uuid4()))
         try:

@@ -39,6 +39,8 @@ class ProviderConfig:
     output_per_million: Decimal
     timeout_seconds: float
     max_output_tokens: int
+    allow_paid: bool = False
+    max_request_cost: Decimal | None = None
 
     def __post_init__(self) -> None:
         _validate_base(self.profile, self.base_url)
@@ -62,10 +64,39 @@ class ProviderConfig:
             raise ValueError("hackathon daily_limit cannot exceed 500 RUB")
         object.__setattr__(self, "input_per_million", _decimal(self.input_per_million, "input_per_million"))
         object.__setattr__(self, "output_per_million", _decimal(self.output_per_million, "output_per_million"))
+        if not isinstance(self.allow_paid, bool):
+            raise ValueError("allow_paid must be a boolean")
+        if self.max_request_cost is not None:
+            object.__setattr__(self, "max_request_cost", _decimal(self.max_request_cost, "max_request_cost"))
         if isinstance(self.timeout_seconds, bool) or not isinstance(self.timeout_seconds, (int, float)) or not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be a positive finite number")
         if isinstance(self.max_output_tokens, bool) or not isinstance(self.max_output_tokens, int) or self.max_output_tokens <= 0:
             raise ValueError("max_output_tokens must be a positive integer")
+
+    @property
+    def is_paid_openrouter(self) -> bool:
+        return self.profile == "openrouter" and not self.model.endswith(":free")
+
+    def ensure_spend_allowed(self) -> None:
+        """Enforce explicit, bounded consent before any paid OpenRouter attempt."""
+        if not self.is_paid_openrouter:
+            return
+        if not self.allow_paid:
+            raise ValueError("paid OpenRouter use requires allow_paid=true")
+        if self.daily_limit <= 0 or self.daily_limit > Decimal("0.20"):
+            raise ValueError("paid OpenRouter daily_limit must be positive and at most 0.20 USD")
+        if (self.max_request_cost is None or self.max_request_cost <= 0
+                or self.max_request_cost > Decimal("0.01")
+                or self.max_request_cost > self.daily_limit):
+            raise ValueError("paid OpenRouter max_request_cost must be positive, at most 0.01 USD, and no greater than daily_limit")
+        if self.input_per_million <= 0 or self.output_per_million <= 0:
+            raise ValueError("paid OpenRouter input and output rates must be explicit positive USD per-million caps")
+        try:
+            json_rates = (float(self.input_per_million), float(self.output_per_million))
+        except (OverflowError, ValueError):
+            raise ValueError("paid OpenRouter price caps must be representable as finite positive JSON numbers") from None
+        if any(not math.isfinite(rate) or rate <= 0 for rate in json_rates):
+            raise ValueError("paid OpenRouter price caps must be representable as finite positive JSON numbers")
 
 
 def _decimal(value: Any, name: str) -> Decimal:
@@ -135,8 +166,13 @@ def _from_mapping(profile: str, value: dict[str, Any]) -> ProviderConfig:
     max_tokens = value.get("max_output_tokens")
     if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens <= 0:
         raise ValueError("max_output_tokens must be a positive integer")
+    allow_paid = value.get("allow_paid", False)
+    if not isinstance(allow_paid, bool):
+        raise ValueError("allow_paid must be a boolean")
+    raw_request_cost = value.get("max_request_cost")
+    request_cost = None if raw_request_cost is None else _decimal(raw_request_cost, "max_request_cost")
     return ProviderConfig(profile, base_url, api_key_env, model, scope.strip(), currency, limit,
-                          input_rate, output_rate, float(timeout), max_tokens)
+                          input_rate, output_rate, float(timeout), max_tokens, allow_paid, request_cost)
 
 
 def load_config(path: str | Path, profile: str | None = None) -> ProviderConfig:
