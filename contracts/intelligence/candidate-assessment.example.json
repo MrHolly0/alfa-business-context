@@ -1,0 +1,159 @@
+{
+  "schema_version": "candidate-assessment-v1",
+  "request_id": "demo-aluminium-cfo-v1",
+  "tenant_id": "demo",
+  "company_id": "demo-packaging",
+  "status": "partial",
+  "execution_mode": "baseline",
+  "summary": "Детерминированный baseline: автоматическая причинная оценка не выполнялась.",
+  "claims": [
+    {
+      "claim_id": "event-evidence",
+      "kind": "external_fact",
+      "text": "Внешний материал описывает событие: Синтетический пример. Поставщик объявил, что алюминий будет поставляться с задержкой в две недели. Изменение касается новых заказов. Цены действующих договоров в сообщении не указаны.",
+      "evidence_refs": [
+        "ev_3980b7e894fbc5b312a3430daa9753524adc96b0"
+      ],
+      "context_refs": [],
+      "assumptions": [],
+      "alternatives": [],
+      "falsifiers": [],
+      "origin": null
+    },
+    {
+      "claim_id": "bank-position",
+      "kind": "bank_view",
+      "text": "В банковском материале указано: Синтетическая банковская заметка для теста. Алюминий и сроки поставки следует оценивать с учётом запасов и условий конкретного договора. Это учебный текст, он не является позицией какого-либо банка.",
+      "evidence_refs": [
+        "ev_cc94423536040b2f8e30a5c0d8c3c59f4d61f526"
+      ],
+      "context_refs": [],
+      "assumptions": [],
+      "alternatives": [],
+      "falsifiers": [],
+      "origin": "bank"
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "ev_3980b7e894fbc5b312a3430daa9753524adc96b0",
+      "document_id": "doc_95eef363c7bb42a5c140f3e9452a1c1d",
+      "document_revision_ref": "doc_95eef363c7bb42a5c140f3e9452a1c1d:1",
+      "source_id": "news-demo",
+      "source_role": "external",
+      "title": "Учебная новость: поставки алюминия",
+      "canonical_uri": "urn:event:demo-aluminium-event",
+      "published_at": "2026-10-24T09:00:00Z",
+      "fetched_at": "2026-10-24T12:00:00Z",
+      "locator": "chars:0-183",
+      "quote": "Синтетический пример. Поставщик объявил, что алюминий будет поставляться с задержкой в две недели. Изменение касается новых заказов. Цены действующих договоров в сообщении не указаны.",
+      "content_hash": "694f2b1e7f71c41a78c454b34f3124a18940536395649aacdda53e5d6716dcf7",
+      "synthetic": true,
+      "score": 0.9018518518518519
+    },
+    {
+      "evidence_id": "ev_cc94423536040b2f8e30a5c0d8c3c59f4d61f526",
+      "document_id": "doc_bb1a9b77362269c00a80bd9759083329",
+      "document_revision_ref": "doc_bb1a9b77362269c00a80bd9759083329:1",
+      "source_id": "bank-demo",
+      "source_role": "bank",
+      "title": "Учебная аналитическая заметка, не позиция Альфа-Банка",
+      "canonical_uri": "urn:synthetic:bank:aluminium:1",
+      "published_at": "2026-10-24T08:00:00Z",
+      "fetched_at": "2026-10-24T10:00:00Z",
+      "locator": "chars:0-198",
+      "quote": "Синтетическая банковская заметка для теста. Алюминий и сроки поставки следует оценивать с учётом запасов и условий конкретного договора. Это учебный текст, он не является позицией какого-либо банка.",
+      "content_hash": "c535599ea00b460b1fc9c481056b4be6d1c0629384affb68b475b2df2cab69ad",
+      "synthetic": true,
+      "score": 0.16384615384615386
+    }
+  ],
+  "influence_chain": [],
+  "clarifications": [],
+  "coverage": {
+    "external": 1,
+    "bank": 1,
+    "confirmed_dependencies": 1,
+    "company_facts": 1
+  },
+  "versions": {
+    "prompt": "analysis-v1",
+    "pipeline": "bounded-pipeline-v1",
+    "model": null,
+    "context": 1,
+    "source_policy": 1,
+    "as_of": "2026-10-24T12:00:00Z",
+    "event_id": "demo-aluminium-event",
+    "event_revision": 1,
+    "event_document_revision_ref": "doc_95eef363c7bb42a5c140f3e9452a1c1d:1",
+    "synthetic": true
+  },
+  "usage": {
+    "model_calls": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0,
+    "accounting_basis": "provider_reported",
+    "attempts": [],
+    "errors": []
+  },
+  "trace": [
+    {
+      "stage": "plan",
+      "step": 1
+    },
+    {
+      "stage": "event_ingested",
+      "revision": "doc_95eef363c7bb42a5c140f3e9452a1c1d:1"
+    },
+    {
+      "stage": "plan_created",
+      "tools": [
+        "search_external",
+        "search_bank"
+      ],
+      "max_steps": 12
+    },
+    {
+      "stage": "tool_search_external",
+      "step": 2
+    },
+    {
+      "stage": "tool_result",
+      "tool": "search",
+      "role": "external",
+      "result_count": 2,
+      "evidence_ids": [
+        "ev_3980b7e894fbc5b312a3430daa9753524adc96b0",
+        "ev_3980b7e894fbc5b312a3430daa9753524adc96b0"
+      ]
+    },
+    {
+      "stage": "tool_search_bank",
+      "step": 3
+    },
+    {
+      "stage": "tool_result",
+      "tool": "search",
+      "role": "bank",
+      "result_count": 1,
+      "evidence_ids": [
+        "ev_cc94423536040b2f8e30a5c0d8c3c59f4d61f526"
+      ]
+    },
+    {
+      "stage": "check",
+      "step": 4
+    },
+    {
+      "stage": "check_result",
+      "external_evidence": true,
+      "bank_evidence": true,
+      "confirmed_company_context": true
+    },
+    {
+      "stage": "baseline"
+    }
+  ],
+  "created_at": "2026-10-24T12:00:00Z"
+}

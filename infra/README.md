@@ -1,40 +1,50 @@
 # Docker
 
-Все команды выполняются из корня репозитория. Нужны Docker и Docker Compose.
-
-## Веб-интерфейс
+Из корня репозитория:
 
 ```sh
 docker compose up --build --wait
 ```
 
-Открыть http://localhost:4173. В контейнере nginx раздаёт готовые файлы React; Node нужен только при сборке. PHP-ядро в этот запуск не входит — его создаёт Backend. До подключения Core API интерфейс использует демонстрационные данные, сетевые функции отключены.
+Веб-интерфейс — http://localhost:4173. Node собирает React, nginx отдаёт готовые файлы. До подключения PHP Core интерфейс работает на демонстрационных данных; `/api/` отвечает `503`.
 
-Остановка: `docker compose down`. Порт можно изменить через `WEB_PORT` в `.env`.
+## Python
 
-## Наша Python-часть
-
-Пример без сети и ключей:
+Сквозной пример, сценарии и тесты без ключей:
 
 ```sh
-docker compose run --build --rm intelligence
-```
-
-Тесты без сетевого доступа:
-
-```sh
+docker compose run --build --rm intelligence demo
+docker compose run --build --rm intelligence evaluate
 docker compose run --build --rm intelligence-test
-docker compose run --build --rm web-test
 ```
 
-## Модели и расходы
+Конфиг моделей монтируется read-only в `/config/providers.json`. По умолчанию используется `apps/intelligence/examples/providers.template.json`; другой файл выбирается через `INTELLIGENCE_CONFIG_FILE` в `.env`. Ключи моделей передаются только Python-контейнерам. [Живой анализ и тарифы](../docs/llm-providers.md).
 
-По умолчанию конфиг берётся из `apps/intelligence/examples/providers.template.json` и доступен в контейнере как `/config/providers.json`. Свой файл можно выбрать переменной `INTELLIGENCE_CONFIG_FILE` в `.env`. Ключи `OPENROUTER_API_KEY` и `HACKATHON_API_KEY` передаются только Python-контейнеру при запуске.
+## Внутренний HTTP API
 
-Реальный запрос выполняется только явной командой `run`; [пример и тарифы](../docs/llm-providers.md). Обычный запуск и тесты модель не вызывают.
+В корневом `.env` задайте `INTELLIGENCE_SERVICE_TOKEN` и список `INTELLIGENCE_TENANTS`, например `demo`. При пустом значении приватные маршруты закрыты. Токен выбираете сами и передаёте только Backend.
 
-Журнал расходов хранится в volume `alfa-business-context-intelligence-state` и переживает удаление контейнера. Не используйте `docker compose down -v` для обычной остановки: это удаляет данные volume. Хостовый Python и контейнер используют разные журналы.
+```sh
+docker compose up --build --wait intelligence-api
+curl --fail http://localhost:8081/health
+```
 
-## Добавление PHP
+По умолчанию `INTELLIGENCE_MODE=baseline`. Значение `model` включает модель только для принятых запросов анализа. `INTELLIGENCE_PROFILE=openrouter` выбирает бесплатную Gemma `:free`; у хакатонного профиля предварительно заполняются тарифы. Пользовательский интерфейс обращается к PHP, внутренний Python API нужен Backend.
 
-Backend подключит собственное приложение и заменит ответ `503` для `/api/` в `apps/web/nginx.conf` на проксирование в PHP Core. Реализация ядра остаётся в его зоне.
+## Worker для Core
+
+После запуска PHP задайте `CORE_BASE_URL`, `CORE_SERVICE_TOKEN`, `INTELLIGENCE_TENANTS` и режим анализа в `.env`:
+
+```sh
+docker compose up --build intelligence-worker
+```
+
+Для однократного получения задания: `docker compose run --rm intelligence-worker worker --once --mode baseline`. [Маршруты и подтверждения](../contracts/intelligence/README.md). Без PHP worker не сможет получить задание; сам PHP этот Compose не создаёт.
+
+## Хранение и остановка
+
+`docker compose down` останавливает контейнеры. SQLite-корпус, результаты и журнал расходов остаются в volume `alfa-business-context-intelligence-state`. Не добавляйте `-v` для обычной остановки. Хостовый запуск использует отдельный каталог `apps/intelligence/.state`, итоги с Docker не объединяются.
+
+Тестовые контейнеры работают без сетевого доступа и не получают ключи. Веб-тесты: `docker compose run --build --rm web-test`.
+
+При прерванном запросе: `docker compose run --rm intelligence inspect`. Сначала остановите API/worker и проверьте неопределённый расход; только затем при необходимости `reset-request --tenant demo --request-id <ID> --confirm-stopped` или `reset-job --job-id <ID> --generation <N> --confirm-stopped`. Сброс не закрывает неопределённые записи денежного журнала и не гарантирует отсутствие повторного списания.

@@ -26,8 +26,9 @@ class ProviderError(RuntimeError):
     """Sanitized provider/response error; never includes body, headers, or key."""
 
     def __init__(self, code: str, message: str, *, billing_uncertain: bool = False,
-                 usage: Usage | None = None):
+                 usage: Usage | None = None, http_status: int | None = None):
         super().__init__(message)
         self.code = code
         self.billing_uncertain = billing_uncertain
         self.usage = usage
+        self.http_status = http_status

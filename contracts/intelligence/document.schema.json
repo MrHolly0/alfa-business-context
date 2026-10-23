@@ -1,0 +1,91 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "tenant_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Tenant Id",
+      "type": "string"
+    },
+    "source_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Source Id",
+      "type": "string"
+    },
+    "source_role": {
+      "enum": [
+        "external",
+        "bank"
+      ],
+      "title": "Source Role",
+      "type": "string"
+    },
+    "canonical_uri": {
+      "maxLength": 2048,
+      "title": "Canonical Uri",
+      "type": "string"
+    },
+    "title": {
+      "maxLength": 1000,
+      "title": "Title",
+      "type": "string"
+    },
+    "content": {
+      "maxLength": 26700000,
+      "title": "Content",
+      "type": "string"
+    },
+    "content_type": {
+      "enum": [
+        "text/plain",
+        "text/html",
+        "application/pdf",
+        "application/rss+xml"
+      ],
+      "title": "Content Type",
+      "type": "string"
+    },
+    "published_at": {
+      "format": "date-time",
+      "title": "Published At",
+      "type": "string"
+    },
+    "fetched_at": {
+      "format": "date-time",
+      "title": "Fetched At",
+      "type": "string"
+    },
+    "synthetic": {
+      "default": false,
+      "title": "Synthetic",
+      "type": "boolean"
+    },
+    "publisher": {
+      "default": "",
+      "maxLength": 500,
+      "title": "Publisher",
+      "type": "string"
+    },
+    "language": {
+      "default": "ru",
+      "maxLength": 24,
+      "title": "Language",
+      "type": "string"
+    }
+  },
+  "required": [
+    "tenant_id",
+    "source_id",
+    "source_role",
+    "canonical_uri",
+    "title",
+    "content",
+    "content_type",
+    "published_at",
+    "fetched_at"
+  ],
+  "title": "DocumentInput",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

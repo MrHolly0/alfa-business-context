@@ -1,0 +1,85 @@
+{
+  "schema_version": "analysis-job-v1",
+  "message_id": "demo-claim-message-1",
+  "job_id": "demo-analysis-job-1",
+  "tenant_scope": "demo",
+  "company_id": "demo-packaging",
+  "trace_id": "demo-trace-1",
+  "lease_generation": 1,
+  "input_versions": {
+    "context_version": 1,
+    "source_policy_version": 1,
+    "event_versions": [
+      {
+        "event_id": "demo-aluminium-event",
+        "revision": 1
+      }
+    ]
+  },
+  "deadline": "2026-10-24T12:05:00Z",
+  "lease_until": "2026-10-24T12:01:00Z",
+  "budget": {
+    "max_model_calls": 2,
+    "max_tokens": 60000,
+    "cost_reservation_rub": 5
+  },
+  "scope": {
+    "source_ids": [
+      "news-demo",
+      "bank-demo"
+    ],
+    "document_revision_refs": []
+  },
+  "analysis": {
+    "schema_version": "analysis-request-v1",
+    "request_id": "demo-aluminium-cfo-v1",
+    "tenant_id": "demo",
+    "company_id": "demo-packaging",
+    "as_of": "2026-10-24T12:00:00Z",
+    "context_version": 1,
+    "source_policy_version": 1,
+    "source_ids": [
+      "news-demo",
+      "bank-demo"
+    ],
+    "company": {
+      "name": "Упаковка Север (учебный пример)",
+      "industry": "Производство упаковки",
+      "description": "Синтетическая крупная компания, выручка 18 млрд рублей.",
+      "role": "Финансовый директор",
+      "dependencies": [
+        {
+          "dependency_id": "dep-aluminium",
+          "label": "алюминий",
+          "kind": "raw_material",
+          "status": "confirmed",
+          "provenance": "Синтетический ответ руководителя закупок от 2026-10-23; не платёжный граф"
+        }
+      ],
+      "facts": [
+        {
+          "fact_id": "fact-contract",
+          "text": "Цена по действующим договорам фиксирована до конца квартала.",
+          "provenance": "Синтетический профиль компании, версия 1"
+        }
+      ]
+    },
+    "event": {
+      "event_id": "demo-aluminium-event",
+      "title": "Учебная новость: поставки алюминия",
+      "text": "Синтетический пример. Поставщик объявил, что алюминий будет поставляться с задержкой в две недели. Изменение касается новых заказов. Цены действующих договоров в сообщении не указаны.",
+      "source_id": "news-demo",
+      "published_at": "2026-10-24T09:00:00Z",
+      "synthetic": true,
+      "revision": 1
+    },
+    "budget": {
+      "max_model_calls": 2,
+      "max_input_tokens": 24000,
+      "max_output_tokens": 2048,
+      "max_total_tokens": 60000,
+      "max_steps": 12
+    },
+    "synthetic": true
+  }
+}

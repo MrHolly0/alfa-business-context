@@ -1,17 +1,37 @@
 # Запуск и работа
 
-Основной способ запуска и проверки — [Docker](../infra/README.md).
+Основной способ — [Docker](../infra/README.md). Команды выполняются из корня репозитория.
 
 ## Python без Docker
 
-Нужен Python 3.12+. Из корня:
+Нужны Python 3.12+ и uv:
 
 ```sh
-PYTHONPATH=apps/intelligence python3 -m intelligence.llm
-PYTHONPATH=apps/intelligence python3 -m unittest discover -s apps/intelligence/tests -v
+cd apps/intelligence
+uv sync --frozen
+uv run --frozen python -m intelligence demo
+uv run --frozen python -m intelligence evaluate
+uv run --frozen python -m pytest -q
 ```
 
-## Сборка интерфейса без Docker
+Для ключа из корневого `.env` добавьте `--env-file ../../.env` к `uv run`. Без явного `--mode model` анализ выполняет baseline. Для живого примера:
+
+```sh
+uv run --frozen --env-file ../../.env python -m intelligence analyze \
+  --input examples/analysis-request.json --mode model --profile openrouter
+```
+
+После изменения зависимостей обновите lock и производные файлы контейнера:
+
+```sh
+uv lock
+uv export --frozen --no-dev --no-emit-project -o requirements.lock
+uv export --frozen --only-group dev --no-emit-project -o requirements-dev.lock
+```
+
+Проверьте команды и схемы: `uv run python scripts/export_contracts.py --check`. Без `--check` команда обновляет JSON Schema и OpenAPI в `contracts/intelligence`.
+
+## Интерфейс
 
 Нужен Node.js из `.nvmrc`:
 
@@ -22,10 +42,8 @@ npm --prefix apps/web run build
 npm --prefix apps/web run validate
 ```
 
-Результат — статические файлы `apps/web/dist`. Для просмотра используйте Docker nginx.
+Готовые файлы находятся в `apps/web/dist`, их отдаёт Docker/nginx. Python API не заменяет пользовательский PHP API.
 
 ## Передача работы
 
-Наша реализация — `apps/intelligence`. Форматы заданий и результатов согласуем с Backend через `contracts`; PHP-код он пишет в своей зоне. Frontend подключает экран к тому же формату.
-
-Перед передачей приложите пример входа и выхода, команду запуска и результат проверок. Если изменился формат, одновременно обновите описание и пример в `contracts`. Порядок задач — в [плане](backlog.md).
+Форматы Python-запросов и кандидата — в [contracts/intelligence](../contracts/intelligence/README.md). Backend реализует выдачу задания и сохранение результата на своей стороне; Frontend подключается к Core. Вместе проверяем пример с двумя компаниями и двумя ролями. Без реальных данных и прогонов модели не объявляем метрики качества достигнутыми.

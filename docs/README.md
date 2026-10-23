@@ -9,6 +9,8 @@
 
 По конкретной задаче:
 
+- [Реализованная Python-часть](../apps/intelligence/README.md).
+- [Форматы Python для Backend](../contracts/intelligence/README.md).
 - [Модели и расходы](llm-providers.md).
 - [HTTP-контракты и примеры](../contracts/README.md).
 - [Требования кейса](requirements.md).

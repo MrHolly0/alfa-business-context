@@ -1,6 +1,28 @@
 [project]
 name = "alfa-business-context-intelligence"
-version = "0.1.0"
-description = "Offline-first OpenAI-compatible provider and budget adapters"
+version = "0.2.0"
+description = "Documents, evidence search and company news analysis"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+  "defusedxml>=0.7.1,<0.8",
+  "fastapi>=0.115,<1",
+  "httpx>=0.28,<1",
+  "pydantic>=2.10,<3",
+  "pypdf>=6,<7",
+  "uvicorn>=0.34,<1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8,<10",
+]
+
+[project.scripts]
+intelligence = "intelligence.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["intelligence"]

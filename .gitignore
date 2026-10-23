@@ -18,3 +18,5 @@ apps/intelligence/.state/
 apps/intelligence/build/
 apps/intelligence/dist/
 apps/intelligence/*.local.json
+
+**/.pytest_cache/

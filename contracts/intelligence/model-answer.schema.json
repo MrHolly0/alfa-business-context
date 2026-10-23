@@ -1,0 +1,205 @@
+{
+  "$defs": {
+    "CandidateClaim": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_id": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Claim Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "external_fact",
+            "bank_view",
+            "model_hypothesis",
+            "recommendation",
+            "unknown"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "evidence_refs": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "context_refs": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Context Refs",
+          "type": "array"
+        },
+        "assumptions": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 30,
+          "title": "Assumptions",
+          "type": "array"
+        },
+        "alternatives": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 30,
+          "title": "Alternatives",
+          "type": "array"
+        },
+        "falsifiers": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 30,
+          "title": "Falsifiers",
+          "type": "array"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Origin"
+        }
+      },
+      "required": [
+        "claim_id",
+        "kind",
+        "text"
+      ],
+      "title": "CandidateClaim",
+      "type": "object"
+    },
+    "InfluenceEdge": {
+      "additionalProperties": false,
+      "properties": {
+        "edge_id": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Edge Id",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "evidence_refs": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "context_refs": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Context Refs",
+          "type": "array"
+        },
+        "provenance": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Provenance",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "confirmed",
+            "hypothesis"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "alternatives": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Alternatives",
+          "type": "array"
+        },
+        "falsifiers": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Falsifiers",
+          "type": "array"
+        }
+      },
+      "required": [
+        "edge_id",
+        "description",
+        "provenance",
+        "status"
+      ],
+      "title": "InfluenceEdge",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Only the fields the model is allowed to author.",
+  "properties": {
+    "summary": {
+      "maxLength": 5000,
+      "title": "Summary",
+      "type": "string"
+    },
+    "claims": {
+      "items": {
+        "$ref": "#/$defs/CandidateClaim"
+      },
+      "maxItems": 100,
+      "title": "Claims",
+      "type": "array"
+    },
+    "influence_chain": {
+      "items": {
+        "$ref": "#/$defs/InfluenceEdge"
+      },
+      "maxItems": 100,
+      "title": "Influence Chain",
+      "type": "array"
+    },
+    "clarifications": {
+      "items": {
+        "maxLength": 1000,
+        "type": "string"
+      },
+      "maxItems": 30,
+      "title": "Clarifications",
+      "type": "array"
+    }
+  },
+  "required": [
+    "summary",
+    "claims",
+    "influence_chain",
+    "clarifications"
+  ],
+  "title": "ModelAnswer",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

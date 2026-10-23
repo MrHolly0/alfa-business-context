@@ -1,0 +1,316 @@
+{
+  "$defs": {
+    "AnalysisBudget": {
+      "additionalProperties": false,
+      "properties": {
+        "max_model_calls": {
+          "default": 2,
+          "maximum": 3,
+          "minimum": 0,
+          "title": "Max Model Calls",
+          "type": "integer"
+        },
+        "max_input_tokens": {
+          "default": 24000,
+          "maximum": 24000,
+          "minimum": 1,
+          "title": "Max Input Tokens",
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "default": 2048,
+          "maximum": 2048,
+          "minimum": 1,
+          "title": "Max Output Tokens",
+          "type": "integer"
+        },
+        "max_total_tokens": {
+          "default": 60000,
+          "maximum": 60000,
+          "minimum": 1,
+          "title": "Max Total Tokens",
+          "type": "integer"
+        },
+        "max_steps": {
+          "default": 12,
+          "maximum": 12,
+          "minimum": 1,
+          "title": "Max Steps",
+          "type": "integer"
+        }
+      },
+      "title": "AnalysisBudget",
+      "type": "object"
+    },
+    "CompanyContext": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "industry": {
+          "default": "",
+          "maxLength": 1000,
+          "title": "Industry",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Description",
+          "type": "string"
+        },
+        "role": {
+          "default": "",
+          "maxLength": 1000,
+          "title": "Role",
+          "type": "string"
+        },
+        "dependencies": {
+          "items": {
+            "$ref": "#/$defs/ProvenancedDependency"
+          },
+          "maxItems": 100,
+          "title": "Dependencies",
+          "type": "array"
+        },
+        "facts": {
+          "items": {
+            "$ref": "#/$defs/CompanyFact"
+          },
+          "maxItems": 100,
+          "title": "Facts",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "CompanyContext",
+      "type": "object"
+    },
+    "CompanyFact": {
+      "additionalProperties": false,
+      "properties": {
+        "fact_id": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Fact Id",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "provenance": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Provenance",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fact_id",
+        "text",
+        "provenance"
+      ],
+      "title": "CompanyFact",
+      "type": "object"
+    },
+    "EventInput": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Event Id",
+          "type": "string"
+        },
+        "revision": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "title": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 100000,
+          "title": "Text",
+          "type": "string"
+        },
+        "source_id": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Source Id",
+          "type": "string"
+        },
+        "published_at": {
+          "format": "date-time",
+          "title": "Published At",
+          "type": "string"
+        },
+        "synthetic": {
+          "default": false,
+          "title": "Synthetic",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "event_id",
+        "title",
+        "text",
+        "source_id",
+        "published_at"
+      ],
+      "title": "EventInput",
+      "type": "object"
+    },
+    "ProvenancedDependency": {
+      "additionalProperties": false,
+      "properties": {
+        "dependency_id": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Dependency Id",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "kind": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "confirmed",
+            "hypothesis"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "provenance": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Provenance",
+          "type": "string"
+        }
+      },
+      "required": [
+        "dependency_id",
+        "label",
+        "kind",
+        "status",
+        "provenance"
+      ],
+      "title": "ProvenancedDependency",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "analysis-request-v1",
+      "default": "analysis-request-v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "request_id": {
+      "maxLength": 8000,
+      "minLength": 1,
+      "title": "Request Id",
+      "type": "string"
+    },
+    "tenant_id": {
+      "maxLength": 8000,
+      "minLength": 1,
+      "title": "Tenant Id",
+      "type": "string"
+    },
+    "company_id": {
+      "maxLength": 8000,
+      "minLength": 1,
+      "title": "Company Id",
+      "type": "string"
+    },
+    "as_of": {
+      "format": "date-time",
+      "title": "As Of",
+      "type": "string"
+    },
+    "context_version": {
+      "minimum": 1,
+      "title": "Context Version",
+      "type": "integer"
+    },
+    "source_policy_version": {
+      "minimum": 1,
+      "title": "Source Policy Version",
+      "type": "integer"
+    },
+    "source_ids": {
+      "items": {
+        "maxLength": 8000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 100,
+      "minItems": 1,
+      "title": "Source Ids",
+      "type": "array"
+    },
+    "document_revision_refs": {
+      "items": {
+        "maxLength": 8000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 500,
+      "title": "Document Revision Refs",
+      "type": "array"
+    },
+    "company": {
+      "$ref": "#/$defs/CompanyContext"
+    },
+    "event": {
+      "$ref": "#/$defs/EventInput"
+    },
+    "budget": {
+      "$ref": "#/$defs/AnalysisBudget"
+    },
+    "synthetic": {
+      "default": false,
+      "title": "Synthetic",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "request_id",
+    "tenant_id",
+    "company_id",
+    "as_of",
+    "context_version",
+    "source_policy_version",
+    "source_ids",
+    "company",
+    "event"
+  ],
+  "title": "AnalysisRequest",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

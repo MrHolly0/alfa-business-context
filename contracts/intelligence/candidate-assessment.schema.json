@@ -1,0 +1,486 @@
+{
+  "$defs": {
+    "CandidateClaim": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_id": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Claim Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "external_fact",
+            "bank_view",
+            "model_hypothesis",
+            "recommendation",
+            "unknown"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "evidence_refs": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "context_refs": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Context Refs",
+          "type": "array"
+        },
+        "assumptions": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 30,
+          "title": "Assumptions",
+          "type": "array"
+        },
+        "alternatives": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 30,
+          "title": "Alternatives",
+          "type": "array"
+        },
+        "falsifiers": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 30,
+          "title": "Falsifiers",
+          "type": "array"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Origin"
+        }
+      },
+      "required": [
+        "claim_id",
+        "kind",
+        "text"
+      ],
+      "title": "CandidateClaim",
+      "type": "object"
+    },
+    "Coverage": {
+      "additionalProperties": false,
+      "properties": {
+        "external": {
+          "minimum": 0,
+          "title": "External",
+          "type": "integer"
+        },
+        "bank": {
+          "minimum": 0,
+          "title": "Bank",
+          "type": "integer"
+        },
+        "confirmed_dependencies": {
+          "minimum": 0,
+          "title": "Confirmed Dependencies",
+          "type": "integer"
+        },
+        "company_facts": {
+          "minimum": 0,
+          "title": "Company Facts",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "external",
+        "bank",
+        "confirmed_dependencies",
+        "company_facts"
+      ],
+      "title": "Coverage",
+      "type": "object"
+    },
+    "EvidenceRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence_id": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "document_id": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Document Id",
+          "type": "string"
+        },
+        "document_revision_ref": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Document Revision Ref",
+          "type": "string"
+        },
+        "source_id": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Source Id",
+          "type": "string"
+        },
+        "source_role": {
+          "enum": [
+            "external",
+            "bank"
+          ],
+          "title": "Source Role",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "canonical_uri": {
+          "title": "Canonical Uri",
+          "type": "string"
+        },
+        "published_at": {
+          "format": "date-time",
+          "title": "Published At",
+          "type": "string"
+        },
+        "fetched_at": {
+          "format": "date-time",
+          "title": "Fetched At",
+          "type": "string"
+        },
+        "locator": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Locator",
+          "type": "string"
+        },
+        "quote": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Quote",
+          "type": "string"
+        },
+        "content_hash": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "synthetic": {
+          "title": "Synthetic",
+          "type": "boolean"
+        },
+        "score": {
+          "minimum": 0,
+          "title": "Score",
+          "type": "number"
+        }
+      },
+      "required": [
+        "evidence_id",
+        "document_id",
+        "document_revision_ref",
+        "source_id",
+        "source_role",
+        "title",
+        "canonical_uri",
+        "published_at",
+        "fetched_at",
+        "locator",
+        "quote",
+        "content_hash",
+        "synthetic",
+        "score"
+      ],
+      "title": "EvidenceRecord",
+      "type": "object"
+    },
+    "InfluenceEdge": {
+      "additionalProperties": false,
+      "properties": {
+        "edge_id": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Edge Id",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "evidence_refs": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "context_refs": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Context Refs",
+          "type": "array"
+        },
+        "provenance": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Provenance",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "confirmed",
+            "hypothesis"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "alternatives": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Alternatives",
+          "type": "array"
+        },
+        "falsifiers": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Falsifiers",
+          "type": "array"
+        }
+      },
+      "required": [
+        "edge_id",
+        "description",
+        "provenance",
+        "status"
+      ],
+      "title": "InfluenceEdge",
+      "type": "object"
+    },
+    "Versions": {
+      "additionalProperties": false,
+      "properties": {
+        "prompt": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Prompt",
+          "type": "string"
+        },
+        "pipeline": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Pipeline",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "context": {
+          "minimum": 1,
+          "title": "Context",
+          "type": "integer"
+        },
+        "source_policy": {
+          "minimum": 1,
+          "title": "Source Policy",
+          "type": "integer"
+        },
+        "as_of": {
+          "format": "date-time",
+          "title": "As Of",
+          "type": "string"
+        },
+        "event_id": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_revision": {
+          "minimum": 1,
+          "title": "Event Revision",
+          "type": "integer"
+        },
+        "event_document_revision_ref": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Event Document Revision Ref",
+          "type": "string"
+        },
+        "synthetic": {
+          "title": "Synthetic",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "prompt",
+        "pipeline",
+        "context",
+        "source_policy",
+        "as_of",
+        "event_id",
+        "event_revision",
+        "event_document_revision_ref",
+        "synthetic"
+      ],
+      "title": "Versions",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "candidate-assessment-v1",
+      "default": "candidate-assessment-v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "request_id": {
+      "title": "Request Id",
+      "type": "string"
+    },
+    "tenant_id": {
+      "title": "Tenant Id",
+      "type": "string"
+    },
+    "company_id": {
+      "title": "Company Id",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "ready",
+        "partial",
+        "unknown"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "execution_mode": {
+      "enum": [
+        "model",
+        "baseline"
+      ],
+      "title": "Execution Mode",
+      "type": "string"
+    },
+    "summary": {
+      "maxLength": 5000,
+      "title": "Summary",
+      "type": "string"
+    },
+    "claims": {
+      "items": {
+        "$ref": "#/$defs/CandidateClaim"
+      },
+      "title": "Claims",
+      "type": "array"
+    },
+    "evidence": {
+      "items": {
+        "$ref": "#/$defs/EvidenceRecord"
+      },
+      "title": "Evidence",
+      "type": "array"
+    },
+    "influence_chain": {
+      "items": {
+        "$ref": "#/$defs/InfluenceEdge"
+      },
+      "title": "Influence Chain",
+      "type": "array"
+    },
+    "clarifications": {
+      "items": {
+        "maxLength": 1000,
+        "type": "string"
+      },
+      "maxItems": 30,
+      "title": "Clarifications",
+      "type": "array"
+    },
+    "coverage": {
+      "$ref": "#/$defs/Coverage"
+    },
+    "versions": {
+      "$ref": "#/$defs/Versions"
+    },
+    "usage": {
+      "additionalProperties": true,
+      "title": "Usage",
+      "type": "object"
+    },
+    "trace": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Trace",
+      "type": "array"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "request_id",
+    "tenant_id",
+    "company_id",
+    "status",
+    "execution_mode",
+    "summary",
+    "coverage",
+    "versions",
+    "usage",
+    "trace",
+    "created_at"
+  ],
+  "title": "CandidateAssessment",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -2,11 +2,14 @@
 
 | Каталог | Что внутри | Состояние |
 |---|---|---|
-| `apps/web/src` | React и текущая логика экрана | Собирается в статические файлы |
-| `apps/web/public` | HTML, стили и изображения | Копируются в сборку |
-| `apps/core` | Описание будущего PHP-ядра | Реализация принадлежит Backend |
-| `apps/intelligence/intelligence` | Python-адаптеры моделей и журнал расходов | Работают CLI и тесты; анализ материалов предстоит сделать |
-| `contracts` | Форматы данных и примеры | Согласуются между участниками |
-| `infra` | Запуск контейнеров | Веб и Python проверяются независимо |
+| `apps/web/src` | React-интерфейс | Статическая сборка и учебные данные |
+| `apps/web/public` | HTML, стили, изображения | Копируются в сборку |
+| `apps/core` | Описание PHP-ядра | Реализация принадлежит Backend |
+| `apps/intelligence/intelligence/corpus.py` | Документы, версии, фрагменты и поиск | SQLite, фильтры по источникам/дате/tenant |
+| `apps/intelligence/intelligence/pipeline.py` | План, поиск, анализ, проверка результата | Baseline и явный вызов модели |
+| `apps/intelligence/intelligence/llm` | Адаптеры и учёт расходов | Хакатонный шлюз и OpenRouter `:free` |
+| `apps/intelligence/intelligence/worker.py` | Получение заданий и доставка кандидата | Проверяется с подставным Core |
+| `contracts/intelligence` | JSON Schema, OpenAPI и примеры | Реальный формат Python-стороны |
+| `infra` | Команды Docker | Web, Python CLI/API/worker и отдельные тесты |
 
-В рабочем веб-приложении нет Node backend. Контроллеры продукта создаёт Backend на PHP; наша зона — Python-анализ.
+Node backend отсутствует. Пользовательские контроллеры создаёт Backend на PHP. Подробная карта Python — в [README приложения](../apps/intelligence/README.md).

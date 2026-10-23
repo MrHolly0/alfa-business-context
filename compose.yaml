@@ -39,14 +39,14 @@ services:
       - no-new-privileges:true
     network_mode: none
 
-  intelligence:
+  intelligence: &intelligence
     profiles: [tools]
     build:
       context: .
       dockerfile: apps/intelligence/Dockerfile
       target: runtime
     init: true
-    environment:
+    environment: &intelligence-environment
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       HACKATHON_API_KEY: ${HACKATHON_API_KEY:-}
     volumes:
@@ -59,11 +59,38 @@ services:
           create_host_path: false
     read_only: true
     tmpfs:
-      - /tmp:rw,nosuid,nodev,size=16m
+      - /tmp:rw,nosuid,nodev,size=64m
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
+
+  intelligence-api:
+    <<: *intelligence
+    profiles: [analysis]
+    environment:
+      <<: *intelligence-environment
+      INTELLIGENCE_SERVICE_TOKEN: ${INTELLIGENCE_SERVICE_TOKEN:-}
+      INTELLIGENCE_TENANTS: ${INTELLIGENCE_TENANTS:-}
+    command: ["serve", "--host", "0.0.0.0", "--mode", "${INTELLIGENCE_MODE:-baseline}", "--config", "/config/providers.json", "--profile", "${INTELLIGENCE_PROFILE:-openrouter}"]
+    ports:
+      - "127.0.0.1:${INTELLIGENCE_PORT:-8081}:8081"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  intelligence-worker:
+    <<: *intelligence
+    profiles: [worker]
+    environment:
+      <<: *intelligence-environment
+      CORE_BASE_URL: ${CORE_BASE_URL:-http://core:8080}
+      CORE_SERVICE_TOKEN: ${CORE_SERVICE_TOKEN:-}
+      INTELLIGENCE_TENANTS: ${INTELLIGENCE_TENANTS:-}
+    command: ["worker", "--mode", "${INTELLIGENCE_MODE:-baseline}", "--config", "/config/providers.json", "--profile", "${INTELLIGENCE_PROFILE:-openrouter}"]
 
   intelligence-test:
     profiles: [test]

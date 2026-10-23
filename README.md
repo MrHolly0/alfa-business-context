@@ -11,7 +11,7 @@
 | PHP-ядро и API | `apps/core` | Backend |
 | Поиск, анализ и модели | `apps/intelligence` | ML |
 
-Наша текущая реализация — Python-компонент. PHP-ядро создаёт Backend: сейчас в `apps/core` только описание. Веб-приложение содержит интерфейс и демонстрационные данные. Node используется для его сборки и тестов, готовые файлы раздаёт nginx. Полный путь через PHP и Python ещё нужно соединить.
+Наша текущая реализация — Python-компонент. PHP-ядро создаёт Backend: сейчас в `apps/core` только описание. Веб-приложение содержит интерфейс и демонстрационные данные. Node используется для его сборки и тестов, готовые файлы раздаёт nginx. Python выполняет импорт, поиск, анализ и получение заданий; полный путь через настоящий PHP ещё нужно соединить.
 
 ## Запуск через Docker
 
@@ -21,10 +21,11 @@
 docker compose up --build --wait
 ```
 
-Python-пример без ключей и вызовов моделей:
+Сквозной Python-пример без ключей и вызовов моделей:
 
 ```sh
-docker compose run --build --rm intelligence
+docker compose run --build --rm intelligence demo
+docker compose run --rm intelligence evaluate
 ```
 
 Проверки:
@@ -42,3 +43,5 @@ docker compose run --build --rm intelligence-test
 - [Устройство проекта](docs/architecture.md).
 - [Docker и конфигурация](infra/README.md).
 - [Модели, ключи и расходы](docs/llm-providers.md).
+
+[Наша Python-часть: запуск, структура и реальные вызовы](apps/intelligence/README.md).

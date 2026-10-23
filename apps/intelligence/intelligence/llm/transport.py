@@ -60,7 +60,7 @@ class ChatCompletionTransport:
         except urllib.error.HTTPError as exc:
             status = exc.code
             raise ProviderError("provider_http_error", f"Provider returned HTTP {status}",
-                                billing_uncertain=status >= 500 or status in {408, 429}) from None
+                                billing_uncertain=status >= 500 or status in {408, 429}, http_status=status) from None
         except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException):
             raise ProviderError("provider_transport_error", "Provider request failed or timed out",
                                 billing_uncertain=True) from None

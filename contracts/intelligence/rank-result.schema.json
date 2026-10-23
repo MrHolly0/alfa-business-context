@@ -1,0 +1,166 @@
+{
+  "$defs": {
+    "ExcludedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "minLength": 1,
+          "title": "Event Id",
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "source_not_allowed",
+            "published_after_as_of"
+          ],
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "reason"
+      ],
+      "title": "ExcludedEvent",
+      "type": "object"
+    },
+    "MatchReason": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "confirmed_dependency",
+            "company_fact",
+            "company_name",
+            "industry",
+            "role_tiebreak"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "context_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Context Ref"
+        },
+        "text": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ],
+      "title": "MatchReason",
+      "type": "object"
+    },
+    "RankedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "minLength": 1,
+          "title": "Event Id",
+          "type": "string"
+        },
+        "score": {
+          "minimum": 0,
+          "title": "Score",
+          "type": "integer"
+        },
+        "relevance": {
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ],
+          "title": "Relevance",
+          "type": "string"
+        },
+        "reasons": {
+          "items": {
+            "$ref": "#/$defs/MatchReason"
+          },
+          "maxItems": 100,
+          "title": "Reasons",
+          "type": "array"
+        }
+      },
+      "required": [
+        "event_id",
+        "score",
+        "relevance",
+        "reasons"
+      ],
+      "title": "RankedEvent",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "event-ranking-v1",
+      "default": "event-ranking-v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "tenant_id": {
+      "minLength": 1,
+      "title": "Tenant Id",
+      "type": "string"
+    },
+    "ranked": {
+      "items": {
+        "$ref": "#/$defs/RankedEvent"
+      },
+      "title": "Ranked",
+      "type": "array"
+    },
+    "excluded": {
+      "items": {
+        "$ref": "#/$defs/ExcludedEvent"
+      },
+      "title": "Excluded",
+      "type": "array"
+    },
+    "unsupported_context": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Unsupported Context",
+      "type": "array"
+    },
+    "method": {
+      "const": "lexical-v1",
+      "default": "lexical-v1",
+      "title": "Method",
+      "type": "string"
+    },
+    "limitations": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Limitations",
+      "type": "array"
+    }
+  },
+  "required": [
+    "tenant_id",
+    "ranked",
+    "excluded",
+    "unsupported_context",
+    "limitations"
+  ],
+  "title": "RankResult",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
