@@ -2,6 +2,8 @@
 
 Сервис помогает руководителю понять, какие новости могут повлиять на его компанию, и увидеть основания, ограничения и неизвестное.
 
+[Начать работу с проектом](docs/handoff.md) · [Разработка](docs/development.md) · [Контракты](contracts/intelligence/README.md)
+
 ## Компоненты и границы
 
 | Часть | Каталог | Ответственность |
@@ -26,7 +28,7 @@ docker compose up --build --wait
 
 ```sh
 docker compose run --build --rm intelligence demo
-docker compose run --build --rm intelligence demo-data --output /tmp/demo-data.json
+docker compose run --build --rm intelligence demo-data
 docker compose run --build --rm intelligence evaluate --mode baseline
 docker compose run --build --rm intelligence-test
 docker compose run --build --rm web-test
