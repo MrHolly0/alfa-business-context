@@ -1,19 +1,19 @@
-> Архив версии интерфейса. Исторические описание и результаты; текущие состояние и команды — в [README приложения](../README.md).
+> Архив версии интерфейса. Текущие состояние и команды — в [README приложения](../README.md).
 
 # Иллюстрации версии 8
 
-Созданы встроенной генерацией изображений, по отдельному вызову на объект. Общая арт-дирекция:
+Объёмные иллюстрации используют белые поверхности, красные акценты `#EF3124`, прозрачный фон и единый ракурс. Силуэты рассчитаны на небольшие карточки интерфейса.
 
-> Use case: stylized-concept. One isolated 3D business illustration. Premium matte white ceramic and paper with Alfa scarlet #EF3124 accents, 3/4 isometric camera, soft studio light from upper left, square canvas, genuinely transparent background, no text or logos, clear silhouette at 56 px. One object fully visible with safe margins. No floating decorations or background shadow.
-
-| Тема | Сохранённый ассет | Отдельное описание |
+| Тема | Файл | Изображение |
 |---|---|---|
-| raw | web/assets/situation-raw.webp | two short rolls of white paper and one small red swatch, symbol of materials and procurement |
-| finance | web/assets/situation-finance.webp | a rounded white bank card standing in front of a small neat stack of white coins, card with a single red horizontal stripe, no glyphs |
-| logistics | web/assets/situation-logistics.webp | a compact white delivery truck with a bright red cargo box, solid wheels and no text |
-| demand | web/assets/situation-demand.webp | a sculptural white shopping bag with a red handle, simple recognizable silhouette |
-| software | web/assets/situation-software.webp | a white slightly open laptop with a blank red display, minimal thick rounded construction |
-| opportunity | web/assets/situation-opportunity.webp | a white circular bullseye target with red central disc and a single red arrow entering its center |
-| packaging | web/assets/situation-packaging.webp | a closed white cardboard box with a bright red tape strip across the top, a simple square compact silhouette |
+| Материалы | [situation-raw.webp](../public/assets/situation-raw.webp) | Рулоны бумаги |
+| Финансы | [situation-finance.webp](../public/assets/situation-finance.webp) | Карта и монеты |
+| Логистика | [situation-logistics.webp](../public/assets/situation-logistics.webp) | Грузовик |
+| Спрос | [situation-demand.webp](../public/assets/situation-demand.webp) | Сумка для покупок |
+| Технологии | [situation-software.webp](../public/assets/situation-software.webp) | Ноутбук |
+| Возможности | [situation-opportunity.webp](../public/assets/situation-opportunity.webp) | Мишень |
+| Упаковка | [situation-packaging.webp](../public/assets/situation-packaging.webp) | Коробка |
 
-Оригиналы PNG хранятся рядом под теми же именами. Для веб-доставки выполнено только кодирование в lossless WebP: все декодированные RGBA-пиксели сравнены с исходником и совпадают. Изображения просмотрены отдельно и в интерфейсе. Контрольные иконки интерфейса остаются векторными Lucide.
+В `public/assets` также находятся шесть WebP-изображений персонажа. В интерфейсе используются состояния [покоя](../public/assets/01_calm_right.webp) и [внимания](../public/assets/03_listening_right.webp). PNG-дубликаты в веб-сборку не включаются. При преобразовании персонажа в WebP проверено точное совпадение RGBA-пикселей с оригиналами.
+
+Иконки интерфейса — векторные Lucide. Условия использования материалов перечислены в [сведениях о сторонних компонентах](../../../THIRD_PARTY_NOTICES.md).
