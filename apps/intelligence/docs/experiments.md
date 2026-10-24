@@ -12,7 +12,7 @@
 
 ```sh
 cd apps/intelligence
-uv run pytest tests/test_experiments.py tests/test_contenders.py
+.venv/bin/python -m pytest -q -p no:cacheprovider tests/test_experiments.py tests/test_contenders.py
 ```
 
 В CLI USD и RUB учитываются в отдельных постоянных пулах. Проверка без сети: `python -m intelligence arena budget --config examples/providers.paid.template.json --profile openrouter`. Смена валюты не обнуляет общий счёт соответствующего провайдера.

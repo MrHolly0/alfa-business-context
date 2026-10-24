@@ -19,6 +19,7 @@ from .events import ImpactPackage
 
 PROMPT_VERSION = "analysis-v2"
 PIPELINE_VERSION = "bounded-pipeline-v1"
+MAX_MODEL_EVENT_CHARS = 2_000
 MAX_QUERY_CHARS = 320
 MAX_EVIDENCE = 16
 ANALYST_PREFERENCE_GUIDANCE = (
@@ -277,6 +278,9 @@ class AnalysisPipeline:
             usage["errors"].append("model_call_budget_zero")
             return self._empty_payload(evidence)
         context = self._context_payload(request)
+        if context["event_text_truncated"]:
+            trace.append({"stage": "event_context_bounded", "original_characters": len(request.event.text),
+                          "projected_characters": len(context["event"]["text"])})
         user_base = files("intelligence.prompts").joinpath(f"{PROMPT_VERSION}.user.ru.txt").read_text("utf-8")
         system = files("intelligence.prompts").joinpath(f"{PROMPT_VERSION}.system.ru.txt").read_text("utf-8")
         payload = {"REQUEST_CONTEXT": context, "RETRIEVED_EVIDENCE": evidence,
@@ -559,6 +563,10 @@ class AnalysisPipeline:
         if missing_confirmation:
             clarifications.append("Уточните наблюдаемый показатель или событие, которое подтвердит гипотезу.")
             status = "partial"
+        limitations = []
+        if len(request.event.text) > MAX_MODEL_EVENT_CHARS:
+            limitations.append("event_text_excerpt_only")
+            if status == "ready": status = "partial"
         return CandidateAssessment(request_id=request.request_id, tenant_id=request.tenant_id,
             company_id=request.company_id, status=status,
             execution_mode="baseline" if self.llm is None else "model",
@@ -570,7 +578,7 @@ class AnalysisPipeline:
                       "bank": sum(e["source_role"] == "bank" for e in evidence),
                       "confirmed_dependencies": sum(d.status == "confirmed" and self._context_is_current(d, request.as_of)
                                                      for d in request.company.dependencies),
-                      "company_facts": len(request.company.facts)},
+                      "company_facts": len(request.company.facts), "limitations": limitations},
             versions={"prompt": PROMPT_VERSION, "analyst_config": config.ref if config else "baseline@1", "pipeline": PIPELINE_VERSION,
                       "model": next((a.get("model") for a in reversed(usage["attempts"]) if a.get("model")), None),
                       "context": request.context_version, "source_policy": request.source_policy_version,
@@ -582,8 +590,13 @@ class AnalysisPipeline:
 
     @staticmethod
     def _context_payload(request):
-        return {"company": request.company.model_dump(mode="json"),
-                "event": request.event.model_dump(mode="json"),
+        event = request.event.model_dump(mode="json")
+        # This projection never changes the request or its pinned corpus revision.
+        # Exact primary quotes remain available in RETRIEVED_EVIDENCE.
+        event["text"] = request.event.text[:MAX_MODEL_EVENT_CHARS]
+        return {"company": request.company.model_dump(mode="json"), "event": event,
+                "event_original_characters": len(request.event.text),
+                "event_text_truncated": len(request.event.text) > MAX_MODEL_EVENT_CHARS,
                 "context_version": request.context_version,
                 "source_policy_version": request.source_policy_version}
 

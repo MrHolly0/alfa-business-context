@@ -35,6 +35,7 @@ class ArtifactStore:
                   response TEXT NOT NULL, PRIMARY KEY (tenant_id, request_id));
                 CREATE TABLE IF NOT EXISTS reservations (
                   tenant_id TEXT NOT NULL, request_id TEXT NOT NULL, payload_hash TEXT NOT NULL,
+                  owner_token TEXT,
                   PRIMARY KEY (tenant_id, request_id));
                 CREATE TABLE IF NOT EXISTS outbox (
                   message_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, payload TEXT NOT NULL,
@@ -62,6 +63,9 @@ class ArtifactStore:
                                      ("last_error", "TEXT")):
                 if name not in columns:
                     db.execute(f"ALTER TABLE outbox ADD COLUMN {name} {definition}")
+            reservation_columns = {row[1] for row in db.execute("PRAGMA table_info(reservations)")}
+            if "owner_token" not in reservation_columns:
+                db.execute("ALTER TABLE reservations ADD COLUMN owner_token TEXT")
             db.execute("UPDATE outbox SET retry_deadline=strftime('%s',created_at)+86400 WHERE retry_deadline=0")
 
     @contextmanager
@@ -84,9 +88,18 @@ class ArtifactStore:
         if row["payload_hash"] != body_hash: raise ValueError("idempotency_conflict")
         return json.loads(row["response"])
 
-    def save_candidate(self, tenant_id: str, request_id: str, body_hash: str, response: Any):
+    def save_candidate(self, tenant_id: str, request_id: str, body_hash: str, response: Any,
+                       owner_token: str | None = None):
         encoded = canonical_json(response)
         with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if owner_token is not None:
+                reservation = db.execute(
+                    "SELECT payload_hash,owner_token FROM reservations WHERE tenant_id=? AND request_id=?",
+                    (tenant_id, request_id),
+                ).fetchone()
+                if not reservation or reservation["payload_hash"] != body_hash or reservation["owner_token"] != owner_token:
+                    raise ValueError("reservation_owner_mismatch")
             try:
                 db.execute("INSERT INTO candidates VALUES (?,?,?,?)", (tenant_id, request_id, body_hash, encoded))
                 db.execute("DELETE FROM reservations WHERE tenant_id=? AND request_id=?", (tenant_id, request_id))
@@ -98,20 +111,41 @@ class ArtifactStore:
 
     def reserve_candidate(self, tenant_id: str, request_id: str, body_hash: str) -> bool:
         """Atomically reserve one execution; matching in-flight retries never run the model twice."""
+        return self.claim_candidate(tenant_id, request_id, body_hash) is not None
+
+    def claim_candidate(self, tenant_id: str, request_id: str, body_hash: str) -> str | None:
+        """Create an execution reservation and return its fencing token.
+
+        A matching retry receives no token while the first owner is active or
+        after an interrupted/uncertain execution. Only that token may complete
+        or release the reservation.
+        """
+        owner_token = uuid.uuid4().hex
         with self._db() as db:
             if db.execute("SELECT 1 FROM candidates WHERE tenant_id=? AND request_id=?", (tenant_id, request_id)).fetchone():
-                return False
+                return None
             try:
-                db.execute("INSERT INTO reservations VALUES (?,?,?)", (tenant_id, request_id, body_hash))
-                return True
+                db.execute("INSERT INTO reservations(tenant_id,request_id,payload_hash,owner_token) VALUES (?,?,?,?)",
+                           (tenant_id, request_id, body_hash, owner_token))
+                return owner_token
             except sqlite3.IntegrityError:
                 row = db.execute("SELECT payload_hash FROM reservations WHERE tenant_id=? AND request_id=?", (tenant_id, request_id)).fetchone()
                 if row["payload_hash"] != body_hash: raise ValueError("idempotency_conflict")
-                return False
+                return None
+
+    def release_candidate(self, tenant_id: str, request_id: str, body_hash: str, owner_token: str) -> bool:
+        """Release a reservation only for its owner and only with the matching request hash."""
+        if not owner_token:
+            return False
+        with self._db() as db:
+            return db.execute(
+                "DELETE FROM reservations WHERE tenant_id=? AND request_id=? AND payload_hash=? AND owner_token=?",
+                (tenant_id, request_id, body_hash, owner_token),
+            ).rowcount == 1
 
     def list_reservations(self):
         with self._db() as db:
-            return [dict(row) for row in db.execute("SELECT tenant_id,request_id,payload_hash FROM reservations ORDER BY tenant_id,request_id")]
+            return [dict(row) for row in db.execute("SELECT tenant_id,request_id,payload_hash,owner_token FROM reservations ORDER BY tenant_id,request_id")]
 
     def reset_candidate(self, tenant_id: str, request_id: str, *, force: bool = False):
         """Operator recovery only after stopping the caller and reviewing uncertain provider spend."""

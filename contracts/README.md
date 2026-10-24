@@ -1,10 +1,10 @@
 # API и сообщения: текущий прототип и проектный контракт
 
-Реализованная Python-сторона и актуальные схемы — в [intelligence](intelligence/README.md). Ниже сохранён общий проектный draft пользовательского PHP API. JSON в `examples/` синтетический; `*-draft-1` не является runtime-форматом. Веб-интерфейс backend API не реализует.
+Реализованная Python-сторона, JSON-модели и внутренние маршруты описаны в [intelligence contracts](intelligence/README.md). Ниже — проектный draft пользовательского PHP API и будущей инфраструктуры; эти маршруты не являются запущенным backend. JSON в `examples/` синтетический; `*-draft-1` не является runtime-форматом.
 
 ## Текущее состояние
 
-Веб-контейнер раздаёт только статический интерфейс. Реализация PHP Core принадлежит Backend и пока не подключена. Запросы `/api/` получают `503`; Node backend удалён из рабочего приложения.
+Web-контейнер раздаёт только статический интерфейс через nginx. Node.js используется для сборки и тестов, не как backend runtime. PHP Core пока не подключён; запросы `/api/` получают `503`. Python AI/Data реализует внутренние `POST /internal/v1/analyze`, `POST /internal/v1/search`, `POST /internal/v1/rank`, `POST /internal/v1/sources/probe`, документы/originals и execution inspection. Это внутренние сервисные маршруты, не public user API и не замена Core authorization.
 
 Примеры ниже задают будущий формат обмена, а не работающие маршруты.
 

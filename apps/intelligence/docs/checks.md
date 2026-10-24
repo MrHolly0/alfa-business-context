@@ -2,6 +2,6 @@
 
 Текущие результаты хоста, Docker, живых моделей и реального RSS собраны в [едином отчёте](../../../docs/ai-live-checks.md). Там отдельно указаны списания OpenRouter, доступность шлюза Альфы, обнаруженные ошибки и границы проверки качества.
 
-Команда полного локального набора: `python -m pytest -q -p no:cacheprovider tests` из `apps/intelligence`. Docker: `docker compose --env-file /dev/null run --build --rm intelligence-test` из корня. Сетевые проверки не входят в pytest и не запускаются при обычной сборке.
+Команда полного локального набора из `apps/intelligence`: `.venv/bin/python -m pytest -q -p no:cacheprovider tests`. Docker-команда из корня: `docker compose --env-file /dev/null run --build --rm intelligence-test`. Сетевые проверки не входят в pytest и не запускаются при обычной сборке.
 
 Проверки со стендом охватывают настоящий CoreClient/Worker, lease, heartbeat, stale versions, отмену, рестарт и повторную доставку. Стенд не является Symfony; настоящий Core/UI пока не подключён. Программные проверки цитат и ссылок не доказывают смысловую точность. Независимая экспертная разметка и предоставленный банковский корпус остаются внешними условиями приёмки.

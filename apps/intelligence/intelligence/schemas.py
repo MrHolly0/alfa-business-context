@@ -56,7 +56,7 @@ class EventInput(StrictModel):
     event_id: NonEmpty
     revision: int = Field(default=1, ge=1)
     title: NonEmpty
-    text: Annotated[str, Field(max_length=100_000)]
+    text: Annotated[str, Field(max_length=2_000_000)]
     source_id: NonEmpty
     published_at: datetime
     synthetic: bool = False
@@ -182,6 +182,8 @@ class Coverage(StrictModel):
     limitations: list[str] = Field(default_factory=list, max_length=30)
     checked_at: datetime | None = None
     independent_origins: int = Field(default=0, ge=0)
+    origin_groups: int = Field(default=0, ge=0)
+    independence_status: Literal["unknown", "supported"] = "unknown"
 
 
 class Versions(StrictModel):

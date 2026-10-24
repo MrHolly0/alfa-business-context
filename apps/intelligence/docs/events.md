@@ -1,8 +1,8 @@
-# Event grouping, shared impact packages and period research
+# События, общие пакеты и периодный анализ
 
-`intelligence.events.EventStore` adds a durable, tenant-scoped event layer beside `CorpusStore`. It accepts Corpus-compatible document fields, groups publication revisions, extracts attributed claims, and caches a shared `ImpactPackage`. `intelligence.research` provides evidence-bounded dependency paths, observation-only period calculations, and reassessment signatures. These are Python module contracts; they are not yet wired into the existing analysis pipeline or HTTP/job entry points.
+`intelligence.events.EventStore` хранит события и публикации с разделением по tenant рядом с `CorpusStore`. Он группирует версии публикаций, извлекает атрибутированные утверждения и кеширует общий `ImpactPackage`. `DataWorkflow` использует эти функции при обработке разрешённого снимка; HTTP API и Worker принимают `DataTask`. Fixture Core stand проверяет контракт заданий и публикаций, но не заменяет PHP Core.
 
-## Ingest a Corpus document
+## Добавить документ в событие
 
 ```python
 from intelligence.events import EventStore
@@ -27,13 +27,13 @@ publication = {
 stored = store.ingest(publication)
 ```
 
-The returned value contains `tenant_id`, `event_id`, event `revision`, `publication_id`, `publication_revision`, `content_hash`, grouping reason, and whether the stored state changed. In production, `data_classification` is supplied from the persisted Core source grant, never trusted from a task payload. Canonical URL identity is scoped by tenant and source. Tracking parameters and fragments are removed. Re-fetching identical content is idempotent. A changed publication appends a revision; adding an independently sourced copy updates the event snapshot. Near-duplicate grouping uses a high text similarity threshold and a seven-day publication window. It is a review grouping hint only and never increases the independent-origin count. Similar subject matter below that threshold remains separate.
+Результат содержит `tenant_id`, `event_id`, ревизии события и публикации, `publication_id`, `content_hash`, причину группировки и признак изменения. В рабочем запуске классификация берётся из сохранённого Core grant, а не из текста задания. Идентификатор URL ограничен tenant и source; tracking-параметры и fragment удаляются. Повтор одинакового содержимого идемпотентен. Изменённая публикация добавляет версию; копия из другого источника обновляет снимок события. Близкие дубликаты группируются по сходству текста в пределах семи дней. Это только подсказка для проверки, она не увеличивает число независимых источников.
 
-`origin_group_id` may be supplied by the source adapter. Otherwise the canonical host is used as a conservative origin group. The store never assumes that different URLs or similar texts are independent. Each ingested publication revision also keeps the Core-assigned `data_classification`. An input marked `synthetic=True` is stored as `synthetic`; otherwise the classification defaults to `confidential`. A task-level request cannot upgrade a persisted source classification.
+Адаптер источника может задать `origin_group_id`; иначе используется host canonical URL. Разные URL и похожий текст сами по себе не считаются независимыми. Каждая версия публикации хранит Core-классификацию. `synthetic=True` сохраняется как `synthetic`; иначе по умолчанию используется `confidential`. Задание не может повысить сохранённую классификацию.
 
-## Read under the current source policy
+## Читать с текущей политикой источников
 
-Every read or package build requires tenant, policy identity/version, and the allowed source IDs supplied by Core:
+Для чтения и сборки пакета нужны tenant, ID и версия политики, а также разрешённые Core source IDs:
 
 ```python
 snapshot = store.get_event(
@@ -48,10 +48,9 @@ original = store.original(
 )
 ```
 
-Policy filtering is applied before returning source text or building claims. A source excluded from the current policy cannot enter the package from another publication, event revision, or tenant. Callers may request an earlier event revision for audit; its publication content is pinned to the exact version recorded in that snapshot.
-Callers that have a narrower Core document snapshot can also pass `allowed_document_revision_refs=[...]` to `get_event`, `original`, `extract_claims`, or `build_impact_package`; reads and package sources are then restricted to those exact references.
+Фильтр применяется до возврата текста и сборки утверждений. Исключённый источник не попадёт в пакет из другой публикации, ревизии события или tenant. Для аудита можно запросить старую ревизию события; содержимое публикаций при этом закреплено за версиями из того снимка. Если Core передал более узкий набор документов, укажите `allowed_document_revision_refs` — чтение ограничится точными ссылками на ревизии.
 
-## Claims and shared package
+## Утверждения и общий пакет
 
 ```python
 package = store.build_impact_package(
@@ -63,51 +62,62 @@ package = store.build_impact_package(
 payload = package.model_dump(mode="json")
 ```
 
-`ImpactPackage` is a Pydantic model and includes `package_id`, tenant/event/revision, claims, source references, coverage, model/prompt/policy versions, and bounded literal entities, territories and resources. `mechanisms` contains conditional `ImpactMechanism` hypotheses with an explicit horizon, conditions, alternatives, falsifiers, and the publication IDs supporting the mechanism. Every mechanism reference must belong to a publication that has a quote-validated claim. The older `possible_mechanisms` string field remains as a compatibility view of accepted mechanism descriptions. These mechanisms are hypotheses, not causal findings. The package ID includes event revision, tenant, policy ID/version, allowed source IDs, exact allowed document revisions when supplied, and model/prompt identity. It is cached in SQLite and reused across company analyses using the same tenant and policy snapshot. Source references include persisted classification, canonical URI, exact source content hash, publication metadata, origin group, and optional Corpus revision reference; `original()` retrieves the exact text while policy permits it.
+`ImpactPackage` содержит `package_id`, tenant/event/revision, утверждения, ссылки на источники, coverage, версии модели/prompt/политики и ограниченные списки entities, territories и resources. `mechanisms` содержит условные гипотезы с горизонтом, условиями, альтернативами, опровержениями и ссылками на публикации. Ссылка механизма должна вести на публикацию с проверенной цитатой. Это гипотезы, а не выводы о причинности. ID пакета учитывает ревизию события, tenant, политику, разрешённые источники и, если задано, точные ревизии документов. Пакет кешируется в SQLite и переиспользуется для компаний с тем же снимком политики. Ссылки содержат сохранённую классификацию, canonical URI, hash текста, метаданные и origin group. `original()` возвращает точный текст, пока действует разрешение.
 
-An external extractor call is allowed only when every included publication revision is persisted as `public` or `synthetic`; this check runs before both claim-cache and package-cache lookup. It receives at most 10,000 UTF-8 bytes of publication text total, uses a 24,000-byte-conservative input-token cap, and makes one call. It receives no company profile or private facts. LLM claims require exact quotes in the identified permitted publication. Entities, territories, and resources are retained only when they are literal strings present in allowed source text. Mechanisms with malformed fields or publication references outside the validated claims are dropped with explicit coverage limitations. Programmatic guards downgrade a claim labeled `fact` when its quote explicitly contains opinion or forecast wording.
+Внешний вызов извлекателя разрешён только если каждая включённая публикация сохранена как `public` или `synthetic`; проверка выполняется до чтения кеша. В модель передаётся не более 10 000 UTF-8 байт публикаций, не передаётся профиль компании и делается не более одного вызова. Вызовы одного ключа сериализуются межпроцессной блокировкой. Перед вызовом сохраняется durable reservation: если процесс оборвался после возможной отправки запроса, следующий запуск использует атрибутированные цитаты без модели и помечает неопределённость, вместо слепого повторения платного вызова. Каждое модельное утверждение обязано содержать точную цитату из разрешённой публикации. Entities, territories и resources сохраняются только как буквальные фрагменты текста. Некорректные механизмы отбрасываются с ограничением в coverage. Программная проверка понижает `fact`, если цитата явно содержит мнение или прогноз.
 
-When `LLMService` is absent or returns malformed/unverifiable output, the deterministic path treats exact source excerpts as `reported_fact` claims with a note that source attribution does not establish truth. Failed semantic extraction stores a safe error class, a fallback mode, and limitations; it does not claim successful mechanism extraction. The model cannot make a quote into independent corroboration; distinct `origin_group_id` values are counted separately. Exact package and semantic claim-extraction caches are tenant-, policy-, allow-list-, model-, and prompt-scoped. The semantic cache stores both validated claims and bounded semantic fields, keyed on source content hashes and origin groups, so another receipt for the same content from an already represented origin does not trigger another model parse; the receipt remains in the package source list. A new origin changes the semantic signature. Prompt/cache identity is versioned as `event-claims-v2` and `event-impact-v2`.
+Если `LLMService` отсутствует или ответ некорректен, детерминированный путь сохраняет точные отрывки как `reported_fact` и указывает, что атрибуция источнику не подтверждает истинность. Сбой семантического извлечения оставляет безопасный код ошибки, fallback и ограничения; система не заявляет, что извлекла механизмы.
 
-## Business impact paths
+Coverage раздельно показывает число разрешённых публикаций (`permitted_publications`), число подписанных групп происхождения (`origin_group_count`) и консервативное число групп после слияния точных копий (`independent_origin_groups`). Точное совпадение content hash на разных host/group labels не считается вторым подтверждением и добавляет limitation. Статус независимости остаётся `unknown`: ни разные домены, ни разные origin IDs сами по себе не доказывают редакционную независимость. Похожие, но не дословно одинаковые тексты также не доказывают независимость.
 
-`intelligence.research.DependencyEdge` represents one dependency supplied by a caller. Each edge requires status, evidence reference, evidence basis, and optional validity dates. `impact_candidates(package, company_id, edges, as_of=..., max_hops=2)` returns paths of at least two and at most three supplied edges that terminate at an explicit package entity. It does not create edges or infer purchase/supply relationships from payment observations. A returned path says only that a possible dependency path exists; it does not assert that the event caused a business outcome.
+Кеши ограничены tenant, политикой, allow-list, моделью и версией prompt. Семантический кеш учитывает хеши текста и origin groups: новая квитанция того же источника не запускает повторный разбор, но остаётся в списке источников пакета. Ключ пакета включает версию семантики coverage, поэтому ранее сохранённый пакет со старым подсчётом перепечаток не выдаётся повторно. Версии кеша: `event-claims-v2`, `event-impact-v2` и `origin-independence-v2`.
 
-The caller remains responsible for loading company dependencies under the correct tenant and including only evidence refs it is authorized to use. The input edge list must represent business relationships already established by the owning Core/data layer.
+## Пути возможного влияния
 
-Before deciding which authorized companies receive a full personalized model analysis,
-`select_affected_businesses(package, businesses, as_of=..., max_hops=3)` can rank a
-provided company snapshot using its actual `dependency_graph`, `CompanyContext`
-dependencies and facts. It matches only explicit package entities, resources and
-territories, with conservative token/suffix normalization. Direct one-edge matches
-appear in this selection API; the existing `impact_candidates(...)` compatibility
-API continues to return only two- or three-edge paths. A payment observation is not
-accepted as a dependency edge. Future or expired edges are excluded at `as_of`.
+`intelligence.research.DependencyEdge` описывает переданную зависимость с состоянием, ссылкой на основание и необязательными датами действия. `impact_candidates(...)` возвращает пути из двух или трёх таких рёбер до сущности из пакета. Он не создаёт связи и не выводит отношения поставки из агрегатов платежей. Путь показывает возможную связь, но не доказывает бизнес-эффект события.
 
-The result is one `ImpactSelection` per supplied business, sorted by heuristic score
-and company ID. `status="no_signal_found"` and zero score mean only that the supplied
-snapshot had no matching signal; they do not mark a company safe. Scores are deterministic **queue-priority hints**, not probabilities,
-semantic model confidence, or evidence that a business will be affected. Explicit
-active confirmed dependency paths rank highest; assumed paths, facts and text matches
-rank lower; industry-only overlap is a weak signal. A zero score means no match was
-found in the supplied snapshot, not that the company is safe. Each row includes
-matched nodes, evidence-backed paths, context/source coverage, package limitations
-and uncertainty reasons. A caller may use this ordering to prioritize scheduled work
-and avoid low-signal scheduled model calls, but must retain the no-match state as
-`not evaluated` and allow explicit manual analysis. It must not claim a negative
-impact finding from a skipped analysis.
+Вызывающая сторона отвечает за загрузку зависимостей правильного tenant и за передачу только разрешённых evidence refs. Рёбра должны описывать отношения, уже заданные Core или владельцем данных.
 
-This selection step uses only the company snapshots already supplied by the caller;
-it never searches for another company's private context. The heuristic is not a
-trained or quality-validated ranking model and does not replace the personalized
-analysis and hard evidence checks.
+`select_affected_businesses(...)` ранжирует переданный снимок компании по его
+`dependency_graph`, зависимостям и фактам. Он сопоставляет явные entities,
+resources и territories пакета с консервативной нормализацией. Прямые связи доступны
+в этом отборе; `impact_candidates(...)` по-прежнему возвращает пути только из двух
+или трёх рёбер. Наблюдение платежа не считается зависимостью. Будущие и истёкшие
+рёбра исключаются на дату `as_of`.
 
-## Period calculations and reassessment
+Результат содержит по одному `ImpactSelection` на каждую переданную компанию и
+сортируется по эвристическому score и ID. `no_signal_found` и нулевой score означают,
+что в переданном снимке совпадение не найдено; они не означают, что компания в
+безопасности. Score — только подсказка для очереди, не вероятность и не уверенность
+модели. Подтверждённые активные пути ранжируются выше предположений и текстовых
+совпадений; отраслевое совпадение — слабый сигнал. Результат включает найденные
+узлы, пути, coverage и причины неопределённости. Workflow использует порог только
+для пропуска слабосигнального планового вызова; ручной анализ остаётся доступен.
+Пропуск обозначается как `not evaluated`, а не как отрицательное заключение.
 
-`analyze_period(observations, period_start=..., period_end=..., known_at=..., mode="retrospective"|"as_known")` accepts only supplied numeric observations with a metric, unit, observed time, availability time, revision, and source reference. It selects the latest version per observation ID, calculates first-to-last changes in code, and excludes observations or revisions from the future. `as_known` uses only revisions available by `known_at`; `retrospective` uses the latest supplied revisions available at the current run time. Coverage reports selected revisions, excluded later revisions, source refs, and multi-point metrics. Results are descriptive and explicitly make no causal attribution.
+Отбор использует только переданные снимки и не ищет закрытый контекст других
+компаний. Эвристика не обучена и не прошла проверку качества; она не заменяет
+персональный анализ и строгую проверку свидетельств.
 
-`reassess(previous, current)` signs only event/evidence refs, company context, source policy, analyst config, model, and prompt versions. It returns a field-by-field change report and `publication_revision_required=False` when a repeated check has no decision-relevant changes. Callers should persist that signature with their own candidate revision; this helper does not publish a business situation or write to Core.
+## Периоды и повторная оценка
 
-## Integration boundary
+`analyze_period(...)` принимает только переданные числовые наблюдения с метрикой,
+единицей, временем измерения и доступности, ревизией и ссылкой на источник. Код
+выбирает последнюю доступную версию и считает изменение от первого до последнего
+наблюдения. `as_known` ограничен `known_at`; `retrospective` использует версии,
+доступные на момент запуска. Расчёт описательный и не доказывает причинность.
 
-The current implementation does not fetch RSS/API/URLs, manage source policy, schedule background jobs, query `CorpusStore` automatically, maintain a company dependency graph, or publish/revise a product situation. The collection adapter or Core job worker must pass authorized `CorpusStore` document revisions and source-policy snapshots into these APIs. Full HTTP integration, backfill scheduling, graph storage, and publication fencing remain separate work. SQLite persistence here is a local module store, not the proposed shared bank PostgreSQL deployment.
+`reassess(previous, current)` подписывает событие/evidence refs, контекст компании,
+политику, analyst config, модель и версии prompt. Он возвращает сравнение полей и
+`publication_revision_required=False`, если значимых изменений нет. Вызывающая
+сторона сама сохраняет подпись и публикует кандидата; helper не пишет в Core.
+
+## Границы интеграции
+
+Сбор RSS/API/URL выполняет `NewsCollector`; Core передаёт разрешённую политику,
+контекст и снимок компаний в `DataTask`. Workflow сам выбирает разрешённые ревизии
+корпуса, собирает события и пакеты, запускает анализ и возвращает кандидатов,
+публикационные подписи, coverage, watch и period результаты. `Worker` передаёт
+результат Core; только Core владеет расписанием и решением о публикации или отзыве.
+Локальные SQLite-хранилища не заменяют production-хранилище банка, а fixture Core
+stand не является PHP-интеграцией.

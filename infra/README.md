@@ -8,7 +8,7 @@
 docker compose up --build --wait
 ```
 
-React demo доступен на http://localhost:4173, порт опубликован только на loopback. Пока Symfony Core не подключён, экран использует демонстрационные данные; `/api/` возвращает `503`.
+React demo доступен на http://localhost:4173, порт опубликован только на loopback. Node.js находится в build/test stages; runtime контейнер — nginx со статическими файлами. Пока Symfony Core не подключён, экран использует собственные данные браузерного прототипа; `/api/` возвращает `503`. React demo и Python AI/Data не соединены.
 
 ## Python, тесты и offline demo
 
@@ -20,7 +20,7 @@ docker compose run --build --rm intelligence-test
 docker compose run --build --rm web-test
 ```
 
-`demo-data` выполняет полный локальный поток на синтетической RSS-фикстуре, без HTTP и внешнего LLM. `evaluate` проверяет функциональные cases, а не реальную точность модели. Test containers запускаются с `network_mode: none`.
+`demo-data` выполняет отдельный полный локальный Python поток на синтетической RSS-фикстуре, без HTTP и внешнего LLM. Он не подменяет действия в React UI. `evaluate` проверяет функциональные cases, а не реальную точность модели. Test containers запускаются с `network_mode: none`.
 
 Хостовый эквивалент, из каталога `apps/intelligence`:
 
@@ -32,7 +32,7 @@ uv run --frozen python -m intelligence run-task --mode baseline \
 uv run --frozen python -m pytest -q -p no:cacheprovider tests
 ```
 
-`run-task` исполняет snapshot локально. Рабочая очередь появляется только на стороне Core.
+`run-task` исполняет переданный `ai-data-task-v1` snapshot локально. Рабочая очередь и публикация бизнес-результата должны появиться на стороне Core; PHP Core в текущем Compose отсутствует.
 
 ## Внутренний Python API
 

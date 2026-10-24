@@ -102,3 +102,49 @@ def test_period_retrospective_includes_late_received_external_not_bank(tmp_path)
         timeline=result.period_report['publication_timeline']
         assert len(timeline)==(1 if mode=='retrospective' else 0)
         if timeline: assert timeline[0]['source_id']=='news'
+
+
+def _long_document(data):
+    text=("Поставки через порт задерживаются. "*4000).strip()
+    from test_workflow import NOW
+    original=data.store.ingest({"tenant_id":"tenant-a","source_id":"news","source_role":"external",
+        "canonical_uri":"https://news.example/long","title":"Длинная статья о поставках","content":text,
+        "content_type":"text/plain","published_at":(NOW-timedelta(days=1)).isoformat(),
+        "fetched_at":(NOW-timedelta(hours=1)).isoformat(),"synthetic":True})
+    return text,original
+
+
+def test_long_corpus_revision_runs_through_api_without_changing_primary_text(tmp_path):
+    data,_,client=api(tmp_path)
+    text,original=_long_document(data)
+    request=task(tmp_path,operation="analyze",budget={"max_model_calls":0}).model_dump(mode="json")
+    response=client.post("/internal/v1/analyze",headers=AUTH,json=request)
+    assert response.status_code==200,response.text
+    result=response.json();candidate=result["candidates"][0]
+    assert candidate["versions"]["event_document_revision_ref"]==original["document_revision_ref"]
+    assert "event_text_excerpt_only" in candidate["coverage"]["limitations"]
+    assert candidate["status"]=="partial"
+    stored=data.store.list_documents(tenant_id="tenant-a",source_ids=["news"],as_of=request["as_of"])
+    assert stored[0]["content"]==text
+    assert stored[0]["content_hash"]==original["content_hash"]
+
+
+def test_long_corpus_revision_is_delivered_by_real_worker(tmp_path):
+    data,_=workflow(tmp_path);_,original=_long_document(data)
+    prepared=task(tmp_path,operation="analyze",budget={"max_model_calls":0}).model_dump(mode="json")
+    now=datetime.now(timezone.utc)
+    job={"schema_version":"ai-job-v1","message_id":"long-seed","job_id":"long-path","tenant_scope":"tenant-a",
+        "company_id":prepared["company_id"],"trace_id":"long-trace","lease_generation":1,
+        "input_versions":{"context_version":1,"source_policy_version":7,"event_versions":[]},
+        "deadline":(now+timedelta(minutes=5)).isoformat(),"lease_until":(now+timedelta(seconds=60)).isoformat(),
+        "scope":{"source_ids":["news"],"document_revision_refs":[]},
+        "budget":{"max_model_calls":0,"max_tokens":60000,"cost_reservation_rub":0},"task":prepared}
+    app=stand_app(tmp_path/"long-stand.db",fixture_mode=True,operator_token="long-test")
+    with TestClient(app,client=("127.0.0.1",1234)) as http:
+        assert http.post("/fixture/seed",headers={"X-Operator-Token":"long-test"},json={"job":job}).status_code==200
+        worker=Worker(CoreClient("http://testserver","long-test",client=http),AnalysisPipeline(data.store),
+            ArtifactStore(tmp_path/"long-artifacts.db"),data_workflow=data,tenant_ids={"tenant-a"})
+        result=worker.run_once()
+        assert result["status"]=="submitted",result
+        state=http.get("/fixture/state",headers={"X-Operator-Token":"long-test"}).json()
+        assert state["published"]

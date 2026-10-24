@@ -1353,6 +1353,21 @@
             "minimum": 0.0,
             "title": "Independent Origins",
             "default": 0
+          },
+          "origin_groups": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Origin Groups",
+            "default": 0
+          },
+          "independence_status": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "supported"
+            ],
+            "title": "Independence Status",
+            "default": "unknown"
           }
         },
         "additionalProperties": false,
@@ -1917,7 +1932,7 @@
           },
           "text": {
             "type": "string",
-            "maxLength": 100000,
+            "maxLength": 2000000,
             "title": "Text"
           },
           "source_id": {

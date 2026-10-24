@@ -17,6 +17,7 @@ import socket
 import sqlite3
 import ssl
 import urllib.parse
+import uuid
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
@@ -222,11 +223,13 @@ class SourcePolicySnapshot(FrozenContract):
             return False
         if document.get("source_role") is not None and document.get("source_role") != source.source_role:
             return False
-        excluded_ids = set(self.excluded_source_ids) | set(self.user_excluded_source_ids)
+        excluded_ids = set(self.excluded_source_ids)
         excluded_publishers = {value.casefold() for value in self.excluded_publishers}
         excluded_uris = set(self.excluded_document_uris)
         publisher = str(document.get("publisher") or source.publisher).casefold()
         canonical_uri = str(document.get("canonical_uri") or "")
+        # User-feed hiding is presentation-only. Only Core's company-wide
+        # exclusions may remove a document from collection or analysis.
         return source.source_id not in excluded_ids and publisher not in excluded_publishers and canonical_uri not in excluded_uris
 
     def is_personally_hidden(self, document: dict[str, Any]) -> bool:
@@ -453,12 +456,17 @@ class NewsCollector:
               tenant_id TEXT NOT NULL, source_id TEXT NOT NULL, next_poll TEXT NOT NULL,
               attempts INTEGER NOT NULL DEFAULT 0, etag TEXT, last_modified TEXT,
               last_error TEXT, last_status INTEGER, lease_until TEXT, grant_fingerprint TEXT,
+              lease_generation INTEGER NOT NULL DEFAULT 0, lease_token TEXT,
               PRIMARY KEY(tenant_id,source_id))""")
                 columns = {row[1] for row in db.execute("PRAGMA table_info(poll_state)")}
                 if "lease_until" not in columns:
                     db.execute("ALTER TABLE poll_state ADD COLUMN lease_until TEXT")
                 if "grant_fingerprint" not in columns:
                     db.execute("ALTER TABLE poll_state ADD COLUMN grant_fingerprint TEXT")
+                if "lease_generation" not in columns:
+                    db.execute("ALTER TABLE poll_state ADD COLUMN lease_generation INTEGER NOT NULL DEFAULT 0")
+                if "lease_token" not in columns:
+                    db.execute("ALTER TABLE poll_state ADD COLUMN lease_token TEXT")
                 db.execute("""CREATE TABLE IF NOT EXISTS raw_receipts (
               tenant_id TEXT NOT NULL, source_id TEXT NOT NULL, canonical_uri TEXT NOT NULL,
               raw_sha256 TEXT NOT NULL, raw_ref TEXT NOT NULL, content_type TEXT NOT NULL,
@@ -471,7 +479,17 @@ class NewsCollector:
                 db.rollback()
                 raise
 
-    def collect(self, snapshot: SourcePolicySnapshot | dict[str, Any], *, now: datetime | None = None, source_ids: list[str] | tuple[str, ...] | None = None, force: bool = False) -> dict[str, Any]:
+    @staticmethod
+    def _check(checkpoint: Any, stage: str) -> None:
+        if checkpoint is None:
+            return
+        try:
+            checkpoint(stage)
+        except BaseException as exc:
+            # Carry the exact worker exception across source-level catch-alls.
+            raise _CheckpointAbort(exc) from None
+
+    def collect(self, snapshot: SourcePolicySnapshot | dict[str, Any], *, now: datetime | None = None, source_ids: list[str] | tuple[str, ...] | None = None, force: bool = False, checkpoint: Any = None) -> dict[str, Any]:
         snapshot = snapshot if isinstance(snapshot, SourcePolicySnapshot) else SourcePolicySnapshot.model_validate(snapshot)
         now = _aware(now or datetime.now(timezone.utc))
         if now is None:
@@ -485,7 +503,12 @@ class NewsCollector:
             selected = tuple(source for source in selected if source.source_id in requested)
         report: dict[str, Any] = {"policy_id": snapshot.policy_id, "policy_revision": snapshot.revision, "tenant_id": snapshot.tenant_id, "checked_at": _iso(now), "fetched": 0, "unchanged": 0, "skipped": [], "pending_metadata": [], "errors": [], "documents": []}
         for source in selected:
-            outcome = self._collect_source(snapshot, source, now, force)
+            try:
+                self._check(checkpoint, f"before_source:{source.source_id}")
+                outcome = self._collect_source(snapshot, source, now, force, checkpoint=checkpoint)
+                self._check(checkpoint, f"after_source:{source.source_id}")
+            except _CheckpointAbort as exc:
+                raise exc.original
             report["fetched"] += int(outcome.pop("fetched", 0))
             report["unchanged"] += int(outcome.pop("unchanged", 0))
             for key in ("skipped", "pending_metadata", "errors", "documents"):
@@ -518,7 +541,7 @@ class NewsCollector:
         except Exception:
             return SourceProbeResult(grant_id=request.grant_id, status="error", requested_url=_safe_report_url(url), error_code="probe_failed")
 
-    def _collect_source(self, snapshot: SourcePolicySnapshot, source: SourceGrant, now: datetime, force: bool) -> dict[str, Any]:
+    def _collect_source(self, snapshot: SourcePolicySnapshot, source: SourceGrant, now: datetime, force: bool, *, checkpoint: Any = None) -> dict[str, Any]:
         outcome: dict[str, Any] = {"fetched": 0, "unchanged": 0, "skipped": [], "pending_metadata": [], "errors": [], "documents": []}
         if source.content_type not in {"application/rss+xml", "application/atom+xml", "application/json"} and not snapshot.permits_document({
                 "tenant_id": snapshot.tenant_id, "source_id": source.source_id,
@@ -536,7 +559,7 @@ class NewsCollector:
         if state and state["last_modified"]:
             conditional["If-Modified-Since"] = state["last_modified"]
         try:
-            response = self._request(source.uri, conditional, allowed_hosts={_host(source.uri), *source.allowed_redirect_hosts}, max_redirects=MAX_REDIRECTS, timeout=source.timeout_seconds, max_bytes=source.max_bytes)
+            response = self._request(source.uri, conditional, allowed_hosts={_host(source.uri), *source.allowed_redirect_hosts}, max_redirects=MAX_REDIRECTS, timeout=source.timeout_seconds, max_bytes=source.max_bytes, checkpoint=checkpoint)
             if response.status == 304:
                 outcome["unchanged"] = 1
                 self._save_state(snapshot.tenant_id, source, now + timedelta(seconds=source.poll_interval_seconds), state, response, None, success=True)
@@ -554,16 +577,16 @@ class NewsCollector:
             raw_hash = _sha(response.body)
             if source.content_type in {"application/rss+xml", "application/atom+xml"}:
                 raw_ref = self._save_raw(snapshot.tenant_id, raw_hash, response.body)
-                docs, pending = self._ingest_feed(snapshot, source, response.body, raw_hash, raw_ref, now)
+                docs, pending = self._ingest_feed(snapshot, source, response.body, raw_hash, raw_ref, now, checkpoint=checkpoint)
                 outcome["documents"].extend(docs)
                 outcome["pending_metadata"].extend(pending)
                 if source.fetch_articles:
-                    article_docs, article_pending = self._fetch_feed_articles(snapshot, source, response.body, now)
+                    article_docs, article_pending = self._fetch_feed_articles(snapshot, source, response.body, now, checkpoint=checkpoint)
                     outcome["documents"].extend(article_docs)
                     outcome["pending_metadata"].extend(article_pending)
             elif source.content_type == "application/json":
                 raw_ref = self._save_raw(snapshot.tenant_id, raw_hash, response.body)
-                docs, pending = self._ingest_json(snapshot, source, response.body, raw_hash, raw_ref, now)
+                docs, pending = self._ingest_json(snapshot, source, response.body, raw_hash, raw_ref, now, checkpoint=checkpoint)
                 outcome["documents"].extend(docs)
                 outcome["pending_metadata"].extend(pending)
             else:
@@ -590,6 +613,9 @@ class NewsCollector:
             outcome["fetched"] = 1
             self._save_state(snapshot.tenant_id, source, now + timedelta(seconds=source.poll_interval_seconds), state, response, None, success=True)
             return outcome
+        except _CheckpointAbort as exc:
+            self._release_poll_claim(snapshot.tenant_id, source, state)
+            raise exc.original
         except _RetryableFetchError as exc:
             retry = self._backoff(source, state, now, exc.response.headers.get("retry-after"))
             message = str(exc)
@@ -602,7 +628,7 @@ class NewsCollector:
             outcome["errors"].append({"source_id": source.source_id, "error": message, "retry_at": _iso(retry)})
         return outcome
 
-    def _request(self, url: str, headers: dict[str, str], *, allowed_hosts: set[str], max_redirects: int, timeout: int, max_bytes: int) -> "_Response":
+    def _request(self, url: str, headers: dict[str, str], *, allowed_hosts: set[str], max_redirects: int, timeout: int, max_bytes: int, checkpoint: Any = None) -> "_Response":
         current = _https_url(url)
         conditional_headers = {}
         for key, value in headers.items():
@@ -611,12 +637,14 @@ class NewsCollector:
                 conditional_headers["If-None-Match" if normalized == "if-none-match" else "If-Modified-Since"] = str(value)
         headers = conditional_headers
         for redirect_count in range(max_redirects + 1):
+            self._check(checkpoint, f"before_request:{redirect_count}")
             if _host(current) not in allowed_hosts:
                 raise ValueError("redirect_host_not_allowed")
             response = self.fetcher(current, headers, timeout=timeout, max_bytes=max_bytes)
             if not isinstance(response, FetchResult):
                 response = FetchResult.model_validate(response)
             response.headers = {str(key).casefold(): str(value) for key, value in response.headers.items()}
+            self._check(checkpoint, f"after_request:{redirect_count}")
             if len(response.body) > max_bytes:
                 raise ValueError("response_too_large")
             if response.status not in {301, 302, 303, 307, 308}:
@@ -697,7 +725,7 @@ class NewsCollector:
         published = _aware(_nested(first, mapping["published_at"]))
         return {"title": str(title) if title else None, "publisher": str(_nested(first, mapping.get("publisher", "")) or "") or None, "author": str(_nested(first, mapping.get("author", "")) or "") or None, "published_at": published, "event_time": _aware(_nested(first, mapping.get("event_time", ""))), "language": str(_nested(first, mapping.get("language", "")) or "") or None, "preview_text": str(content or "")[:4000], "content": text, "content_type": "application/json", "missing_fields": [field for field, value in (("title", title), ("published_at", published), ("items", rows)) if not value]}
 
-    def _ingest_feed(self, snapshot: SourcePolicySnapshot, source: SourceGrant, raw: bytes, raw_hash: str, raw_ref: str, now: datetime) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    def _ingest_feed(self, snapshot: SourcePolicySnapshot, source: SourceGrant, raw: bytes, raw_hash: str, raw_ref: str, now: datetime, *, checkpoint: Any = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         from defusedxml import ElementTree as SafeET
 
         xml = raw.decode("utf-8-sig", errors="replace")
@@ -725,6 +753,7 @@ class NewsCollector:
                 event_times[uri] = event_time
         docs, pending = [], []
         for item in parsed.items[:MAX_FEED_ITEMS]:
+            self._check(checkpoint, f"before_article:{source.source_id}")
             published = _aware(item.published_at)
             if published is None:
                 pending.append({"source_id": source.source_id, "url": _safe_report_url(item.uri) if item.uri else None, "title": item.title or None, "raw_sha256": raw_hash, "missing_fields": ["published_at"]})
@@ -754,7 +783,7 @@ class NewsCollector:
             docs.append(self._ingest_document(snapshot, source, uri, info, raw, source.content_type, published, event_times.get(item.uri or "") or _aware(source.event_time), authors.get(item.uri or "", ""), publisher, raw_hash, raw_ref, now))
         return docs, pending
 
-    def _ingest_json(self, snapshot: SourcePolicySnapshot, source: SourceGrant, raw: bytes, raw_hash: str, raw_ref: str, now: datetime) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    def _ingest_json(self, snapshot: SourcePolicySnapshot, source: SourceGrant, raw: bytes, raw_hash: str, raw_ref: str, now: datetime, *, checkpoint: Any = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         payload = json.loads(raw.decode("utf-8-sig", errors="replace"))
         mapping = source.json_mapping or {}
         if isinstance(mapping, JSONAdapterMapping):
@@ -764,6 +793,7 @@ class NewsCollector:
             raise ValueError("json_adapter_items_not_array")
         docs, pending = [], []
         for row in rows[:MAX_JSON_ITEMS]:
+            self._check(checkpoint, f"before_article:{source.source_id}")
             title = _nested(row, mapping["title"])
             content = _nested(row, mapping["content"])
             uri = _nested(row, mapping["url"])
@@ -788,11 +818,12 @@ class NewsCollector:
             docs.append(self._ingest_document(snapshot, source, document_url, info, raw, "application/json", published, _aware(_nested(row, mapping.get("event_time", ""))) or _aware(source.event_time), str(_nested(row, mapping.get("author", "")) or ""), str(_nested(row, mapping.get("publisher", "")) or source.publisher), raw_hash, raw_ref, now))
         return docs, pending
 
-    def _fetch_feed_articles(self, snapshot: SourcePolicySnapshot, source: SourceGrant, feed_raw: bytes, now: datetime) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    def _fetch_feed_articles(self, snapshot: SourcePolicySnapshot, source: SourceGrant, feed_raw: bytes, now: datetime, *, checkpoint: Any = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         parsed = parse_content(feed_raw.decode("utf-8-sig", errors="replace"), "application/rss+xml")
         docs, pending = [], []
         allowed = set(source.article_hosts)
         for item in parsed.items:
+            self._check(checkpoint, f"before_article:{source.source_id}")
             if len(docs) + len(pending) >= MAX_ARTICLES:
                 break
             if not item.uri or _host(item.uri) not in allowed:
@@ -805,7 +836,7 @@ class NewsCollector:
                 url = _https_url(item.uri)
                 if not snapshot.permits_document({"tenant_id": snapshot.tenant_id, "source_id": source.source_id, "publisher": source.publisher, "canonical_uri": url}):
                     continue
-                article = self._request(url, {}, allowed_hosts={_host(url), *allowed, *source.allowed_redirect_hosts}, max_redirects=MAX_REDIRECTS, timeout=source.timeout_seconds, max_bytes=source.max_bytes)
+                article = self._request(url, {}, allowed_hosts={_host(url), *allowed, *source.allowed_redirect_hosts}, max_redirects=MAX_REDIRECTS, timeout=source.timeout_seconds, max_bytes=source.max_bytes, checkpoint=checkpoint)
                 if article.status != 200:
                     continue
                 kind = self._detect_type(article.content_type, article.body)
@@ -816,6 +847,8 @@ class NewsCollector:
                 digest = _sha(article.body)
                 reference = self._save_raw(snapshot.tenant_id, digest, article.body)
                 docs.append(self._ingest_document(snapshot, source, article.url, info, article.body, kind, published, _aware(source.event_time), info.get("author") or "", info.get("publisher") or source.publisher, digest, reference, now))
+            except _CheckpointAbort:
+                raise
             except Exception:
                     pending.append({"source_id": source.source_id, "url": _safe_report_url(item.uri), "title": item.title or None, "missing_fields": ["article_fetch_failed"]})
         return docs, pending
@@ -894,8 +927,8 @@ class NewsCollector:
 
     def _state(self, tenant_id: str, source_id: str) -> dict[str, Any] | None:
         with sqlite3.connect(self.state_path) as db:
-            row = db.execute("SELECT next_poll,attempts,etag,last_modified,last_error,last_status,lease_until,grant_fingerprint FROM poll_state WHERE tenant_id=? AND source_id=?", (tenant_id, source_id)).fetchone()
-        return dict(zip(("next_poll", "attempts", "etag", "last_modified", "last_error", "last_status", "lease_until", "grant_fingerprint"), row)) if row else None
+            row = db.execute("SELECT next_poll,attempts,etag,last_modified,last_error,last_status,lease_until,grant_fingerprint,lease_generation,lease_token FROM poll_state WHERE tenant_id=? AND source_id=?", (tenant_id, source_id)).fetchone()
+        return dict(zip(("next_poll", "attempts", "etag", "last_modified", "last_error", "last_status", "lease_until", "grant_fingerprint", "lease_generation", "lease_token"), row)) if row else None
 
     @staticmethod
     def _grant_fingerprint(source: SourceGrant) -> str:
@@ -909,63 +942,104 @@ class NewsCollector:
         fingerprint = self._grant_fingerprint(source)
         with sqlite3.connect(self.state_path, timeout=10, isolation_level=None) as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT next_poll,attempts,etag,last_modified,last_error,last_status,lease_until,grant_fingerprint FROM poll_state WHERE tenant_id=? AND source_id=?", (tenant_id, source.source_id)).fetchone()
-            state = dict(zip(("next_poll", "attempts", "etag", "last_modified", "last_error", "last_status", "lease_until", "grant_fingerprint"), row)) if row else None
-            if state and state.get("lease_until") and (_aware(state["lease_until"]) or now) > now:
-                db.rollback()
-                return state, "already_running"
+            row = db.execute("SELECT next_poll,attempts,etag,last_modified,last_error,last_status,lease_until,grant_fingerprint,lease_generation,lease_token FROM poll_state WHERE tenant_id=? AND source_id=?", (tenant_id, source.source_id)).fetchone()
+            state = dict(zip(("next_poll", "attempts", "etag", "last_modified", "last_error", "last_status", "lease_until", "grant_fingerprint", "lease_generation", "lease_token"), row)) if row else None
             if state and state.get("grant_fingerprint") != fingerprint:
                 # URI, parser/adapter, permission classification or limits changed.
                 # Drop validators and schedule state so the new grant is fetched now.
                 state.update(next_poll=_iso(now), attempts=0, etag=None, last_modified=None,
-                             last_error=None, last_status=None, grant_fingerprint=fingerprint)
-                db.execute("UPDATE poll_state SET next_poll=?,attempts=0,etag=NULL,last_modified=NULL,last_error=NULL,last_status=NULL,grant_fingerprint=? WHERE tenant_id=? AND source_id=?",
+                             last_error=None, last_status=None, grant_fingerprint=fingerprint,
+                             lease_until=None, lease_token=None)
+                db.execute("UPDATE poll_state SET next_poll=?,attempts=0,etag=NULL,last_modified=NULL,last_error=NULL,last_status=NULL,grant_fingerprint=?,lease_until=NULL,lease_token=NULL WHERE tenant_id=? AND source_id=?",
                            (_iso(now), fingerprint, tenant_id, source.source_id))
+            if state and state.get("lease_until") and (_aware(state["lease_until"]) or now) > now:
+                db.rollback()
+                return state, "already_running"
             due = _aware(state["next_poll"]) if state else None
             if not force and due and due > now:
                 db.rollback()
                 return state, "not_due"
             # Longer than the bounded HTTP timeout, leaving room for DNS/TLS setup.
             lease_until = now + timedelta(seconds=max(30, source.timeout_seconds + 10))
+            generation = int(state.get("lease_generation", 0) if state else 0) + 1
+            claim_token = uuid.uuid4().hex
             next_poll = state["next_poll"] if state else _iso(now)
-            db.execute("INSERT INTO poll_state(tenant_id,source_id,next_poll,attempts,etag,last_modified,last_error,last_status,lease_until,grant_fingerprint) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,source_id) DO UPDATE SET lease_until=excluded.lease_until,grant_fingerprint=excluded.grant_fingerprint",
+            db.execute("INSERT INTO poll_state(tenant_id,source_id,next_poll,attempts,etag,last_modified,last_error,last_status,lease_until,grant_fingerprint,lease_generation,lease_token) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,source_id) DO UPDATE SET lease_until=excluded.lease_until,grant_fingerprint=excluded.grant_fingerprint,lease_generation=excluded.lease_generation,lease_token=excluded.lease_token",
                        (tenant_id, source.source_id, next_poll, state["attempts"] if state else 0,
                         state.get("etag") if state else None, state.get("last_modified") if state else None,
                         state.get("last_error") if state else None, state.get("last_status") if state else None,
-                        _iso(lease_until), fingerprint))
+                        _iso(lease_until), fingerprint, generation, claim_token))
             db.commit()
             if state is None:
                 state = {"next_poll": next_poll, "attempts": 0, "etag": None, "last_modified": None,
                          "last_error": None, "last_status": None, "lease_until": _iso(lease_until),
-                         "grant_fingerprint": fingerprint}
+                         "grant_fingerprint": fingerprint, "lease_generation": generation,
+                         "lease_token": claim_token}
             else:
                 state["lease_until"] = _iso(lease_until)
                 state["grant_fingerprint"] = fingerprint
+                state["lease_generation"] = generation
+                state["lease_token"] = claim_token
             return state, None
 
     def _save_state(self, tenant_id: str, source: SourceGrant, next_poll: datetime, prior: dict[str, Any] | None, response: "_Response | FetchResult | None", error: str | None, *, success: bool) -> None:
+        if not prior or not prior.get("lease_token") or not prior.get("lease_generation"):
+            return
         headers = response.headers if response else {}
         attempts = 0 if success else (prior["attempts"] if prior else 0) + 1
         fingerprint = self._grant_fingerprint(source)
         with sqlite3.connect(self.state_path, timeout=10, isolation_level=None) as db:
             db.execute("BEGIN IMMEDIATE")
-            current = db.execute("SELECT grant_fingerprint FROM poll_state WHERE tenant_id=? AND source_id=?", (tenant_id, source.source_id)).fetchone()
-            # A slower request under an old grant may not overwrite newer grant state.
-            if current and current[0] != fingerprint:
+            cursor = db.execute("""UPDATE poll_state SET next_poll=?,attempts=?,etag=?,last_modified=?,last_error=?,last_status=?,lease_until=NULL,lease_token=NULL
+              WHERE tenant_id=? AND source_id=? AND grant_fingerprint=? AND lease_generation=? AND lease_token=?""",
+              (_iso(next_poll), attempts, headers.get("etag") or prior.get("etag"),
+               headers.get("last-modified") or prior.get("last_modified"), error,
+               response.status if response else None, tenant_id, source.source_id,
+               fingerprint, prior["lease_generation"], prior["lease_token"]))
+            # The token fences expired owners and same-grant successors.
+            if cursor.rowcount != 1:
                 db.rollback()
                 return
-            db.execute("""INSERT INTO poll_state(tenant_id,source_id,next_poll,attempts,etag,last_modified,last_error,last_status,lease_until,grant_fingerprint) VALUES(?,?,?,?,?,?,?,?,NULL,?) ON CONFLICT(tenant_id,source_id) DO UPDATE SET
-              next_poll=excluded.next_poll,attempts=excluded.attempts,etag=excluded.etag,last_modified=excluded.last_modified,last_error=excluded.last_error,last_status=excluded.last_status,lease_until=NULL,grant_fingerprint=excluded.grant_fingerprint""", (tenant_id, source.source_id, _iso(next_poll), attempts, headers.get("etag") or (prior["etag"] if prior else None), headers.get("last-modified") or (prior["last_modified"] if prior else None), error, response.status if response else None, fingerprint))
             db.commit()
+
+    def _release_poll_claim(self, tenant_id: str, source: SourceGrant, claim: dict[str, Any] | None) -> None:
+        """Release only this exact poll lease, without changing retry state."""
+        if not claim or not claim.get("lease_token"):
+            return
+        with sqlite3.connect(self.state_path, timeout=10, isolation_level=None) as db:
+            db.execute("BEGIN IMMEDIATE")
+            cursor = db.execute("UPDATE poll_state SET lease_until=NULL,lease_token=NULL WHERE tenant_id=? AND source_id=? AND grant_fingerprint=? AND lease_generation=? AND lease_token=?",
+                (tenant_id, source.source_id, self._grant_fingerprint(source), claim.get("lease_generation"), claim["lease_token"]))
+            if cursor.rowcount == 1:
+                db.commit()
+            else:
+                db.rollback()
 
     @staticmethod
     def _backoff(source: SourceGrant, state: dict[str, Any] | None, now: datetime, retry_after: str | None) -> datetime:
-        retry_date = _aware(retry_after)
-        if retry_date and now < retry_date <= now + timedelta(hours=6):
-            return retry_date
+        if retry_after:
+            value = retry_after.strip()
+            if re.fullmatch(r"[0-9]+", value):
+                normalized = value.lstrip("0") or "0"
+                # Avoid parsing arbitrarily large attacker-controlled integers.
+                if len(normalized) > 12:
+                    return datetime.max.replace(tzinfo=timezone.utc)
+                seconds = int(normalized)
+                remaining = (datetime.max.replace(tzinfo=timezone.utc) - now).total_seconds()
+                if seconds > remaining:
+                    return datetime.max.replace(tzinfo=timezone.utc)
+                return now + timedelta(seconds=seconds)
+            retry_date = _aware(value)
+            if retry_date is not None and retry_date > now:
+                return retry_date
         attempt = (state["attempts"] if state else 0) + 1
         ceiling = min(source.poll_interval_seconds, 60 * (2 ** min(attempt, 10)))
         return now + timedelta(seconds=max(1, int(random.uniform(ceiling / 2, ceiling))))
+
+
+class _CheckpointAbort(BaseException):
+    def __init__(self, original: BaseException) -> None:
+        self.original = original
 
 
 class _RetryableFetchError(ValueError):

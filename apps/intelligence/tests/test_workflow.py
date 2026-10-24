@@ -91,7 +91,7 @@ def test_collection_raw_event_and_two_company_assessments_are_scoped(tmp_path):
     assert result.events[0]["tenant_id"] == "tenant-a"
 
 
-def test_identical_reprints_group_as_one_event_with_two_origins(tmp_path):
+def test_identical_reprints_group_as_one_event_without_independent_confirmation(tmp_path):
     reprint = FEED.replace(b"news.example/story-1", b"news-b.example/story-2")
     instance, fetcher = workflow(tmp_path, FetchResult(status=200,
         headers={"content-type": "application/rss+xml"}, body=FEED), FetchResult(status=200,
@@ -100,7 +100,9 @@ def test_identical_reprints_group_as_one_event_with_two_origins(tmp_path):
     result = instance.run(task_input)
     assert len(result.events) == 1
     assert result.events[0]["coverage"]["permitted_publications"] == 2
-    assert result.events[0]["coverage"]["independent_origin_groups"] == 2
+    assert result.events[0]["coverage"]["origin_group_count"] == 2
+    assert result.events[0]["coverage"]["independent_origin_groups"] == 1
+    assert result.events[0]["coverage"]["independence_status"] == "unknown"
     assert len(fetcher.calls) == 2
 
 

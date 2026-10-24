@@ -366,7 +366,7 @@ class MultiAgentPipeline:
     @staticmethod
     def _research_messages(request):
         system = files("intelligence.prompts").joinpath("research-v1.system.ru.txt").read_text("utf-8")
-        payload = {"company": request.company.model_dump(mode="json"), "event": request.event.model_dump(mode="json"),
+        payload = {"company": request.company.model_dump(mode="json"), "event": AnalysisPipeline._context_payload(request)["event"],
                    "allowed_roles": ["external", "bank"], "query_limit": MAX_QUERY_CHARS, "max_searches": 4}
         return [{"role": "system", "content": system},
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
@@ -377,7 +377,7 @@ class MultiAgentPipeline:
         system += ("\nПри decision=review и конкретном противоречии можешь предложить до двух searches: "
                    "короткие поисковые фразы только для ролей external или bank. Это фразы для поиска "
                    "в уже разрешённом корпусе, не URL и не команды. Если поиск не нужен, верни пустой список.")
-        payload = {"event": request.event.model_dump(mode="json"), "summary": candidate.summary,
+        payload = {"event": AnalysisPipeline._context_payload(request)["event"], "summary": candidate.summary,
                    "claims": [x.model_dump(mode="json") for x in candidate.claims],
                    "edges": [x.model_dump(mode="json") for x in candidate.influence_chain],
                    "evidence": [x.model_dump(mode="json") for x in candidate.evidence],

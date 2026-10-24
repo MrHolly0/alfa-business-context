@@ -20,6 +20,15 @@ from .watches import WatchCondition, WatchObservation, WatchEvaluation, evaluate
 from .periods import PeriodPublication, analyze_period_research
 from .artifacts import canonical_json, payload_hash
 
+class WorkflowNotStarted(ValueError):
+    """Capacity/lock refusal before analysis begins; safe to retry this owner."""
+    def __init__(self, code):
+        if code not in {"capacity_exhausted", "request_in_progress"}:
+            raise ValueError("invalid_not_started_code")
+        self.code = code
+        super().__init__(code)
+
+
 class BusinessSnapshot(StrictModel):
     company_id: str = Field(min_length=1,max_length=256)
     context_version: int = Field(ge=1)
@@ -192,15 +201,15 @@ class DataWorkflow:
         task=task if isinstance(task,DataTask) else DataTask.model_validate(task)
         check=checkpoint or (lambda stage:None); check('before_workflow')
         slot_lock=self._acquire_slot_lock()
-        if slot_lock is None:raise ValueError('capacity_exhausted')
+        if slot_lock is None:raise WorkflowNotStarted('capacity_exhausted')
         request_key=hashlib.sha256(f'{task.tenant_id}\0{task.request_id}'.encode()).hexdigest()
         request_lock=None
         local_slot=False
         try:
             request_lock=self._lock_file(self.execution_locks/f'request-{request_key}.lock')
-            if request_lock is None:raise ValueError('request_in_progress')
+            if request_lock is None:raise WorkflowNotStarted('request_in_progress')
             local_slot=self.slots.acquire(blocking=False)
-            if not local_slot:raise ValueError('capacity_exhausted')
+            if not local_slot:raise WorkflowNotStarted('capacity_exhausted')
             return self._run(task,check)
         finally:
             if local_slot:self.slots.release()
@@ -239,7 +248,7 @@ class DataWorkflow:
             result.coverage['model_limitation']='confidential_external_model_disabled'
         if task.operation=='collect':
             stage('before_collection',{'source_count':len(allowed)})
-            result.collection=self.collector.collect(policy,now=datetime.now(timezone.utc))
+            result.collection=self.collector.collect(policy,now=datetime.now(timezone.utc),checkpoint=check)
             stage('collection_complete',{'report_saved':True})
         analysis_as_of=(datetime.now(timezone.utc) if task.knowledge_mode=='latest' else task.as_of)
         if task.period and task.period.mode=='retrospective': analysis_as_of=datetime.now(timezone.utc)
@@ -349,6 +358,8 @@ class DataWorkflow:
                             candidate.versions.event_revision=package.revision
                             candidate.shared_package_ref=package.package_id
                             candidate.coverage.independent_origins=package.coverage.independent_origin_groups
+                            candidate.coverage.origin_groups=package.coverage.origin_group_count
+                            candidate.coverage.independence_status=package.coverage.independence_status
                             candidate.trace.append({'stage':'persisted_candidate_reused','reason':'publication_not_proven'})
                             changes={'status':'changed','publication_revision_required':True,
                                 'reason':'publication_not_proven','changed_inputs':[],
@@ -380,6 +391,8 @@ class DataWorkflow:
                                 'Какая подтверждённая зависимость компании связана с этим событием? В переданном контексте такая связь не найдена.']))[:30]
                         candidate.shared_package_ref=package.package_id
                         candidate.coverage.independent_origins=package.coverage.independent_origin_groups
+                        candidate.coverage.origin_groups=package.coverage.origin_group_count
+                        candidate.coverage.independence_status=package.coverage.independence_status
                         candidate.coverage.checked_at=datetime.now(timezone.utc)
                         candidate.coverage.limitations=list(dict.fromkeys(candidate.coverage.limitations+package.coverage.limitations))
                         candidate.watch_conditions=list(dict.fromkeys([x for c in candidate.claims for x in c.falsifiers+c.confirmation_conditions]))[:50]

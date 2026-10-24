@@ -1,15 +1,19 @@
 """Tenant-scoped event grouping, versioned publications, claims and shared impact packages.
 
 Similarity only helps group material for review. It is never counted as independent
-corroboration; source independence is represented by origin_group_id.
+corroboration. Declared origin groups are tracked separately; true reporting
+independence remains unknown unless independently established outside this store.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from enum import StrEnum
+from contextlib import contextmanager
+import fcntl
 import hashlib
 import json
+import os
 import re
 import sqlite3
 import unicodedata
@@ -24,6 +28,7 @@ from .llm.service import estimate_text_tokens
 EVENT_STORE_VERSION = "event-store-v1"
 CLAIM_PROMPT_VERSION = "event-claims-v2"
 IMPACT_PROMPT_VERSION = "event-impact-v2"
+IMPACT_CACHE_SEMANTICS_VERSION = "origin-independence-v2"
 NEAR_DUPLICATE_THRESHOLD = 0.965
 MAX_CLAIMS = 32
 MAX_EXTRACTOR_TEXT_BYTES = 10_000
@@ -151,7 +156,10 @@ class ImpactMechanism(BaseModel):
 class Coverage(BaseModel):
     model_config = ConfigDict(extra="forbid")
     permitted_publications: int
+    origin_group_count: int = 0
     independent_origin_groups: int
+    independence_status: Literal["unknown", "supported"] = "unknown"
+    independence_basis: str = ""
     policy_source_count: int
     policy_id: str
     policy_version: str
@@ -236,6 +244,10 @@ CREATE TABLE IF NOT EXISTS claim_extractions (
   PRIMARY KEY(tenant_id,event_id,source_policy_id,policy_version,allowed_sources_hash,
               semantic_signature,model_version,prompt_version)
 );
+CREATE TABLE IF NOT EXISTS claim_extraction_reservations (
+  tenant_id TEXT NOT NULL, reservation_id TEXT NOT NULL, status TEXT NOT NULL,
+  created_at TEXT NOT NULL, PRIMARY KEY(tenant_id,reservation_id)
+);
 """
 
 
@@ -261,6 +273,20 @@ class EventStore:
         db.execute("PRAGMA foreign_keys=ON")
         db.execute("PRAGMA journal_mode=WAL")
         return db
+
+    @contextmanager
+    def _file_lock(self, namespace: str, key: str):
+        """Cross-process singleflight; wait without holding a SQLite transaction."""
+        lock_dir = Path(self.path + ".locks")
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        lock_path = lock_dir / f"{namespace}-{_hash(key)}.lock"
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
 
     @staticmethod
     def _input(value: PublicationInput | Mapping[str, Any]) -> PublicationInput:
@@ -414,10 +440,36 @@ class EventStore:
     @staticmethod
     def _snapshot(tenant,event_id,revision,rows,policy_id,policy_version,policy_source_count):
         origins = {r["origin_group_id"] for r in rows}
+        # Collapse declared origins connected by identical content. Distinct
+        # labels and publication receipts remain visible, but do not turn an
+        # exact syndicated copy into a second confirmation.
+        parent = {origin: origin for origin in origins}
+        def find(origin):
+            while parent[origin] != origin:
+                parent[origin] = parent[parent[origin]]
+                origin = parent[origin]
+            return origin
+        by_content: dict[str, set[str]] = {}
+        for row in rows:
+            by_content.setdefault(row["content_hash"], set()).add(row["origin_group_id"])
+        exact_reprints = False
+        for groups in by_content.values():
+            if len(groups) < 2:
+                continue
+            exact_reprints = True
+            first = next(iter(groups))
+            for origin in groups:
+                parent[find(origin)] = find(first)
+        distinct_content_origins = len({find(origin) for origin in origins})
+        limitations = ["exact_reprints_not_independent_confirmations"] if exact_reprints else []
         return {"tenant_id":tenant,"event_id":event_id,"revision":revision,
             "sources":[dict(r) for r in rows],"coverage":{"permitted_publications":len(rows),
-            "independent_origin_groups":len(origins),"policy_source_count":policy_source_count,
-            "policy_id":policy_id,"policy_version":policy_version,"originals_available":bool(rows)}}
+            "origin_group_count":len(origins),"independent_origin_groups":distinct_content_origins,
+            "independence_status":"unknown",
+            "independence_basis":"exact_content_hash_deduplicated_origin_labels; true reporting independence is unverified",
+            "policy_source_count":policy_source_count,
+            "policy_id":policy_id,"policy_version":policy_version,"originals_available":bool(rows),
+            "limitations":limitations}}
 
     @staticmethod
     def _semantic_signature(sources: list[dict[str, Any]]) -> str:
@@ -506,6 +558,73 @@ class EventStore:
     def extract_claims(self, tenant_id: str, event_id: str, *, source_policy_id: str,
                        policy_version: str, allowed_source_ids: list[str], revision: int | None = None,
                        llm=None, allowed_document_revision_refs: list[str] | None = None) -> tuple[list[Claim], dict[str, Any]]:
+        if llm is None:
+            return self._extract_claims_impl(tenant_id,event_id,source_policy_id=source_policy_id,
+                policy_version=policy_version,allowed_source_ids=allowed_source_ids,revision=revision,
+                allowed_document_revision_refs=allowed_document_revision_refs)
+        snapshot = self.get_event(tenant_id,event_id,source_policy_id=source_policy_id,
+            policy_version=policy_version,allowed_source_ids=allowed_source_ids,revision=revision,
+            allowed_document_revision_refs=allowed_document_revision_refs)
+        if snapshot is None:
+            raise ValueError("event is not available under the supplied tenant source policy")
+        if any(source.get("data_classification") not in {"public","synthetic"} for source in snapshot["sources"]):
+            raise ValueError("external_event_model_requires_public_or_synthetic_sources")
+        model_version = getattr(getattr(llm,"config",None),"model","deterministic-reported-claims-v1")
+        allowed = self._allowed(tenant_id,source_policy_id,policy_version,allowed_source_ids)
+        allowed_hash = _hash(json.dumps([allowed,sorted(allowed_document_revision_refs)
+            if allowed_document_revision_refs is not None else None],separators=(",",":")))
+        semantic_signature = self._semantic_signature(snapshot["sources"])
+        key = "\0".join((tenant_id,event_id,source_policy_id,policy_version,allowed_hash,
+                          semantic_signature,model_version,CLAIM_PROMPT_VERSION))
+        reservation_id = _hash(key)
+        with self._file_lock("claims",key):
+            cached = self._cached_claims(tenant_id,event_id,source_policy_id,policy_version,
+                allowed_hash,semantic_signature,model_version)
+            if cached is not None:
+                cached_claims,cached_meta = cached
+                permitted = {source["publication_id"]:source for source in snapshot["sources"]}
+                if all(claim.publication_id in permitted and
+                       claim.quote in permitted[claim.publication_id]["content"] for claim in cached_claims):
+                    return cached_claims,cached_meta
+            now = datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00","Z")
+            with self._connect() as db:
+                db.execute("BEGIN IMMEDIATE")
+                existing = db.execute("SELECT status FROM claim_extraction_reservations WHERE tenant_id=? AND reservation_id=?",
+                                      (tenant_id,reservation_id)).fetchone()
+                if existing is None:
+                    db.execute("INSERT INTO claim_extraction_reservations VALUES(?,?,?,?)",
+                               (tenant_id,reservation_id,"started",now))
+                    db.commit()
+                    owner = True
+                    uncertain = False
+                else:
+                    db.execute("UPDATE claim_extraction_reservations SET status='uncertain' WHERE tenant_id=? AND reservation_id=?",
+                               (tenant_id,reservation_id))
+                    db.commit()
+                    owner = False
+                    uncertain = True
+            if uncertain:
+                # A previous process may have sent the paid request and died
+                # before persisting its response. Do not blindly spend again.
+                return self._extract_claims_impl(tenant_id,event_id,source_policy_id=source_policy_id,
+                    policy_version=policy_version,allowed_source_ids=allowed,revision=revision,llm=None,
+                    allowed_document_revision_refs=allowed_document_revision_refs,
+                    _model_version_override=model_version,_uncertain_recovery=True)
+            result = self._extract_claims_impl(tenant_id,event_id,source_policy_id=source_policy_id,
+                policy_version=policy_version,allowed_source_ids=allowed,revision=revision,llm=llm,
+                allowed_document_revision_refs=allowed_document_revision_refs,
+                _model_version_override=model_version)
+            if owner:
+                with self._connect() as db:
+                    db.execute("DELETE FROM claim_extraction_reservations WHERE tenant_id=? AND reservation_id=?",
+                               (tenant_id,reservation_id))
+            return result
+
+    def _extract_claims_impl(self, tenant_id: str, event_id: str, *, source_policy_id: str,
+                       policy_version: str, allowed_source_ids: list[str], revision: int | None = None,
+                       llm=None, allowed_document_revision_refs: list[str] | None = None,
+                       _model_version_override: str | None = None,
+                       _uncertain_recovery: bool = False) -> tuple[list[Claim], dict[str, Any]]:
         snapshot = self.get_event(tenant_id,event_id,source_policy_id=source_policy_id,
             policy_version=policy_version,allowed_source_ids=allowed_source_ids,revision=revision,allowed_document_revision_refs=allowed_document_revision_refs)
         if snapshot is None:
@@ -516,7 +635,9 @@ class EventStore:
         # classification; text inside a document cannot change it.
         if llm is not None and any(source.get("data_classification") not in {"public","synthetic"} for source in sources):
             raise ValueError("external_event_model_requires_public_or_synthetic_sources")
-        model_version = getattr(getattr(llm,"config",None),"model","deterministic-reported-claims-v1") if llm else "deterministic-reported-claims-v1"
+        model_version = (_model_version_override or
+            (getattr(getattr(llm,"config",None),"model","deterministic-reported-claims-v1")
+             if llm else "deterministic-reported-claims-v1"))
         allowed = self._allowed(tenant_id,source_policy_id,policy_version,allowed_source_ids)
         allowed_hash = _hash(json.dumps([allowed,sorted(allowed_document_revision_refs)
             if allowed_document_revision_refs is not None else None],separators=(",",":")))
@@ -533,7 +654,8 @@ class EventStore:
         claims: list[Claim] = []
         extraction_mode = "deterministic_reported_claims"
         semantic = self._deterministic_semantics(sources)
-        limitations: list[str] = []
+        limitations: list[str] = (["extractor_call_outcome_uncertain_no_automatic_retry"]
+                                  if _uncertain_recovery else [])
         model_error = None
         if llm is not None:
             # Bound the combined publication text sent outside the event store.
@@ -670,7 +792,7 @@ class EventStore:
         model = model_version or getattr(getattr(llm,"config",None),"model","deterministic-reported-claims-v1")
         allowed_hash = _hash(json.dumps([allowed,sorted(allowed_document_revision_refs) if allowed_document_revision_refs is not None else None],separators=(",",":")))
         package_id = "pkg_"+_hash("\0".join((tenant_id,event_id,str(snapshot["revision"]),source_policy_id,
-            policy_version,allowed_hash,model,IMPACT_PROMPT_VERSION)))[:32]
+            policy_version,allowed_hash,model,IMPACT_PROMPT_VERSION,IMPACT_CACHE_SEMANTICS_VERSION)))[:32]
         db=self._connect()
         try:
             row=db.execute("SELECT payload_json FROM impact_packages WHERE tenant_id=? AND package_id=?",(tenant_id,package_id)).fetchone()
@@ -693,9 +815,10 @@ class EventStore:
             resources=semantic.get("resources",[]),
             mechanisms=[ImpactMechanism.model_validate(item) for item in semantic.get("mechanisms",[])],
             possible_mechanisms=[item["description"] for item in semantic.get("mechanisms",[])],
-            coverage=Coverage(**snapshot["coverage"],extraction_mode=claim_meta["extraction_mode"],
-                limitations=list(dict.fromkeys([*claim_meta.get("limitations",[]),
-                    *([] if len(snapshot["sources"]) else ["no_policy_permitted_publications"])]))),
+            coverage=Coverage(**{**snapshot["coverage"],"extraction_mode":claim_meta["extraction_mode"],
+                "limitations":list(dict.fromkeys([*snapshot["coverage"].get("limitations",[]),
+                    *claim_meta.get("limitations",[]),
+                    *([] if len(snapshot["sources"]) else ["no_policy_permitted_publications"])]))}),
             model_version=model,prompt_version=IMPACT_PROMPT_VERSION,policy_version=policy_version,
             created_at=datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00","Z"))
         payload=package.model_dump_json()

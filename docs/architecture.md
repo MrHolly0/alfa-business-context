@@ -1,49 +1,56 @@
-# Архитектура проекта
+# Архитектура
 
-В репозитории есть React demo UI и развиваемая Python AI/Data часть. Symfony Core — внешний компонент: в `apps/core` пока нет рабочей реализации. Протоколы и fixture stand позволяют проверять совместимость, но не подменяют пользовательский PHP backend.
+Проект состоит из трёх частей: React-интерфейса, бизнес-ядра Symfony/PHP и отдельного Python-модуля анализа данных. В репозитории работают интерфейс на учебных данных и Python. PHP ещё не реализован; его протокол проверяется через отдельный контрактный стенд.
+
+## Что работает сейчас
+
+- **React/nginx:** интерфейс и локальное состояние браузера. Node.js нужен для сборки и тестов. Пользовательские действия пока не запускают Python.
+- **Python CLI/API/worker:** сбор материалов, документы, события, общий разбор, анализ компаний, периоды и наблюдения, настройки аналитика и турнир.
+- **Контрактный стенд Core:** проверка получения задания, продления lease и доставки результата. Он не предоставляет пользовательские права и не заменяет Symfony.
+
+## Подключение компонентов
 
 ```mermaid
 flowchart LR
-    User[Пользователь] --> UI[React UI]
-    UI --> PHP[Symfony Core: права и бизнес-состояние]
-    PHP -->|ai-job-v1 / source policy snapshot| Worker[Python CoreClient + Worker]
-    Worker -->|claim / heartbeat / ai-result-v1| PHP
-    Worker --> Workflow[Python DataWorkflow]
-    Workflow --> Collect[Source grants / bounded collector]
-    Collect --> Corpus[CorpusStore + private raw receipts]
-    Corpus --> Events[Events / claims / shared impact package]
-    Events --> Research[Scoped retrieval / graph / period / watches]
-    Research --> Analysts[Baseline or approved analyst config]
-    Analysts --> LLM[Explicitly configured model, if classification + budget allow]
-    Research --> Result[Candidate / coverage / versions]
-    Analysts --> Result
-    Result --> PHP
+    UI["React: интерфейс"] -. "после подключения" .-> Core["Symfony/PHP: бизнес-ядро"]
+    Worker["Python worker"] -. "claim / heartbeat / result" .-> Core
+    Worker --> Stand["Контрактный стенд Core"]
+    Worker --> Flow["Python: сбор и анализ"]
+    Flow --> Corpus["Документы, оригиналы, события"]
+    Flow --> LLM["Разрешённая модель"]
+    Flow --> Candidate["Кандидат с основаниями"]
 ```
 
-## Владение данными
+Пунктир обозначает ещё не подключённый PHP-контур. В рабочей системе интерфейс обращается к Core. Python worker забирает задания у Core и возвращает кандидатов, а не публикует ситуации самостоятельно.
 
-Core — источник истины для principals, membership/permissions, company profiles, source catalog and grants, source policy versions, jobs/leases, decisions и опубликованных business revisions. Frontend вызывает Core, а не внутренний Python endpoint. Пользовательское скрытие новости не меняет analytics policy; компания-исключение source/publisher/document требует Core permission и новой policy version.
+## Кто владеет данными
 
-Python хранит технические AI/Data records: неизменяемые документы и revisions, сырые bytes/hash receipts, evidence, event artifacts, impact packages, analyst configs, workflow stages, budget ledger и result outbox. Корпус и конфигурации находятся в локальном SQLite/state directory; private raw blobs tenant-isolated. Это не общий банковский PostgreSQL и не таблицы Core.
+| Core | Python |
+|---|---|
+| Пользователи, организации и права | Получение разрешённых материалов |
+| Профиль компании и ответы на уточнения | Документы, версии, оригиналы и поиск |
+| Каталог источников, настройки и политика | События, общий разбор и персональный анализ |
+| Расписание, задания, отмена и публикация | Настройки аналитика, оценки и турнир |
+| Бизнес-статусы и доставка в интерфейс | Журнал этапов, расходы и очередь отправки результата |
 
-Source PolicySnapshot приходит от Core на каждую задачу. Collector проверяет tenant, даты, enabled source, exclusions, HTTPS, публичные DNS addresses с IP pinning/TLS, allowlisted redirects, limits, ETag/backoff. Probe — одноразовая проверка URL; он не сохраняет user subscription. Collector поддерживает RSS/Atom, HTML, PDF и статическое JSON dot-path mapping, без произвольного crawler. Оригинал хранится отдельно от нормализованного текста и не меняет class из-за текста материала.
+Core передаёт неизменяемый снимок контекста и политики. Python не читает и не изменяет бизнес-таблицы Core. Личное скрытие новости не исключает её из анализа компании; для исключения основания Core выдаёт новую версию политики.
 
-## Поток AI/Data
+## Путь данных
 
-1. Core проверяет право пользователя, собирает snapshots и создаёт durable job со scope, versions, deadline, budget и generation.
-2. Worker получает `ai-job-v1`, запускает workflow с heartbeat/checkpoints, проверяет lease/deadline/versions и ставит точное сообщение в durable outbox.
-3. Collector читает только разрешённый source snapshot. Corpus сохраняет raw receipt, нормализованные ревизии и provenance. Без публикационной даты материал остаётся pending, а не получает текущую дату.
-4. EventStore объединяет повторные публикации, ведёт source origins/revisions и claim metadata; shared impact package можно применить к нескольким company snapshots. Similarity и упоминание в платеже не доказывают независимость источника или коммерческую связь.
-5. Research ограничен разрешёнными document refs, as-of/knowledge cutoff, профилем и предоставленным графом. Периодные метрики рассчитываются детерминированно. Watch eval применяет заданные человеком/Core условия к наблюдениям.
-6. Логические роли researcher/analyst/critic делят один scope и budget pipeline. Это не обязательный набор отдельных agent services. При наличии разрешённой классификации и явного budget вызывается настроенный provider; confidential input блокирует внешний call.
-7. Worker передаёт `ai-result-v1`. Core повторно проверяет cancel, lease generation, versions, scope и signature; только Core публикует или отклоняет ситуацию.
+1. Core создаёт задание с разрешёнными компаниями и источниками, версиями, сроком и бюджетом.
+2. Worker получает задание и продлевает lease — ограниченное по времени право его выполнять. Отмена или потеря lease останавливает следующие этапы.
+3. Collector получает RSS/Atom, HTML, PDF или JSON по указанным правилам. Проверяются адреса, ограничения размера и времени, исключения и срок следующего опроса. Probe источника возвращает предварительный просмотр, а не создаёт подписку.
+4. Корпус сохраняет оригинал отдельно от нормализованного текста. Публикации получают версии и точные фрагменты. Перепечатки объединяются в события, общий разбор используется для нескольких компаний.
+5. Поиск работает в разрешённом корпусе. Влияние оценивается по переданным фактам и зависимостям компании. Платёж и принадлежность группе не доказывают поставку.
+6. Исследователь, аналитик и критик работают в общем лимите. Код проверяет формат, ссылки и условия использования данных; смысловая правильность требует отдельной оценки.
+7. Worker передаёт `ai-result-v1`. Core проверяет актуальность версий и lease, устраняет повтор и принимает решение о публикации.
 
-Python cache не является доказательством получения результата Core. Core прикладывает точный `published_assessments` proof на следующую работу; без него Python возвращает сохранённый candidate с `publication_revision_required=true`, а Core дедуплицирует signature, чтобы не потерять первую публикацию или не создать revision повторно.
+Локальный кеш не доказывает, что Core получил результат. Для повторной проверки Core передаёт `published_assessments` — подписи уже опубликованных оценок. Без подтверждения Python повторно предлагает сохранённого кандидата, а Core устраняет дубликат.
 
-## Запуск и масштабирование
+## Хранение и запуск
 
-FastAPI предоставляет внутренний сервисный API; CLI может напрямую исполнить DataTask для локальной проверки. В рабочем пути Core владеет очередью, scheduler, user-facing progress, cancellation и notifications. Fixture-only Core stand привязан к loopback и запускается с явным `--fixture-mode`; он тестирует обычные worker routes и SQLite state, но не реализует PHP authorization/SSO/UI.
+Python использует SQLite для корпуса, событий, конфигураций, этапов, расходов и очереди отправки; сырые оригиналы сохраняет в отдельном каталоге с разделением по организациям. В Docker это named volume `alfa-business-context-intelligence-state`. HTTP API и worker используют те же модули, что CLI.
 
-Для текущих контрактов не требуются Kafka, Redis или vector database. SQLite позволяет повторить локальные состояния и проверить revisions/cache/outbox, но не объявляется production multi-node persistence. Научная/экспертная точность, банковские source rights, реальные CSV/PDF и бизнес-приёмка требуют внешних данных.
+PostgreSQL и объектное хранилище относятся к целевой интеграции. Kafka, Redis и векторная база для текущего стенда не требуются. Банковская авторизация, SSE, многосерверное развёртывание и эксплуатационные гарантии ещё не подключены.
 
-Подробнее: [подключение Backend/Frontend](ai-integration.md), [процесс AI/Data](ai-process.md), [матрица готовности](ai-scope-and-readiness.md), [контракты](../contracts/intelligence/README.md), [локальная разработка](development.md), [backlog](backlog.md), [live проверки](ai-live-checks.md).
+[Интеграция](ai-integration.md) · [Контракты](../contracts/intelligence/README.md) · [Запуск](development.md) · [Готовность](ai-scope-and-readiness.md) · [Проверки](ai-live-checks.md)

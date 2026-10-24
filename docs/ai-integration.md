@@ -20,7 +20,7 @@ docker compose --env-file /dev/null run --build --rm intelligence evaluate --mod
 docker compose --env-file /dev/null run --build --rm intelligence-test
 ```
 
-На хосте из `apps/intelligence`:
+На хосте сначала установите окружение по [инструкции разработки](development.md), затем из `apps/intelligence`:
 
 ```sh
 .venv/bin/python -m intelligence demo

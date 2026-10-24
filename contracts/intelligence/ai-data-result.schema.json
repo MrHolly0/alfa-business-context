@@ -296,6 +296,21 @@
           "minimum": 0,
           "title": "Independent Origins",
           "type": "integer"
+        },
+        "origin_groups": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Origin Groups",
+          "type": "integer"
+        },
+        "independence_status": {
+          "default": "unknown",
+          "enum": [
+            "unknown",
+            "supported"
+          ],
+          "title": "Independence Status",
+          "type": "string"
         }
       },
       "required": [

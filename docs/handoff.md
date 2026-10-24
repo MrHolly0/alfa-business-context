@@ -48,11 +48,11 @@ docker compose run --build --rm intelligence-test
 
 Рабочая версия находится в `main`. Для отдельной задачи используйте короткую ветку, например `feat/company-profile`, `fix/source-filter` или `docs/setup`. После включения изменений в `main` удаляйте завершённую ветку. Коммиты — `type: описание на русском`, без дополнительного соавторства.
 
-Для публикации создайте пустой репозиторий `alfa-business-context` в своём аккаунте и выполните из корня, подставив его адрес:
+Репозиторий: [MrHolly0/alfa-business-context](https://github.com/MrHolly0/alfa-business-context). Получить проект:
 
 ```sh
-git remote add origin <адрес-репозитория>
-git push -u origin main
+git clone https://github.com/MrHolly0/alfa-business-context.git
+cd alfa-business-context
 ```
 
-Товарищу достаточно ссылки на репозиторий: `git clone` получит `main` с кодом, документацией и примерами. Доступ к самому репозиторию задаётся в настройках площадки.
+Дальнейшие изменения отправляйте в ветку своей задачи. Основная версия находится в `main`. Доступ участникам задаётся в настройках репозитория.

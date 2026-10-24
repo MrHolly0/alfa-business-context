@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from .artifacts import ArtifactStore, payload_hash
 from .schemas import AnalysisRequest, CandidateAssessment
-from .workflow import DataTask, DataResult, DataWorkflow
+from .workflow import DataTask, DataResult, DataWorkflow, WorkflowNotStarted
 from .collection import SourcePolicySnapshot, SourceProbeRequest, SourceProbeResult
 from .client_data import CompanyContextPrepareRequest, CompanyContextPrepareResult, prepare_company_contexts
 from .relevance import RankRequest, RankResult, rank_events
@@ -184,17 +184,28 @@ def create_app(*, store, pipeline, artifact_store: ArtifactStore | None = None,
         except ValueError as e: raise HTTPException(409, "idempotency_conflict") from e
         if prior is not None: return prior
         try:
-            reserved = artifacts.reserve_candidate(tenant_id, req_id, digest)
+            owner_token = artifacts.claim_candidate(tenant_id, req_id, digest)
         except ValueError as e: raise HTTPException(409, "idempotency_conflict") from e
-        if not reserved:
+        if owner_token is None:
             # An identical request is already executing, or is awaiting operator recovery after a crash.
             raise HTTPException(409, "request_in_progress")
         try:
             if isinstance(request, DataTask):
-                result = DataResult.model_validate(get_workflow().run(request))
+                try:
+                    raw_result = get_workflow().run(request)
+                except WorkflowNotStarted as e:
+                    # This is the sole safe retry signal. It is deliberately
+                    # caught only around DataWorkflow.run, before validation or
+                    # persistence can fail after work has started.
+                    artifacts.release_candidate(tenant_id, req_id, digest, owner_token)
+                    code = str(e)
+                    if code in {"capacity_exhausted", "request_in_progress"}:
+                        raise HTTPException(409, code) from e
+                    raise HTTPException(503, "workflow_not_started") from e
+                result = DataResult.model_validate(raw_result)
             else:
                 result = CandidateAssessment.model_validate(pipeline.run(request))
-            return artifacts.save_candidate(tenant_id, req_id, digest, result)
+            return artifacts.save_candidate(tenant_id, req_id, digest, result, owner_token=owner_token)
         except ValueError as e:
             if str(e) == "idempotency_conflict": raise HTTPException(409, "idempotency_conflict") from e
             code = str(e)

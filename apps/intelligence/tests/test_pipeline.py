@@ -331,3 +331,19 @@ def test_hackathon_legacy_request_does_not_send_confidential_evidence(tmp_path):
     assert not llm.calls
     assert "external_model_data_classification_denied" in result.usage["errors"]
     assert result.status=="partial"
+
+
+def test_long_event_model_projection_keeps_original_revision_and_reports_partial(tmp_path):
+    from intelligence.pipeline import MAX_MODEL_EVENT_CHARS
+    request=req();text=(request.event.text+" ")*2500
+    request=request.model_copy(update={"event":request.event.model_copy(update={"text":text.strip()})})
+    corpus=store(tmp_path);llm=FakeLLM([json.dumps({"summary":"Доступен фрагмент статьи.","claims":[],"influence_chain":[],"clarifications":[]})])
+    result=AnalysisPipeline(corpus,llm).run(request)
+    assert len(llm.calls)==1
+    projected=json.loads(llm.calls[0][0][-1]["content"].rsplit("\n",1)[-1])["REQUEST_CONTEXT"]
+    assert len(projected["event"]["text"])==MAX_MODEL_EVENT_CHARS
+    assert projected["event_original_characters"]==len(request.event.text)
+    assert projected["event_text_truncated"] is True
+    assert "event_text_excerpt_only" in result.coverage.limitations
+    assert result.status=="partial"
+    assert request.event.text==text.strip()

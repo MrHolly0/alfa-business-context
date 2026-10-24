@@ -1,5 +1,8 @@
 from pathlib import Path
-import tempfile
+import json
+import multiprocessing
+import os
+import time
 
 import pytest
 
@@ -51,6 +54,20 @@ def test_near_duplicate_is_grouped_but_independent_sources_remain_distinct(store
     assert snapshot["coverage"]["permitted_publications"]==2
     assert snapshot["coverage"]["independent_origin_groups"]==2
     assert second["grouping"]=="near_duplicate_review_group"
+
+
+def test_exact_reprints_preserve_receipts_but_do_not_count_as_independent(store):
+    text="Публикация сообщает: порт закрыт на два дня из-за шторма."
+    first=store.ingest(publication(uri="https://news-a.example/story",content=text))
+    second=store.ingest(publication(source="src-b",uri="https://news-b.example/copy",content=text))
+    snapshot=policy(store,first["event_id"])
+    coverage=snapshot["coverage"]
+    assert coverage["permitted_publications"]==2
+    assert coverage["origin_group_count"]==2
+    assert coverage["independent_origin_groups"]==1
+    assert coverage["independence_status"]=="unknown"
+    assert "exact_reprints_not_independent_confirmations" in coverage["limitations"]
+    assert second["event_id"]==first["event_id"]
 
 
 def test_tenant_and_source_policy_block_publication_and_original_leaks(store):
@@ -142,7 +159,85 @@ def test_package_lookup_and_semantic_claim_cache_precede_repeat_model_calls(stor
     independent=store.build_impact_package("tenant-a",first["event_id"],source_policy_id="policy-1",
         policy_version="v1",allowed_source_ids=["src-a","src-b","src-c"],llm=llm)
     assert llm.calls==2
-    assert independent.coverage.independent_origin_groups==2
+    assert independent.coverage.permitted_publications==3
+    assert independent.coverage.origin_group_count==2
+    assert independent.coverage.independent_origin_groups==1
+    assert independent.coverage.independence_status=="unknown"
+
+
+def _multiprocess_package_build(path, event_id, counter_path):
+    import fcntl
+    from types import SimpleNamespace
+    store=EventStore(path)
+    class CountingLLM:
+        config=SimpleNamespace(model="multiprocess-singleflight",max_output_tokens=256)
+        def complete(self,*args,**kwargs):
+            fd=os.open(counter_path,os.O_CREAT|os.O_RDWR,0o600)
+            try:
+                fcntl.flock(fd,fcntl.LOCK_EX)
+                os.lseek(fd,0,os.SEEK_SET)
+                current=os.read(fd,32).decode() or "0"
+                os.lseek(fd,0,os.SEEK_SET)
+                os.ftruncate(fd,0)
+                os.write(fd,str(int(current)+1).encode())
+                os.fsync(fd)
+            finally:
+                fcntl.flock(fd,fcntl.LOCK_UN)
+                os.close(fd)
+            time.sleep(0.15)
+            return {"content":json.dumps({"claims":[],"entities":[],"territories":[],"resources":[],"mechanisms":[]})}
+    store.build_impact_package("tenant-a",event_id,source_policy_id="policy-1",policy_version="v1",
+        allowed_source_ids=["src-a"],llm=CountingLLM())
+
+
+def test_shared_package_model_call_is_singleflight_across_processes(tmp_path):
+    path=str(tmp_path/"events.sqlite3")
+    store=EventStore(path)
+    event=store.ingest(publication(content="Публикация сообщает: порт временно закрыт."))
+    counter=str(tmp_path/"calls.txt")
+    # `fork` keeps this offline test small; both workers still open independent
+    # EventStore connections and acquire the process-level file lock.
+    context=multiprocessing.get_context("fork")
+    processes=[context.Process(target=_multiprocess_package_build,args=(path,event["event_id"],counter))
+               for _ in range(2)]
+    for process in processes: process.start()
+    for process in processes: process.join(timeout=10)
+    assert all(not process.is_alive() and process.exitcode==0 for process in processes)
+    assert Path(counter).read_text()=="1"
+
+
+def test_uncertain_extraction_reservation_never_blindly_retries(store):
+    from types import SimpleNamespace
+    first=store.ingest(publication(content="Публикация сообщает: порт закрыт."))
+    snapshot=store.get_event("tenant-a",first["event_id"],source_policy_id="policy-1",
+        policy_version="v1",allowed_source_ids=["src-a"])
+    allowed=store._allowed("tenant-a","policy-1","v1",["src-a"])
+    allowed_hash=__import__("hashlib").sha256(
+        json.dumps([allowed,None],separators=(",",":")).encode()).hexdigest()
+    semantic=store._semantic_signature(snapshot["sources"])
+    model="crashed-after-send"
+    reservation_id=__import__("hashlib").sha256("\0".join(("tenant-a",first["event_id"],"policy-1","v1",
+        allowed_hash,semantic,model,"event-claims-v2")).encode()).hexdigest()
+    with store._connect() as db:
+        db.execute("INSERT INTO claim_extraction_reservations VALUES(?,?,?,?)",
+            ("tenant-a",reservation_id,"started","2026-10-24T00:00:00Z"))
+    class NeverCall:
+        config=SimpleNamespace(model=model,max_output_tokens=256)
+        calls=0
+        def complete(self,*args,**kwargs):
+            self.calls+=1
+            raise AssertionError("uncertain paid call was retried")
+    llm=NeverCall()
+    claims,metadata=store.extract_claims("tenant-a",first["event_id"],source_policy_id="policy-1",
+        policy_version="v1",allowed_source_ids=["src-a"],llm=llm)
+    assert claims and all(claim.kind=="reported_fact" for claim in claims)
+    assert llm.calls==0
+    assert "extractor_call_outcome_uncertain_no_automatic_retry" in metadata["limitations"]
+    replay,replay_metadata=store.extract_claims("tenant-a",first["event_id"],source_policy_id="policy-1",
+        policy_version="v1",allowed_source_ids=["src-a"],llm=llm)
+    assert replay==claims
+    assert replay_metadata==metadata
+    assert llm.calls==0
 
 
 def test_original_at_requested_event_revision_does_not_leak_future_correction(store):

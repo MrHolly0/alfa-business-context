@@ -6,4 +6,4 @@
 
 Вывод объясняет совпавший контекст, но не утверждает причинность или ожидаемый ущерб. Score не является вероятностью, оценкой качества модели или самостоятельной оценкой влияния. Каждый отобранный event передаётся дальше в pipeline для анализа с evidence и проверкой гипотез.
 
-Offline-проверка: `apps/intelligence/.venv/bin/python -m pytest apps/intelligence/tests/test_relevance.py -q`.
+Проверка из корня репозитория: `apps/intelligence/.venv/bin/python -m pytest -q -p no:cacheprovider apps/intelligence/tests/test_relevance.py`.

@@ -114,9 +114,28 @@
           "title": "Permitted Publications",
           "type": "integer"
         },
+        "origin_group_count": {
+          "default": 0,
+          "title": "Origin Group Count",
+          "type": "integer"
+        },
         "independent_origin_groups": {
           "title": "Independent Origin Groups",
           "type": "integer"
+        },
+        "independence_status": {
+          "default": "unknown",
+          "enum": [
+            "unknown",
+            "supported"
+          ],
+          "title": "Independence Status",
+          "type": "string"
+        },
+        "independence_basis": {
+          "default": "",
+          "title": "Independence Basis",
+          "type": "string"
         },
         "policy_source_count": {
           "title": "Policy Source Count",

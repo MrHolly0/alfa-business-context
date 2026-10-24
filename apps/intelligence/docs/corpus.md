@@ -6,4 +6,4 @@
 
 `search(...)` выполняет лексический поиск для русского и английского текста. Tenant, список разрешённых source IDs, роль, `as_of` и явные revision refs ограничивают кандидатов до ранжирования. Без указания ревизии доступна только последняя версия документа на выбранное время. Повторные материалы с одинаковым содержимым занимают одно место в выдаче. Цитаты имеют стабильные ID, hash и локатор смещения или страницы, длина цитаты не превышает 1000 символов. `get_evidence(...)` повторно проверяет tenant/source/time scope.
 
-Проверки offline: `PYTHONPATH=apps/intelligence python -m unittest apps.intelligence.tests.test_corpus apps.intelligence.tests.test_parsers -v`.
+Проверки offline из каталога `apps/intelligence`: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/test_corpus.py tests/test_parsers.py`.

@@ -64,6 +64,13 @@ class CollectionTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def _seed_poll(self, collector, grant, due, *, attempts=0, etag=None, last_modified=None):
+        parsed = SourceGrant.model_validate(grant)
+        state, reason = collector._claim_poll("tenant-a", parsed, NOW, force=True)
+        self.assertIsNone(reason)
+        prior = {**state, "attempts": attempts, "etag": etag, "last_modified": last_modified}
+        collector._save_state("tenant-a", parsed, due, prior, None, None, success=True)
+
     def test_rss_collection_preserves_dates_original_bytes_and_provenance(self):
         fetcher = FakeFetcher(FetchResult(status=200, headers={"content-type": "application/rss+xml", "etag": '"a"'}, body=RSS))
         collector = NewsCollector(self.store, state_path=self.collector_state, fetcher=fetcher, raw_dir=self.raw)
@@ -160,7 +167,7 @@ class CollectionTests(unittest.TestCase):
     def test_conditional_polling_and_304_respect_next_poll(self):
         fetcher = FakeFetcher(FetchResult(status=304, headers={}, body=b""))
         collector = NewsCollector(self.store, state_path=self.collector_state, fetcher=fetcher)
-        collector._save_state("tenant-a", SourceGrant.model_validate(self.grant), NOW + timedelta(hours=1), {"attempts": 2, "etag": '"v1"', "last_modified": None}, None, None, success=True)
+        self._seed_poll(collector, self.grant, NOW + timedelta(hours=1), attempts=2, etag='"v1"')
         policy = snapshot(self.grant)
         self.assertEqual(len(collector.collect(policy, now=NOW)["skipped"]), 1)
         report = collector.collect(policy, now=NOW, force=True)
@@ -171,8 +178,8 @@ class CollectionTests(unittest.TestCase):
         original = SourceGrant.model_validate(self.grant)
         collector = NewsCollector(self.store, state_path=self.collector_state,
             fetcher=FakeFetcher(FetchResult(status=200, headers={"etag": '"new"'}, body=RSS)))
-        collector._save_state("tenant-a", original, NOW + timedelta(hours=1),
-            {"attempts": 3, "etag": '"old"', "last_modified": "yesterday"}, None, None, success=True)
+        self._seed_poll(collector, original, NOW + timedelta(hours=1), attempts=3,
+            etag='"old"', last_modified="yesterday")
         changed = {**self.grant, "uri": "https://feed.example/replacement.xml"}
         fetcher = collector.fetcher
         report = collector.collect(snapshot(changed), now=NOW + timedelta(minutes=1))
@@ -187,14 +194,89 @@ class CollectionTests(unittest.TestCase):
         collector = NewsCollector(self.store, state_path=self.collector_state, fetcher=FakeFetcher())
         old = SourceGrant.model_validate(self.grant)
         new = SourceGrant.model_validate({**self.grant, "uri": "https://feed.example/current.xml"})
-        collector._save_state("tenant-a", new, NOW + timedelta(hours=1),
-            {"attempts": 0, "etag": '"current"', "last_modified": None}, None, None, success=True)
-        collector._save_state("tenant-a", old, NOW + timedelta(minutes=5),
-            {"attempts": 1, "etag": '"stale"', "last_modified": None},
+        old_claim, reason = collector._claim_poll("tenant-a", old, NOW, force=True)
+        self.assertIsNone(reason)
+        new_claim, reason = collector._claim_poll("tenant-a", new, NOW + timedelta(seconds=1), force=True)
+        self.assertIsNone(reason)
+        collector._save_state("tenant-a", new, NOW + timedelta(hours=1), new_claim,
+            FetchResult(status=200, headers={"etag": '"current"'}, body=b"new"), None, success=True)
+        collector._save_state("tenant-a", old, NOW + timedelta(minutes=5), old_claim,
             FetchResult(status=200, headers={"etag": '"stale"'}, body=b"old"), None, success=True)
         state = collector._state("tenant-a", "news")
         self.assertEqual(state["etag"], '"current"')
         self.assertEqual(state["grant_fingerprint"], collector._grant_fingerprint(new))
+
+    def test_personal_hides_do_not_change_company_collection_or_document_permission(self):
+        hidden = snapshot(self.grant, user_excluded_source_ids=("news",),
+                          user_excluded_publishers=("Проверенное издание",),
+                          user_excluded_document_uris=("https://news.example/story",))
+        metadata = {"tenant_id": "tenant-a", "source_id": "news",
+                    "source_role": "external", "publisher": "Проверенное издание",
+                    "canonical_uri": "https://news.example/story"}
+        self.assertIn("news", hidden.effective_source_ids())
+        self.assertTrue(hidden.permits_document(metadata))
+        self.assertTrue(hidden.is_personally_hidden(metadata))
+
+        company_excluded = snapshot(self.grant, excluded_source_ids=("news",))
+        self.assertNotIn("news", company_excluded.effective_source_ids())
+        self.assertFalse(company_excluded.permits_document(metadata))
+
+    def test_expired_same_grant_poll_is_fenced_by_token_and_generation(self):
+        collector = NewsCollector(self.store, state_path=self.collector_state, fetcher=FakeFetcher())
+        grant = SourceGrant.model_validate(self.grant)
+        stale, reason = collector._claim_poll("tenant-a", grant, NOW, force=True)
+        self.assertIsNone(reason)
+        replacement, reason = collector._claim_poll("tenant-a", grant, NOW + timedelta(seconds=31), force=True)
+        self.assertIsNone(reason)
+        self.assertNotEqual(stale["lease_token"], replacement["lease_token"])
+        self.assertGreater(replacement["lease_generation"], stale["lease_generation"])
+
+        collector._save_state("tenant-a", grant, NOW + timedelta(hours=2), stale,
+            FetchResult(status=304, headers={"etag": '"stale"'}), None, success=True)
+        third, reason = collector._claim_poll("tenant-a", grant, NOW + timedelta(seconds=32), force=True)
+        self.assertEqual(reason, "already_running")
+        self.assertEqual(third["lease_token"], replacement["lease_token"])
+        self.assertEqual(third["etag"], replacement["etag"])
+        self.assertEqual(third["attempts"], replacement["attempts"])
+
+    def test_retry_after_delta_seconds_http_date_and_out_of_range_suspension(self):
+        from email.utils import format_datetime
+        target = NOW + timedelta(hours=24)
+        self.assertEqual(NewsCollector._backoff(SourceGrant.model_validate(self.grant), None, NOW,
+            "3600"), NOW + timedelta(hours=1))
+        self.assertEqual(NewsCollector._backoff(SourceGrant.model_validate(self.grant), None, NOW,
+            format_datetime(target)), target)
+        self.assertEqual(NewsCollector._backoff(SourceGrant.model_validate(self.grant), None, NOW,
+            "86400"), target)
+        suspended = NewsCollector._backoff(SourceGrant.model_validate(self.grant), None, NOW,
+            "9" * 10000)
+        self.assertEqual(suspended, datetime.max.replace(tzinfo=timezone.utc))
+
+    def test_checkpoint_cancellation_stops_before_next_source_and_releases_only_owned_lease(self):
+        class Cancelled(RuntimeError):
+            pass
+
+        stopped = False
+        calls = []
+
+        def fetcher(url, headers, **options):
+            nonlocal stopped
+            calls.append(url)
+            stopped = True
+            return FetchResult(status=200, headers={"content-type": "application/rss+xml"}, body=RSS)
+
+        def checkpoint(stage):
+            if stopped:
+                raise Cancelled("synthetic lease loss")
+
+        collector = NewsCollector(self.store, state_path=self.collector_state, fetcher=fetcher)
+        grants = (self.grant, {**self.grant, "source_id": "other", "uri": "https://other.example/rss"})
+        with self.assertRaisesRegex(Cancelled, "synthetic lease loss"):
+            collector.collect(snapshot(*grants), now=NOW, checkpoint=checkpoint)
+        self.assertEqual(calls, [self.grant["uri"]])
+        state = collector._state("tenant-a", "news")
+        self.assertIsNone(state["lease_token"])
+        self.assertIsNone(state["lease_until"])
 
     def test_grant_classification_change_never_promotes_existing_corpus_revision(self):
         confidential = NewsCollector(self.store, state_path=self.collector_state,
@@ -222,7 +304,7 @@ class CollectionTests(unittest.TestCase):
         NewsCollector(self.store, state_path=legacy_path, fetcher=FakeFetcher())
         with sqlite3.connect(legacy_path) as db:
             cols = {row[1] for row in db.execute("PRAGMA table_info(poll_state)")}
-        self.assertTrue({"lease_until", "grant_fingerprint"}.issubset(cols))
+        self.assertTrue({"lease_until", "grant_fingerprint", "lease_generation", "lease_token"}.issubset(cols))
 
     def test_html_probe_detects_metadata_but_does_not_invent_missing_date(self):
         html = '<html><head><title>Заголовок</title><meta property="og:site_name" content="Издание"></head><body><article><p>Текст статьи.</p></article></body></html>'.encode()

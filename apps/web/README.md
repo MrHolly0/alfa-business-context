@@ -1,6 +1,6 @@
 # Веб-приложение
 
-Браузерный React-интерфейс. Node.js используется для сборки и тестов; production runtime — nginx, который раздаёт статические файлы и передаёт `/api/` в PHP core.
+Браузерный React-интерфейс. Node.js используется только для сборки и тестов; контейнер runtime содержит nginx, который раздаёт статические файлы. Сейчас `/api/` отвечает `503`: PHP Core в Compose ещё не подключён.
 
 ## Структура
 
@@ -12,8 +12,8 @@
 
 ## Запуск
 
-Из корня репозитория выполните `npm run dev`. Docker Compose соберёт сервисы и откроет интерфейс на http://localhost:4173. Остановка: `docker compose down`.
+Из корня репозитория выполните `npm run dev`. Docker Compose соберёт статический UI и откроет его на http://localhost:4173. Остановка: `docker compose down`. Это браузерный прототип; он не запускает Python DataTask и не обращается к Core.
 
 Для локальной сборки и тестов установите зависимости через `npm run install:web`, затем используйте `npm run build`, `npm run validate` и `npm test`. Для локального запуска сайта без Docker Node HTTP-сервер не предоставляется.
 
-API обслуживается PHP-приложением в `apps/core`. Python-сервис анализа находится в `apps/intelligence`. Текущее демо-поведение и его ограничения описаны в [статусе веб-приложения](../../docs/web-status.md).
+Python AI/Data находится в `apps/intelligence` и запускается отдельно (например, `demo-data` или `run-task`). Код frontend пока не подключён к Python API или PHP Core. Текущие ограничения описаны в [статусе web-приложения](../../docs/web-status.md), команды — в [infra README](../../infra/README.md).

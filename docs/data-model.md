@@ -1,6 +1,6 @@
 # Модель данных и владение
 
-Целевая модель из product v3, не схема уже созданной базы. Core и AI могут использовать один PostgreSQL-кластер с раздельными schemas/roles, но данные принадлежат одному приложению. Межсервисных SQL joins/FKs и записи в чужие таблицы нет. Идентификаторы между сервисами — opaque strings; каждый JSON/API contract несёт версии и scope. Core остаётся источником истины по доступу, user actions, jobs и опубликованным оценкам.
+Это целевая модель из product v3, а не схема текущей базы. Сегодня Python сохраняет локальные corpus/workflow/source polling данные в SQLite и raw blobs в private state; production Core/PostgreSQL и PHP user API в Compose не подключены. Core и AI могут использовать один PostgreSQL-кластер с раздельными schemas/roles, но данные принадлежат одному приложению. Межсервисных SQL joins/FKs и записи в чужие таблицы нет. Идентификаторы между сервисами — opaque strings; каждый JSON/API contract несёт версии и scope. Core остаётся источником истины по доступу, user actions, jobs и опубликованным оценкам.
 
 ## Core schema — Symfony владеет
 
@@ -39,7 +39,7 @@ Core хранит только устойчивые opaque AI refs и матер
 
 ## Версии, сообщения и инварианты
 
-Публичная команда создаёт Core job с `context_version`, `source_policy_version`, `event_versions`, deadline/budget и `lease_generation`. Python читает согласованный snapshot через Core API; в своей AI schema сохраняет artifact revisions. Candidate возвращает эти же input versions и refs. Core проверяет current membership, source policy, revisions, cancel flag и generation перед публикацией. Устаревший candidate становится `superseded`; новый вход при необходимости coalesces в следующую job.
+Публичная команда должна создавать Core job с `context_version`, `source_policy_version`, `event_versions`, deadline/budget и `lease_generation`. Реализованный Python контракт `ai-data-task-v1` передаёт tenant/company, `context_version`, immutable `SourcePolicySnapshot`, operation, time mode, budget/scope и опубликованные assessment proofs; `ai-data-result-v1` возвращает кандидатов и revisions. Python читает переданный snapshot, а не Core DB. Stand позволяет локально проверять claim/heartbeat/result в fixture-only режиме; это не production Core. При интеграции Core проверяет current membership, source policy, revisions, cancel flag и generation перед публикацией. Устаревший candidate должен стать `superseded`; новый вход при необходимости coalesces в следующую job.
 
 `Idempotency-Key` уникален по scope tenant + principal + operation. Тот же ключ с тем же `payload_hash` возвращает прежнюю job; другой payload — `409 Conflict`. `request_id`/`trace_id` не дедуплицируют действие. At-least-once delivery допустима; Core outbox и inbox/idempotent consumers гарантируют однократное применение эффекта внутри Core. PHP Messenger обрабатывает короткие проекции/outbox/notifications; Python retries долгой job планирует Core `run_after`.
 
