@@ -41,7 +41,8 @@ def main(argv=None):
             cmd.add_argument('--judge-profile', choices=['openrouter', 'hackathon'])
             cmd.add_argument('--scope', help='Область публикации; сравнение с её текущей активной версией')
             cmd.add_argument('--shadow', action='store_true')
-            cmd.add_argument('--critic', action='store_true', help='Один дополнительный разбор оснований перед holdout; без автопереписывания')
+            cmd.add_argument('--shadow-dataset', help='Отдельный свежий tournament-dataset-v1 для сравнения без выбора победителя')
+            cmd.add_argument('--critic', action='store_true', help='Один разбор оснований и максимум один ограниченный проход уточнения ответа перед holdout')
     budget = commands.add_parser('budget', help='Расходы общего счёта и экспериментального пула, без сетевых вызовов')
     budget.add_argument('--config', default=str(APP_ROOT/'examples/providers.template.json'))
     budget.add_argument('--profile', choices=['openrouter', 'hackathon'])
@@ -134,7 +135,8 @@ def main(argv=None):
                     judge=PairJudge(services[-1] if services else None),
                     critic=services[-1] if args.critic and services else None).run(
                         run_id=args.run_id, dataset=read_json(args.dataset), candidate_refs=refs,
-                        mode=args.mode, shadow=args.shadow, execution_identity=identities, target_scope=args.scope)
+                        mode=args.mode, shadow=args.shadow, execution_identity=identities, target_scope=args.scope,
+                        shadow_dataset=read_json(args.shadow_dataset) if args.shadow_dataset else None)
                 write_json(report,args.output)
         return 0
     except Exception as exc:

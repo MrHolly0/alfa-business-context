@@ -1,0 +1,97 @@
+{
+  "$defs": {
+    "RevenueUnit": {
+      "enum": [
+        "RUB",
+        "thousand_RUB"
+      ],
+      "title": "RevenueUnit",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Typed internal API input. Core must authenticate tenant_id before use.",
+  "properties": {
+    "tenant_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Tenant Id",
+      "type": "string"
+    },
+    "filename": {
+      "maxLength": 255,
+      "minLength": 1,
+      "title": "Filename",
+      "type": "string"
+    },
+    "origin": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Origin",
+      "type": "string"
+    },
+    "rows": {
+      "items": {
+        "additionalProperties": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": "object"
+      },
+      "maxItems": 500,
+      "minItems": 1,
+      "title": "Rows",
+      "type": "array"
+    },
+    "roles_by_synthetic_u": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "maxProperties": 500,
+      "title": "Roles By Synthetic U",
+      "type": "object"
+    },
+    "revenue_unit": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RevenueUnit"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "affected_company_ids": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 500,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Affected Company Ids"
+    }
+  },
+  "required": [
+    "tenant_id",
+    "filename",
+    "origin",
+    "rows"
+  ],
+  "title": "CompanyContextPrepareRequest",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

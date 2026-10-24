@@ -1,0 +1,467 @@
+{
+  "$defs": {
+    "Claim": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_id": {
+          "title": "Claim Id",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ClaimKind"
+        },
+        "statement": {
+          "title": "Statement",
+          "type": "string"
+        },
+        "quote": {
+          "title": "Quote",
+          "type": "string"
+        },
+        "source_id": {
+          "title": "Source Id",
+          "type": "string"
+        },
+        "publication_id": {
+          "title": "Publication Id",
+          "type": "string"
+        },
+        "origin_group_id": {
+          "title": "Origin Group Id",
+          "type": "string"
+        },
+        "author": {
+          "default": "",
+          "title": "Author",
+          "type": "string"
+        },
+        "publisher": {
+          "default": "",
+          "title": "Publisher",
+          "type": "string"
+        },
+        "valid_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid From"
+        },
+        "valid_to": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid To"
+        },
+        "supporting_claim_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Supporting Claim Ids",
+          "type": "array"
+        },
+        "contradicting_claim_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Contradicting Claim Ids",
+          "type": "array"
+        },
+        "classification_basis": {
+          "title": "Classification Basis",
+          "type": "string"
+        }
+      },
+      "required": [
+        "claim_id",
+        "kind",
+        "statement",
+        "quote",
+        "source_id",
+        "publication_id",
+        "origin_group_id",
+        "classification_basis"
+      ],
+      "title": "Claim",
+      "type": "object"
+    },
+    "ClaimKind": {
+      "enum": [
+        "fact",
+        "reported_fact",
+        "opinion",
+        "forecast",
+        "hypothesis"
+      ],
+      "title": "ClaimKind",
+      "type": "string"
+    },
+    "Coverage": {
+      "additionalProperties": false,
+      "properties": {
+        "permitted_publications": {
+          "title": "Permitted Publications",
+          "type": "integer"
+        },
+        "independent_origin_groups": {
+          "title": "Independent Origin Groups",
+          "type": "integer"
+        },
+        "policy_source_count": {
+          "title": "Policy Source Count",
+          "type": "integer"
+        },
+        "policy_id": {
+          "title": "Policy Id",
+          "type": "string"
+        },
+        "policy_version": {
+          "title": "Policy Version",
+          "type": "string"
+        },
+        "originals_available": {
+          "title": "Originals Available",
+          "type": "boolean"
+        },
+        "extraction_mode": {
+          "title": "Extraction Mode",
+          "type": "string"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "permitted_publications",
+        "independent_origin_groups",
+        "policy_source_count",
+        "policy_id",
+        "policy_version",
+        "originals_available",
+        "extraction_mode"
+      ],
+      "title": "Coverage",
+      "type": "object"
+    },
+    "ImpactMechanism": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "source_publication_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Source Publication Ids",
+          "type": "array"
+        },
+        "horizon": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Horizon",
+          "type": "string"
+        },
+        "conditions": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Conditions",
+          "type": "array"
+        },
+        "alternatives": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Alternatives",
+          "type": "array"
+        },
+        "falsifiers": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Falsifiers",
+          "type": "array"
+        },
+        "status": {
+          "const": "hypothesis",
+          "default": "hypothesis",
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "description",
+        "source_publication_ids",
+        "horizon",
+        "conditions",
+        "falsifiers"
+      ],
+      "title": "ImpactMechanism",
+      "type": "object"
+    },
+    "SourceReference": {
+      "additionalProperties": false,
+      "properties": {
+        "publication_id": {
+          "title": "Publication Id",
+          "type": "string"
+        },
+        "source_id": {
+          "title": "Source Id",
+          "type": "string"
+        },
+        "source_role": {
+          "title": "Source Role",
+          "type": "string"
+        },
+        "data_classification": {
+          "default": "confidential",
+          "enum": [
+            "public",
+            "synthetic",
+            "confidential"
+          ],
+          "title": "Data Classification",
+          "type": "string"
+        },
+        "canonical_uri": {
+          "title": "Canonical Uri",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "published_at": {
+          "title": "Published At",
+          "type": "string"
+        },
+        "fetched_at": {
+          "title": "Fetched At",
+          "type": "string"
+        },
+        "event_time": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Time"
+        },
+        "publisher": {
+          "default": "",
+          "title": "Publisher",
+          "type": "string"
+        },
+        "author": {
+          "default": "",
+          "title": "Author",
+          "type": "string"
+        },
+        "origin_group_id": {
+          "title": "Origin Group Id",
+          "type": "string"
+        },
+        "content_hash": {
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "document_revision_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Document Revision Ref"
+        },
+        "original_available": {
+          "default": true,
+          "title": "Original Available",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "publication_id",
+        "source_id",
+        "source_role",
+        "canonical_uri",
+        "title",
+        "published_at",
+        "fetched_at",
+        "origin_group_id",
+        "content_hash"
+      ],
+      "title": "SourceReference",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "package_id": {
+      "title": "Package Id",
+      "type": "string"
+    },
+    "data_classification": {
+      "default": "confidential",
+      "enum": [
+        "public",
+        "synthetic",
+        "confidential"
+      ],
+      "title": "Data Classification",
+      "type": "string"
+    },
+    "tenant_id": {
+      "title": "Tenant Id",
+      "type": "string"
+    },
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "revision": {
+      "title": "Revision",
+      "type": "integer"
+    },
+    "claims": {
+      "items": {
+        "$ref": "#/$defs/Claim"
+      },
+      "title": "Claims",
+      "type": "array"
+    },
+    "sources": {
+      "items": {
+        "$ref": "#/$defs/SourceReference"
+      },
+      "title": "Sources",
+      "type": "array"
+    },
+    "entities": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Entities",
+      "type": "array"
+    },
+    "territories": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Territories",
+      "type": "array"
+    },
+    "resources": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Resources",
+      "type": "array"
+    },
+    "mechanisms": {
+      "items": {
+        "$ref": "#/$defs/ImpactMechanism"
+      },
+      "maxItems": 16,
+      "title": "Mechanisms",
+      "type": "array"
+    },
+    "possible_mechanisms": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Possible Mechanisms",
+      "type": "array"
+    },
+    "conditions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Conditions",
+      "type": "array"
+    },
+    "alternatives": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Alternatives",
+      "type": "array"
+    },
+    "unknowns": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Unknowns",
+      "type": "array"
+    },
+    "coverage": {
+      "$ref": "#/$defs/Coverage"
+    },
+    "model_version": {
+      "title": "Model Version",
+      "type": "string"
+    },
+    "prompt_version": {
+      "title": "Prompt Version",
+      "type": "string"
+    },
+    "policy_version": {
+      "title": "Policy Version",
+      "type": "string"
+    },
+    "created_at": {
+      "title": "Created At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "package_id",
+    "tenant_id",
+    "event_id",
+    "revision",
+    "claims",
+    "sources",
+    "coverage",
+    "model_version",
+    "prompt_version",
+    "policy_version",
+    "created_at"
+  ],
+  "title": "ImpactPackage",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

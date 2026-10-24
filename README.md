@@ -1,51 +1,58 @@
 # Бизнес-контекст
 
-Сервис помогает руководителю понять, какие новости важны для его компании и почему.
+Сервис помогает руководителю понять, какие новости могут повлиять на его компанию, и увидеть основания, ограничения и неизвестное.
 
-## Кто где работает
+## Компоненты и границы
 
-| Часть | Каталог | Ответственный |
+| Часть | Каталог | Ответственность |
 |---|---|---|
-| Сценарий и ожидаемые ответы | `docs/product` | БА + промпты |
-| React-интерфейс | `apps/web/src` | Frontend |
-| PHP-ядро и API | `apps/core` | Backend |
-| Поиск, анализ и модели | `apps/intelligence` | ML |
+| Пользовательский экран | `apps/web` | React-интерфейс; до Core работает на демонстрационных данных |
+| Бизнес-ядро | `apps/core` | Symfony/PHP Core: пользователи, права, компании, настройки источников, расписания и публикация результатов; production-реализации пока нет |
+| Анализ данных | `apps/intelligence` | Python: сбор по разрешённым snapshot, корпус, события, поиск, анализ и Core worker |
 
-Наша текущая реализация — Python-компонент. PHP-ядро создаёт Backend: сейчас в `apps/core` только описание. Веб-приложение содержит интерфейс и демонстрационные данные. Node используется для его сборки и тестов, готовые файлы раздаёт nginx. Python выполняет импорт, поиск, анализ и получение заданий; полный путь через настоящий PHP ещё нужно соединить.
+Core владеет правами, контекстом и source policy. Python не меняет эти бизнес-данные: он получает версионированную задачу и возвращает результат-кандидат. Fixture Core stand позволяет проверить контракт с настоящим Python worker, но не заменяет PHP. Оценка на реальных банковских материалах не проведена.
 
-## Запуск через Docker
+Читайте [интеграцию Backend/Frontend](docs/ai-integration.md), [процесс работы](docs/ai-process.md) и [матрицу функций и готовности](docs/ai-scope-and-readiness.md). Текущие live-проверки и расходы ведутся отдельно в [ai-live-checks.md](docs/ai-live-checks.md).
 
-Веб-интерфейс на http://localhost:4173:
+## Запуск интерфейса и Python в Docker
+
+Веб-экран доступен на http://localhost:4173:
 
 ```sh
 docker compose up --build --wait
 ```
 
-Сквозной Python-пример без ключей и вызовов моделей:
+Без ключей и запросов к внешним сервисам:
 
 ```sh
 docker compose run --build --rm intelligence demo
-docker compose run --rm intelligence evaluate
+docker compose run --build --rm intelligence demo-data --output /tmp/demo-data.json
+docker compose run --build --rm intelligence evaluate --mode baseline
+docker compose run --build --rm intelligence-test
+docker compose run --build --rm web-test
 ```
 
-Проверки:
+`demo-data` исполняет локальный сквозной путь на синтетической RSS-фикстуре. Остановка: `docker compose down`; обычный `down` сохраняет named volume с Python state.
+
+## Python на хосте
+
+Команды выполняются из `apps/intelligence`:
 
 ```sh
-docker compose run --build --rm web-test
-docker compose run --build --rm intelligence-test
+.venv/bin/python -m intelligence --help
+.venv/bin/python -m intelligence demo-data --state-dir /tmp/alfa-demo
+.venv/bin/python -m intelligence run-task --mode baseline \
+  --input examples/data-task.json --state-dir /tmp/alfa-task
+.venv/bin/python -m pytest -q -p no:cacheprovider tests
 ```
 
-Остановка: `docker compose down`. Журнал расходов Python остаётся в отдельном Docker volume.
+Для worker/API используйте инструкции в [интеграционном руководстве](docs/ai-integration.md); внешняя модель запускается только при явном выборе `--mode model` и настроенном разрешённом профиле. Реальные банковские CSV/PDF не включены в репозиторий.
 
-## С чего начать
+## Разработка и контракты
 
-- [Ближайшие задачи](docs/backlog.md) и [работа вчетвером](docs/team.md).
-- [Устройство проекта](docs/architecture.md).
-- [Docker и конфигурация](infra/README.md).
-- [Модели, ключи и расходы](docs/llm-providers.md).
-
-[Наша Python-часть: запуск, структура и реальные вызовы](apps/intelligence/README.md).
-
-Платные тесты Gemma включаются отдельным конфигом с локальными лимитами $0.20 в сутки и $0.01 на вызов; [настройка и учёт](docs/llm-providers.md).
-
-Настройки промптов и отдельные турниры находятся в [Python-компоненте](apps/intelligence/README.md#подбор-настроек-и-турнир). Обычный анализ использует готовую версию; эксперименты имеют отдельный лимит внутри общего бюджета.
+- [Python CLI и внутренняя реализация](apps/intelligence/README.md)
+- [Контракты Python для Backend](contracts/intelligence/README.md)
+- [Устройство проекта](docs/architecture.md)
+- [Локальная разработка и проверки](docs/development.md)
+- [Docker и volumes](infra/README.md)
+- [Backlog и внешние зависимости](docs/backlog.md)

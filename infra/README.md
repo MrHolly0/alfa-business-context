@@ -1,54 +1,76 @@
-# Docker
+# Docker Compose и состояние
 
-Из корня репозитория:
+Команды запускаются из корня репозитория. Состав сервисов описан в [`compose.yaml`](../compose.yaml).
+
+## Web demo
 
 ```sh
 docker compose up --build --wait
 ```
 
-Веб-интерфейс — http://localhost:4173. Node собирает React, nginx отдаёт готовые файлы. До подключения PHP Core интерфейс работает на демонстрационных данных; `/api/` отвечает `503`.
+React demo доступен на http://localhost:4173, порт опубликован только на loopback. Пока Symfony Core не подключён, экран использует демонстрационные данные; `/api/` возвращает `503`.
 
-## Python
-
-Сквозной пример, сценарии и тесты без ключей:
+## Python, тесты и offline demo
 
 ```sh
 docker compose run --build --rm intelligence demo
-docker compose run --build --rm intelligence evaluate
+docker compose run --build --rm intelligence demo-data
+docker compose run --build --rm intelligence evaluate --mode baseline
 docker compose run --build --rm intelligence-test
+docker compose run --build --rm web-test
 ```
 
-Конфиг моделей монтируется read-only в `/config/providers.json`. По умолчанию используется `apps/intelligence/examples/providers.template.json`; другой файл выбирается через `INTELLIGENCE_CONFIG_FILE` в `.env`. Ключи моделей передаются только Python-контейнерам. [Живой анализ и тарифы](../docs/llm-providers.md).
+`demo-data` выполняет полный локальный поток на синтетической RSS-фикстуре, без HTTP и внешнего LLM. `evaluate` проверяет функциональные cases, а не реальную точность модели. Test containers запускаются с `network_mode: none`.
 
-## Внутренний HTTP API
-
-В корневом `.env` задайте `INTELLIGENCE_SERVICE_TOKEN` и список `INTELLIGENCE_TENANTS`, например `demo`. При пустом значении приватные маршруты закрыты. Токен выбираете сами и передаёте только Backend.
+Хостовый эквивалент, из каталога `apps/intelligence`:
 
 ```sh
-docker compose up --build --wait intelligence-api
-curl --fail http://localhost:8081/health
+uv sync --frozen
+uv run --frozen python -m intelligence demo-data --state-dir /tmp/alfa-demo
+uv run --frozen python -m intelligence run-task --mode baseline \
+  --input examples/data-task.json --state-dir /tmp/alfa-task
+uv run --frozen python -m pytest -q -p no:cacheprovider tests
 ```
 
-По умолчанию `INTELLIGENCE_MODE=baseline`. Значение `model` включает модель только для принятых запросов анализа. `INTELLIGENCE_PROFILE=openrouter` использует выбранный конфиг Gemma: исходный бесплатный либо отдельный платный с лимитами; у хакатонного профиля предварительно заполняются тарифы. Пользовательский интерфейс обращается к PHP, внутренний Python API нужен Backend.
+`run-task` исполняет snapshot локально. Рабочая очередь появляется только на стороне Core.
 
-## Worker для Core
+## Внутренний Python API
 
-После запуска PHP задайте `CORE_BASE_URL`, `CORE_SERVICE_TOKEN`, `INTELLIGENCE_TENANTS` и режим анализа в `.env`:
+Compose-профиль `analysis` включает API с loopback port mapping. Для закрытых маршрутов оператор задаёт локально `INTELLIGENCE_SERVICE_TOKEN` и `INTELLIGENCE_TENANTS`; при пустой настройке приватные вызовы отклоняются.
 
 ```sh
-docker compose up --build intelligence-worker
+docker compose --profile analysis up --build --wait intelligence-api
+curl --fail http://127.0.0.1:8081/health
 ```
 
-Для однократного получения задания: `docker compose run --rm intelligence-worker worker --once --mode baseline`. [Маршруты и подтверждения](../contracts/intelligence/README.md). Без PHP worker не сможет получить задание; сам PHP этот Compose не создаёт.
+Режим по умолчанию — `INTELLIGENCE_MODE=baseline`. Внешняя модель возможна только при явном выборе режима, настроенном профиле/provider и допустимых source/data classifications/budget. Web UI обращается к Core; Python API — внутренняя граница для доверенного Backend.
 
-## Хранение и остановка
+## Core worker
 
-`docker compose down` останавливает контейнеры. SQLite-корпус, результаты и журнал расходов остаются в volume `alfa-business-context-intelligence-state`. Не добавляйте `-v` для обычной остановки. Хостовый запуск использует отдельный каталог `apps/intelligence/.state`, итоги с Docker не объединяются.
+Compose profile `worker` запускает Python worker. Он требует доступный Core endpoint и `CORE_SERVICE_TOKEN`; `CORE_BASE_URL` по умолчанию указывает на `http://core:8080`, которого в этом Compose нет. Worker не заработает production-путём без настроенного Core:
 
-Тестовые контейнеры работают без сетевого доступа и не получают ключи. Веб-тесты: `docker compose run --build --rm web-test`.
+```sh
+docker compose --profile worker up --build intelligence-worker
+```
 
-При прерванном запросе: `docker compose run --rm intelligence inspect`. Сначала остановите API/worker и проверьте неопределённый расход; только затем при необходимости `reset-request --tenant demo --request-id <ID> --confirm-stopped` или `reset-job --job-id <ID> --generation <N> --confirm-stopped`. Сброс не закрывает неопределённые записи денежного журнала и не гарантирует отсутствие повторного списания.
+Для проверки контракта без PHP запустите standalone fixture-only stand из `apps/intelligence` с `--fixture-mode` и тестовый worker по командам из [development guide](../docs/development.md). Stand слушает только loopback и не является заменой production auth, permissions или Core job storage.
 
-Турнир настроек использует тот же образ и volume Python: `docker compose run --build --rm intelligence arena run --run-id demo-1`. По умолчанию работает без сети; отчёты и реестр остаются в `.state` внутри volume. [Команды и модельный режим](../apps/intelligence/README.md#подбор-настроек-и-турнир).
+## Volumes и остановка
 
-Просмотр очереди доставки: `docker compose run --rm intelligence inspect`. Новые поля ревизий корпуса и повторов доставки добавляются в существующую SQLite автоматически, без очистки volume и сохранённых сообщений. Параллельные миграции сериализуются. `.env` для обновления не меняется.
+`intelligence-api`, CLI `intelligence` и worker используют named volume `alfa-business-context-intelligence-state` под `/app/.state`: corpus, events, budgets, workflow state, results/outbox и private raw blobs. Обычный `docker compose down` сохраняет данные. Удаление volume через `docker compose down -v` необратимо удаляет этот локальный state; выполняйте его только если хотите очистить demo.
+
+Хостовый запуск с `--state-dir /tmp/...` хранится отдельно от Docker. Настройки provider монтируются read-only: по умолчанию `apps/intelligence/examples/providers.template.json`; другой config path задаётся оператором через `INTELLIGENCE_CONFIG_FILE`. Тестовые containers не получают provider credentials.
+
+## Модель и изменения зависимостей
+
+Провайдеры используют отдельные operator-owned конфигурации; документация по режимам и live результатам: [провайдеры](../docs/llm-providers.md), [ai-live-checks](../docs/ai-live-checks.md). Секреты не помещайте в JSON configs, командные примеры или Git.
+
+При согласованном изменении Python dependencies обновляйте lock-файлы из `apps/intelligence`:
+
+```sh
+uv lock
+uv export --frozen --no-dev --no-emit-project -o requirements.lock
+uv export --frozen --only-group dev --no-emit-project -o requirements-dev.lock
+```
+
+После этого выполните Docker test и schema check, прежде чем считать сборку воспроизводимой. Составная архитектура и внешние зависимости описаны в [architecture](../docs/architecture.md), [contracts](../contracts/intelligence/README.md) и [readiness matrix](../docs/ai-scope-and-readiness.md).

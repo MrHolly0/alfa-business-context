@@ -1,0 +1,444 @@
+{
+  "date": "2026-10-24",
+  "data": "Only public source metadata and explicitly synthetic business examples; no customer datasets or keys.",
+  "quality_improvement_proven": false,
+  "openrouter": {
+    "currency": "USD",
+    "prior_reported_cost": "0.002115738",
+    "this_work_reported_cost": "0.024293751306",
+    "cumulative_reported_cost": "0.026409489306",
+    "lifetime_limit": "5",
+    "remaining": "4.973590510694",
+    "reserved": "0",
+    "uncertain_count": 0,
+    "runs": [
+      {
+        "run": "single",
+        "reported_cost_usd": "0.000739618",
+        "cases": [
+          {
+            "company": "synthetic-case",
+            "elapsed_seconds": 23.01,
+            "runtime_fingerprint": null,
+            "results": [
+              {
+                "status": null,
+                "claim_kinds": [],
+                "influence_edges": 0,
+                "errors": [],
+                "roles": [],
+                "critic_decision": null
+              }
+            ]
+          },
+          {
+            "company": "synthetic-case",
+            "elapsed_seconds": 19.58,
+            "runtime_fingerprint": null,
+            "results": [
+              {
+                "status": null,
+                "claim_kinds": [],
+                "influence_edges": 0,
+                "errors": [],
+                "roles": [],
+                "critic_decision": null
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "run": "workflow",
+        "reported_cost_usd": "0.003687519918",
+        "cases": [
+          {
+            "company": "north-haulage",
+            "elapsed_seconds": 37.19,
+            "runtime_fingerprint": null,
+            "results": [
+              {
+                "status": "partial",
+                "claim_kinds": [
+                  "unknown"
+                ],
+                "influence_edges": 0,
+                "errors": [
+                  "invalid_response"
+                ],
+                "roles": [
+                  "analyst",
+                  "critic"
+                ],
+                "critic_decision": "review"
+              }
+            ]
+          },
+          {
+            "company": "volga-machinery",
+            "elapsed_seconds": 23.24,
+            "runtime_fingerprint": null,
+            "results": [
+              {
+                "status": "partial",
+                "claim_kinds": [
+                  "unknown"
+                ],
+                "influence_edges": 0,
+                "errors": [
+                  "invalid_response"
+                ],
+                "roles": [
+                  "researcher",
+                  "analyst",
+                  "critic"
+                ],
+                "critic_decision": "accept"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "run": "workflow-v2",
+        "reported_cost_usd": "0.003317477629",
+        "cases": [
+          {
+            "company": "north-haulage",
+            "elapsed_seconds": 21.15,
+            "runtime_fingerprint": "9dc1c23d66346961fbfa02a671d4ab028059d2049545724f2b271ec8e3b43094",
+            "results": [
+              {
+                "status": "partial",
+                "claim_kinds": [
+                  "unknown"
+                ],
+                "influence_edges": 0,
+                "errors": [
+                  "model_output_rejected:ValueError"
+                ],
+                "roles": [
+                  "researcher",
+                  "analyst",
+                  "critic"
+                ],
+                "critic_decision": "review"
+              }
+            ]
+          },
+          {
+            "company": "volga-machinery",
+            "elapsed_seconds": 25.22,
+            "runtime_fingerprint": "9dc1c23d66346961fbfa02a671d4ab028059d2049545724f2b271ec8e3b43094",
+            "results": [
+              {
+                "status": "partial",
+                "claim_kinds": [
+                  "unknown"
+                ],
+                "influence_edges": 0,
+                "errors": [
+                  "model_output_rejected:ValueError"
+                ],
+                "roles": [
+                  "researcher",
+                  "analyst",
+                  "critic"
+                ],
+                "critic_decision": null
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "run": "workflow-v3",
+        "reported_cost_usd": "0.003127885556",
+        "cases": [
+          {
+            "company": "north-haulage",
+            "elapsed_seconds": 18.18,
+            "runtime_fingerprint": "59f4533e285dedb247dd45b0594438a0b813f76fa49a2bcc3e193a5e146f2576",
+            "results": [
+              {
+                "status": "partial",
+                "claim_kinds": [
+                  "unknown"
+                ],
+                "influence_edges": 0,
+                "errors": [
+                  "input_token_budget_exhausted"
+                ],
+                "roles": [
+                  "researcher",
+                  "analyst",
+                  "critic"
+                ],
+                "critic_decision": "accept"
+              }
+            ]
+          },
+          {
+            "company": "volga-machinery",
+            "elapsed_seconds": 20.03,
+            "runtime_fingerprint": "59f4533e285dedb247dd45b0594438a0b813f76fa49a2bcc3e193a5e146f2576",
+            "results": [
+              {
+                "status": "partial",
+                "claim_kinds": [
+                  "unknown"
+                ],
+                "influence_edges": 0,
+                "errors": [
+                  "input_token_budget_exhausted",
+                  "malformed_json_output"
+                ],
+                "roles": [
+                  "researcher",
+                  "analyst",
+                  "critic"
+                ],
+                "critic_decision": null
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "run": "workflow-v4",
+        "reported_cost_usd": "0.004197476297",
+        "cases": [
+          {
+            "company": "north-haulage",
+            "elapsed_seconds": 39.25,
+            "runtime_fingerprint": "d555d9dd74bb7f23c07a4678a14d3292a39a6470604fe825b84d5e95713a44be",
+            "results": [
+              {
+                "status": "partial",
+                "claim_kinds": [
+                  "unknown"
+                ],
+                "influence_edges": 0,
+                "errors": [
+                  "truncated_response"
+                ],
+                "roles": [
+                  "researcher",
+                  "analyst",
+                  "critic"
+                ],
+                "critic_decision": "accept"
+              }
+            ]
+          },
+          {
+            "company": "volga-machinery",
+            "elapsed_seconds": 25.77,
+            "runtime_fingerprint": "d555d9dd74bb7f23c07a4678a14d3292a39a6470604fe825b84d5e95713a44be",
+            "results": [
+              {
+                "status": "partial",
+                "claim_kinds": [
+                  "external_fact",
+                  "bank_view",
+                  "model_hypothesis",
+                  "unknown"
+                ],
+                "influence_edges": 1,
+                "errors": [],
+                "roles": [
+                  "researcher",
+                  "analyst",
+                  "analyst"
+                ],
+                "critic_decision": "not_evaluated"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "run": "workflow-v5",
+        "reported_cost_usd": "0.002521651090",
+        "cases": [
+          {
+            "company": "north-haulage",
+            "elapsed_seconds": 19.3,
+            "runtime_fingerprint": "546da0981e3ce21db6dc4eb7496da8b62ab5e12a302456892f6a239ff9124111",
+            "results": [
+              {
+                "status": "ready",
+                "claim_kinds": [
+                  "external_fact",
+                  "bank_view",
+                  "model_hypothesis",
+                  "unknown"
+                ],
+                "influence_edges": 1,
+                "errors": [],
+                "roles": [
+                  "analyst",
+                  "critic"
+                ],
+                "critic_decision": "accept"
+              }
+            ]
+          },
+          {
+            "company": "volga-machinery",
+            "elapsed_seconds": 19.72,
+            "runtime_fingerprint": "546da0981e3ce21db6dc4eb7496da8b62ab5e12a302456892f6a239ff9124111",
+            "results": [
+              {
+                "status": "partial",
+                "claim_kinds": [
+                  "external_fact",
+                  "bank_view",
+                  "model_hypothesis",
+                  "unknown"
+                ],
+                "influence_edges": 1,
+                "errors": [],
+                "roles": [
+                  "analyst",
+                  "critic"
+                ],
+                "critic_decision": "accept"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "run": "workflow-v6",
+        "reported_cost_usd": "0.003010039408",
+        "cases": [
+          {
+            "company": "north-haulage",
+            "elapsed_seconds": 19.78,
+            "runtime_fingerprint": "c56448439a1780d8e8209728d73eed4a61e17a9bb7a7f76e1713dc42eec9b601",
+            "results": [
+              {
+                "status": "ready",
+                "claim_kinds": [
+                  "external_fact",
+                  "external_fact",
+                  "bank_view",
+                  "model_hypothesis",
+                  "model_hypothesis"
+                ],
+                "influence_edges": 2,
+                "errors": [],
+                "roles": [
+                  "analyst",
+                  "critic"
+                ],
+                "critic_decision": "accept"
+              }
+            ]
+          },
+          {
+            "company": "volga-machinery",
+            "elapsed_seconds": 16.74,
+            "runtime_fingerprint": "c56448439a1780d8e8209728d73eed4a61e17a9bb7a7f76e1713dc42eec9b601",
+            "results": [
+              {
+                "status": "ready",
+                "claim_kinds": [
+                  "external_fact",
+                  "bank_view",
+                  "model_hypothesis",
+                  "unknown"
+                ],
+                "influence_edges": 1,
+                "errors": [],
+                "roles": [
+                  "analyst",
+                  "critic"
+                ],
+                "critic_decision": "accept"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "run": "workflow-v7",
+        "reported_cost_usd": "0.003692083408",
+        "cases": [
+          {
+            "company": "north-haulage",
+            "elapsed_seconds": 42.89,
+            "runtime_fingerprint": "9c5f6bdc650f76e28077ee0c027f7c7e251e3dfb24db6eebfd0e16e752cb8144",
+            "results": [
+              {
+                "status": "partial",
+                "claim_kinds": [
+                  "external_fact",
+                  "bank_view",
+                  "model_hypothesis",
+                  "unknown"
+                ],
+                "influence_edges": 1,
+                "errors": [],
+                "roles": [
+                  "analyst",
+                  "analyst",
+                  "critic"
+                ],
+                "critic_decision": "review"
+              }
+            ]
+          },
+          {
+            "company": "volga-machinery",
+            "elapsed_seconds": 31.63,
+            "runtime_fingerprint": "9c5f6bdc650f76e28077ee0c027f7c7e251e3dfb24db6eebfd0e16e752cb8144",
+            "results": [
+              {
+                "status": "partial",
+                "claim_kinds": [
+                  "external_fact",
+                  "bank_view",
+                  "model_hypothesis",
+                  "unknown"
+                ],
+                "influence_edges": 1,
+                "errors": [],
+                "roles": [
+                  "analyst",
+                  "critic"
+                ],
+                "critic_decision": "review"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "alfa_gateway": {
+    "generation_calls": 0,
+    "known_generation_spend_rub": "0",
+    "models_http": 200,
+    "key_info_http": 200,
+    "model_group_info_http": 200,
+    "cost_estimate_http": 401,
+    "blocker": "Model tariffs null; authoritative generation cost upper bound unavailable."
+  },
+  "public_source": {
+    "url": "https://www.cbr.ru/rss/RssPress",
+    "probe": "ready",
+    "collected_publications": 14,
+    "network_fetches": 1,
+    "collection_errors": 0
+  },
+  "checks": {
+    "host_python": "3.14",
+    "docker_python": "3.12.14",
+    "passed_tests": 330,
+    "passed_subtests": 11,
+    "baseline_evaluation_cases": 5,
+    "true_php_integration": false
+  }
+}

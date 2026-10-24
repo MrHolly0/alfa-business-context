@@ -67,6 +67,8 @@ class TournamentStore:
                 CREATE TABLE IF NOT EXISTS runs(run_id TEXT PRIMARY KEY, manifest TEXT NOT NULL, report TEXT);
                 CREATE TABLE IF NOT EXISTS holdout_exposures(group_hash TEXT NOT NULL,run_id TEXT NOT NULL,
                     PRIMARY KEY(group_hash,run_id));
+                CREATE TABLE IF NOT EXISTS shadow_exposures(group_hash TEXT NOT NULL,run_id TEXT NOT NULL,
+                    PRIMARY KEY(group_hash,run_id));
                 CREATE TABLE IF NOT EXISTS cells(cell_key TEXT PRIMARY KEY, run_id TEXT NOT NULL,
                     state TEXT NOT NULL, payload TEXT, reserved_at REAL NOT NULL);
             """)
@@ -102,6 +104,16 @@ class TournamentStore:
                 prior.update(row[0] for row in db.execute("SELECT run_id FROM holdout_exposures WHERE group_hash=? AND run_id!=?",(group,run_id)))
                 db.execute("INSERT OR IGNORE INTO holdout_exposures VALUES(?,?)",(group,run_id))
         return {"fresh_for_selection":not prior,"prior_run_count":len(prior)}
+
+    def expose_shadow(self, run_id, cases):
+        groups={group for case in cases for group in _case_groups(case) if not group.startswith("company:")}
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            prior=set()
+            for group in groups:
+                prior.update(row[0] for row in db.execute("SELECT run_id FROM shadow_exposures WHERE group_hash=? AND run_id!=?",(group,run_id)))
+                db.execute("INSERT OR IGNORE INTO shadow_exposures VALUES(?,?)",(group,run_id))
+        return {"fresh":not prior,"prior_run_count":len(prior)}
 
     def review_pack(self, run_id: str) -> list[dict]:
         """Return blind answers with their case context, never config identities."""
@@ -146,6 +158,9 @@ class TournamentStore:
             baseline_ref=report.get("baseline_ref","baseline@1")
             report["promotion_eligible"] = bool(approved and report["synthetic"] is False and ref != baseline_ref and report.get("baseline_snapshot") is not None
                 and report["holdout"].get("fresh_for_selection") is True
+                and report.get("shadow_validation",{}).get("validated") is True
+                and report.get("shadow_validation",{}).get("passed") is True
+                and report.get("shadow_validation",{}).get("fresh") is True
                 and report.get("mode") == "model" and report.get("shadow") is False
                                 and report["holdout"]["passed"] and not report["hard_failures"]
                 and report["training"][ref]["wins"] > report["training"][ref]["losses"])
@@ -187,20 +202,28 @@ class TournamentRunner:
         from .experiments import blind_answer
         return blind_answer(candidate)
 
-    def _run_case(self, run_id, case, config, split, execution_identity, mode, shadow):
+    def _run_case(self, run_id, case, config, split, execution_identity, mode, shadow, candidate_override=None):
         req=AnalysisRequest.model_validate(case["request"])
         pipeline_version="bounded-pipeline-v1"
         prompt_hash=hashlib.sha256(files("intelligence.prompts").joinpath(f"{config.template_version}.system.ru.txt").read_bytes()+files("intelligence.prompts").joinpath(f"{config.template_version}.user.ru.txt").read_bytes()).hexdigest()
         runtime_hashes=_runtime_hashes()
-        key=_digest({"config":config.model_dump(mode="json"),"request":req.model_dump(mode="json"),"documents":case.get("documents",[]),"expected":case.get("expected",{}),"tenant":req.tenant_id,"pipeline":pipeline_version,"evaluation":EVALUATION_VERSION,"prompt_hash":prompt_hash,"runtime_hashes":runtime_hashes,"execution_identity":execution_identity,"mode":mode,"shadow":shadow})
+        key=_digest({"config":config.model_dump(mode="json"),"request":req.model_dump(mode="json"),"documents":case.get("documents",[]),"expected":case.get("expected",{}),"tenant":req.tenant_id,"pipeline":pipeline_version,"evaluation":EVALUATION_VERSION,"prompt_hash":prompt_hash,"runtime_hashes":runtime_hashes,"execution_identity":execution_identity,"mode":mode,"shadow":shadow,"candidate_override":candidate_override})
         cached=self.store._reserve(run_id,key)
         if cached is not None: return cached
         with tempfile.TemporaryDirectory(prefix="tournament-") as directory:
             corpus=CorpusStore(Path(directory)/"corpus.sqlite3")
             for doc in case.get("documents",[]): corpus.ingest(doc)
-            pipeline=self.pipeline_factory(corpus,config)
             started=time.perf_counter()
-            candidate=pipeline.run(req).model_dump(mode="json")
+            if candidate_override is None:
+                pipeline=self.pipeline_factory(corpus,config)
+                candidate=pipeline.run(req).model_dump(mode="json")
+            else:
+                corpus.ingest({"tenant_id":req.tenant_id,"source_id":req.event.source_id,"source_role":"external",
+                    "canonical_uri":f"urn:event:{req.event.event_id}","title":req.event.title,"content":req.event.text,
+                    "content_type":"text/plain","published_at":req.event.published_at.isoformat(),
+                    "fetched_at":req.as_of.isoformat(),"synthetic":bool(req.synthetic or req.event.synthetic),
+                    "publisher":"","language":"ru"})
+                candidate=candidate_override
             latency_ms=round((time.perf_counter()-started)*1000, 3)
             # Apply the shipped deterministic evaluation checks to this exact output;
             # never run the pipeline a second time just to score it.
@@ -275,8 +298,16 @@ class TournamentRunner:
         winner=first_identity if first_identity==second_identity else "tie"
         return {"winner":winner,"reason":"paired_advisory_judgment","advisory":True,"scores":[first.get("scores"),second.get("scores")],"flip_disagreement":first_identity!=second_identity}
 
-    def run(self, *, run_id: str, dataset: dict, candidate_refs: list[str], mode: str="baseline", shadow: bool=False, execution_identity: dict|None=None, target_scope: str|None=None, baseline_ref: str|None=None) -> dict:
+    def run(self, *, run_id: str, dataset: dict, candidate_refs: list[str], mode: str="baseline", shadow: bool=False, execution_identity: dict|None=None, target_scope: str|None=None, baseline_ref: str|None=None, shadow_dataset: dict|None=None, refinement: bool=True) -> dict:
         train,holdout=self._validate_dataset(dataset)
+        shadow_cases=[]
+        if shadow_dataset is not None:
+            shadow_train,shadow_holdout=self._validate_dataset(shadow_dataset)
+            shadow_cases=shadow_train+shadow_holdout
+            main_groups={group for case in train+holdout for group in _case_groups(case)}
+            if main_groups & {group for case in shadow_cases for group in _case_groups(case)}:
+                raise ValueError("shadow_dataset_overlaps_selection_dataset")
+        if not isinstance(refinement,bool): raise ValueError("refinement must be boolean")
         if mode not in {"baseline","model"}: raise ValueError("invalid_tournament_mode")
         if mode=="model" and not execution_identity: raise ValueError("model_mode_requires_sanitized_execution_identity")
         snapshot=self.registry.snapshot(target_scope) if target_scope is not None else None
@@ -288,7 +319,7 @@ class TournamentRunner:
         config_hashes={ref:_digest(config.model_dump(mode="json")) for ref,config in configs.items()}
         prompt_hashes={ref:hashlib.sha256(files("intelligence.prompts").joinpath(f"{config.template_version}.system.ru.txt").read_bytes()+files("intelligence.prompts").joinpath(f"{config.template_version}.user.ru.txt").read_bytes()).hexdigest() for ref,config in configs.items()}
         runtime_hashes=_runtime_hashes()
-        manifest={"dataset_hash":_digest(dataset),"baseline_ref":baseline_ref,"baseline_snapshot":snapshot,"refs":candidate_refs,"config_hashes":config_hashes,"prompt_hashes":prompt_hashes,"runtime_hashes":runtime_hashes,"evaluation_version":EVALUATION_VERSION,"mode":mode,"shadow":bool(shadow),"critic_enabled":self.critic is not None,"synthetic":dataset["synthetic"],"execution_identity":execution_identity or {}}
+        manifest={"dataset_hash":_digest(dataset),"shadow_dataset_hash":_digest(shadow_dataset) if shadow_dataset is not None else None,"baseline_ref":baseline_ref,"baseline_snapshot":snapshot,"refs":candidate_refs,"config_hashes":config_hashes,"prompt_hashes":prompt_hashes,"runtime_hashes":runtime_hashes,"evaluation_version":EVALUATION_VERSION,"mode":mode,"shadow":bool(shadow),"critic_enabled":self.critic is not None,"refinement_enabled":refinement,"synthetic":dataset["synthetic"],"execution_identity":execution_identity or {}}
         # Provider identities may contain Decimal tariffs; compare their persisted JSON form.
         manifest=json.loads(_json(manifest))
         with self.store._db() as db:
@@ -315,26 +346,65 @@ class TournamentRunner:
         best_margin=max(margins.values(),default=0)
         top=[r for r,value in margins.items() if value==best_margin]
         provisional=top[0] if len(top)==1 else baseline_ref
-        critique_result={"used":False,"note":"Critique/refinement hook unavailable; no refinement claimed."}
+        critique_result={"used":False,"refinement":{"attempted":False,"applied":False,"reason":"critic_unavailable"}}
         if self.critic is not None and train:
-            from .experiments import critic_round
+            from .experiments import critic_round, refine_candidate_answer
             critique_ref=provisional
             if critique_ref==baseline_ref:
                 critique_ref=max((r for r in candidate_refs if r!=baseline_ref),key=lambda x:scores[x]["wins"]-scores[x]["losses"],default=baseline_ref)
             case=train[0]
             candidate_output=outputs[critique_ref]["train"][0]["candidate"]
             opponent_output=base["train"][0]["candidate"] if critique_ref!=baseline_ref else outputs[baseline_ref]["train"][0]["candidate"]
-            critique_case={"context":case["request"].get("company"),"question":case["request"].get("event"),
+            critique_case={"request":case["request"],"context":case["request"].get("company"),"question":case["request"].get("event"),
                            "evidence":[{"id":e["evidence_id"],**e} for e in candidate_output.get("evidence",[])]}
-            critic_key=_digest({"kind":"critic","version":"critic-v1","runtime":_runtime_hashes(),"case":critique_case,"answer":self._blind(candidate_output),"opponent":self._blind(opponent_output),"execution_identity":execution_identity or {}})
+            critic_key=_digest({"kind":"critic","version":"critic-refinement-v1","runtime":_runtime_hashes(),"case":critique_case,"answer":self._blind(candidate_output),"opponent":self._blind(opponent_output),"execution_identity":execution_identity or {}})
             try:
                 critiques=self.store._reserve(run_id,critic_key)
                 if critiques is None:
                     critiques=critic_round(self.critic,case=critique_case,answer=candidate_output,opponent=opponent_output)
                     self.store._complete(critic_key,critiques)
-                critique_result={"used":True,"refinement":"not_available","critiques":critiques}
-            except Exception:
-                critique_result={"used":True,"refinement":"not_available","error":"critic_failed_closed"}
+                critique_result={"used":True,"refinement":{"attempted":False,"applied":False,
+                    "reason":"disabled" if not refinement else "no_valid_critiques"},"critiques":critiques}
+                if refinement and critiques.get("critiques") and critique_ref!=baseline_ref:
+                    refinement_key=_digest({"kind":"answer-refinement","version":"answer-refinement-v1","runtime":_runtime_hashes(),
+                        "case":critique_case,"answer":self._blind(candidate_output),"critiques":critiques,"execution_identity":execution_identity or {}})
+                    refined=self.store._reserve(run_id,refinement_key)
+                    if refined is None:
+                        refined=refine_candidate_answer(self.critic,case=case,answer=candidate_output,critiques=critiques["critiques"])
+                        self.store._complete(refinement_key,refined)
+                    if refined.get("refined") is True:
+                        prior_candidate=outputs[critique_ref]["train"][0]
+                        refined_case=self._run_case(run_id,case,configs[critique_ref],"train_refined",execution_identity or {},mode,shadow,
+                                                    candidate_override=refined["candidate"])
+                        old=pairings.get(critique_ref,[None]*len(train))[0]
+                        if old:
+                            field_old="wins" if old["winner"]=="challenger" else "losses" if old["winner"]=="baseline" else "ties"
+                            scores[critique_ref][field_old]-=1
+                        new_judgement=self._pair(case,refined_case,base["train"][0],execution_identity)
+                        if critique_ref in pairings: pairings[critique_ref][0]=new_judgement
+                        field_new="wins" if new_judgement["winner"]=="challenger" else "losses" if new_judgement["winner"]=="baseline" else "ties"
+                        scores[critique_ref][field_new]+=1
+                        outputs[critique_ref]["train"][0]=refined_case
+                        critique_result={"used":True,"critiques":critiques,"refinement":{
+                            "attempted":True,"applied":True,"case_id":case["case_id"],"candidate_ref":critique_ref,
+                            "hard_checks_passed":refined_case["passed"],"checks":refined_case["checks"],
+                            "cost":refined.get("cost"),"cost_currency":refined.get("cost_currency"),
+                            "cost_source":refined.get("cost_source"),"usage":refined.get("usage"),
+                            "scoring_judgment":new_judgement}}
+                    else:
+                        critique_result["refinement"]={"attempted":True,"applied":False,"reason":refined.get("reason","refinement_rejected")}
+                elif refinement and critique_ref==baseline_ref:
+                    critique_result["refinement"]={"attempted":False,"applied":False,"reason":"no_challenger_to_refine"}
+            except Exception as exc:
+                critique_result={"used":True,"refinement":{"attempted":True,"applied":False,
+                    "reason":"critic_or_refinement_failed_closed","error_type":type(exc).__name__}}
+        # Refinement can change only one training judgement. Re-select before the fresh holdout;
+        # shadow observations are deliberately excluded from all winner selection.
+        leaders=[r for r in candidate_refs if r!=baseline_ref and scores[r]["wins"]>scores[r]["losses"]]
+        margins={r:scores[r]["wins"]-scores[r]["losses"] for r in leaders}
+        best_margin=max(margins.values(),default=0)
+        top=[r for r,value in margins.items() if value==best_margin]
+        provisional=top[0] if len(top)==1 else baseline_ref
         exposure=self.store.expose_holdout(run_id,holdout) if mode=="model" else {"fresh_for_selection":False,"prior_run_count":0}
         outputs[baseline_ref]["holdout"]=[self._run_case(run_id,case,configs[baseline_ref],"holdout",execution_identity or {},mode,shadow) for case in holdout]
         if provisional != baseline_ref: outputs[provisional]["holdout"]=[self._run_case(run_id,case,configs[provisional],"holdout",execution_identity or {},mode,shadow) for case in holdout]
@@ -349,6 +419,44 @@ class TournamentRunner:
         failures=[f"{r}:{x['case_id']}" for r in dict.fromkeys([provisional,baseline_ref])
                   for x in outputs[r].get("train",[])+outputs[r].get("holdout",[]) if not x["passed"]]
         winner=baseline_ref if provisional!=baseline_ref and (not hold_pass or failures) else provisional
+        shadow_validation={"validated":False,"passed":False,"fresh":False,"case_count":0,
+                           "reason":"separate_shadow_dataset_not_supplied","comparisons":[]}
+        if shadow_dataset is not None:
+            exposure_shadow=self.store.expose_shadow(run_id,shadow_cases)
+            shadow_results=[]; comparisons=[]
+            if winner!=baseline_ref:
+                for case in shadow_cases:
+                    baseline_result=self._run_case(run_id,case,configs[baseline_ref],"shadow",execution_identity or {},mode,True)
+                    candidate_result=self._run_case(run_id,case,configs[winner],"shadow",execution_identity or {},mode,True)
+                    comparison=self._pair(case,candidate_result,baseline_result,execution_identity)
+                    grounded_kinds={"external_fact","bank_view"}
+                    def grounded_refs(output):
+                        return {ref for claim in output["candidate"].get("claims",[])
+                                if claim.get("kind") in grounded_kinds for ref in claim.get("evidence_refs",[])}
+                    baseline_grounded=grounded_refs(baseline_result)
+                    candidate_grounded=grounded_refs(candidate_result)
+                    facts_preserved=baseline_grounded.issubset(candidate_grounded)
+                    shadow_results.append({"case_id":case["case_id"],"baseline_passed":baseline_result["passed"],
+                        "candidate_passed":candidate_result["passed"],"baseline_cost":baseline_result["measured_cost"],
+                        "candidate_cost":candidate_result["measured_cost"],"baseline_latency_ms":baseline_result["latency_ms"],
+                        "candidate_latency_ms":candidate_result["latency_ms"],
+                        "baseline_grounded_evidence_refs":sorted(baseline_grounded),
+                        "candidate_grounded_evidence_refs":sorted(candidate_grounded),
+                        "grounded_evidence_preserved":facts_preserved})
+                    comparisons.append({"case_id":case["case_id"],**comparison})
+            comparison_complete=bool(comparisons) and all(c.get("reason")!="judge_failed_or_interrupted" for c in comparisons)
+            checks_pass=bool(shadow_results) and all(r["baseline_passed"] and r["candidate_passed"] for r in shadow_results)
+            candidate_no_regression=bool(comparisons) and all(c.get("winner")!="baseline" for c in comparisons)
+            grounded_evidence_preserved=bool(shadow_results) and all(r.get("grounded_evidence_preserved") is True for r in shadow_results)
+            real_fresh=exposure_shadow["fresh"] and shadow_dataset["synthetic"] is False and mode=="model"
+            shadow_passed=bool(real_fresh and checks_pass and comparison_complete and candidate_no_regression and grounded_evidence_preserved)
+            shadow_validation={"validated":shadow_passed,"passed":shadow_passed,"fresh":exposure_shadow["fresh"],
+                "prior_run_count":exposure_shadow["prior_run_count"],"case_count":len(shadow_cases),
+                "candidate_ref":winner,"baseline_ref":baseline_ref,"synthetic":shadow_dataset["synthetic"],
+                "execution_mode":mode,"hard_checks_passed":checks_pass,"comparison_complete":comparison_complete,
+                "candidate_no_regression":candidate_no_regression,"grounded_evidence_preserved":grounded_evidence_preserved,
+                "results":shadow_results,"comparisons":comparisons,
+                "reason":"fresh_model_shadow_compared_without_selection" if shadow_passed else "shadow_validation_gates_not_satisfied"}
         if winner==baseline_ref:
             challenger=max((r for r in candidate_refs if r!=baseline_ref),key=lambda x:scores[x]["wins"]-scores[x]["losses"],default=baseline_ref)
             review_split="train"
@@ -366,7 +474,7 @@ class TournamentRunner:
             b=outputs[labels["B"]][review_split][i]["candidate"]
             evidence={e["evidence_id"]:e for out in (a,b) for e in out.get("evidence",[])}
             pack.append({"blind_id":blind_id,"case_id":case["case_id"],"company":case["request"].get("company"),"question":case["request"].get("event"),"evidence":list(evidence.values()),"A":self._blind(a),"B":self._blind(b)})
-        report={"schema_version":"tournament-report-v1","run_id":run_id,"baseline_ref":baseline_ref,"baseline_snapshot":snapshot,"winner_ref":winner,"synthetic":dataset["synthetic"],"mode":mode,"shadow":bool(shadow),"measured_quality":False,"training":scores,"pairings":pairings,
+        report={"schema_version":"tournament-report-v1","run_id":run_id,"baseline_ref":baseline_ref,"baseline_snapshot":snapshot,"winner_ref":winner,"synthetic":dataset["synthetic"],"mode":mode,"shadow":bool(shadow),"shadow_validation":shadow_validation,"measured_quality":False,"training":scores,"pairings":pairings,"refinement":critique_result,
                 "candidate_metrics":{r:[{"case_id":x["case_id"],"cost":x["measured_cost"],"known_partial_cost":x["known_partial_cost"],"cost_currency":x["cost_currency"],"cost_complete":x["cost_complete"],"latency_ms":x["latency_ms"]} for x in outputs[r]["train"]] for r in candidate_refs},
                 "holdout":{**exposure,"passed":bool(hold_pass),"case_count":len(holdout),"judgments":holdout_judgments,"winner_cases":winner_cases,"baseline_cases":base_cases},"hard_failures":failures,
                 "critic":critique_result,

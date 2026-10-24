@@ -1,0 +1,230 @@
+{
+  "$defs": {
+    "PeriodMetric": {
+      "additionalProperties": false,
+      "properties": {
+        "metric": {
+          "title": "Metric",
+          "type": "string"
+        },
+        "unit": {
+          "title": "Unit",
+          "type": "string"
+        },
+        "first_observed_at": {
+          "title": "First Observed At",
+          "type": "string"
+        },
+        "first_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "First Value"
+        },
+        "last_observed_at": {
+          "title": "Last Observed At",
+          "type": "string"
+        },
+        "last_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Last Value"
+        },
+        "change": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Change"
+        },
+        "observations_used": {
+          "title": "Observations Used",
+          "type": "integer"
+        },
+        "source_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Source Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "metric",
+        "unit",
+        "first_observed_at",
+        "first_value",
+        "last_observed_at",
+        "last_value",
+        "change",
+        "observations_used",
+        "source_refs"
+      ],
+      "title": "PeriodMetric",
+      "type": "object"
+    },
+    "PeriodReport": {
+      "additionalProperties": false,
+      "properties": {
+        "period_start": {
+          "title": "Period Start",
+          "type": "string"
+        },
+        "period_end": {
+          "title": "Period End",
+          "type": "string"
+        },
+        "knowledge_mode": {
+          "enum": [
+            "retrospective",
+            "as_known"
+          ],
+          "title": "Knowledge Mode",
+          "type": "string"
+        },
+        "known_at": {
+          "title": "Known At",
+          "type": "string"
+        },
+        "metrics": {
+          "items": {
+            "$ref": "#/$defs/PeriodMetric"
+          },
+          "title": "Metrics",
+          "type": "array"
+        },
+        "coverage": {
+          "additionalProperties": true,
+          "title": "Coverage",
+          "type": "object"
+        },
+        "statement": {
+          "default": "Descriptive changes in supplied observations; no causal attribution is made.",
+          "title": "Statement",
+          "type": "string"
+        }
+      },
+      "required": [
+        "period_start",
+        "period_end",
+        "knowledge_mode",
+        "known_at",
+        "metrics",
+        "coverage"
+      ],
+      "title": "PeriodReport",
+      "type": "object"
+    },
+    "PeriodTimelineEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "revision": {
+          "title": "Revision",
+          "type": "integer"
+        },
+        "event_time": {
+          "format": "date-time",
+          "title": "Event Time",
+          "type": "string"
+        },
+        "published_at": {
+          "format": "date-time",
+          "title": "Published At",
+          "type": "string"
+        },
+        "server_received_at": {
+          "format": "date-time",
+          "title": "Server Received At",
+          "type": "string"
+        },
+        "source_id": {
+          "title": "Source Id",
+          "type": "string"
+        },
+        "document_revision_ref": {
+          "title": "Document Revision Ref",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "quote": {
+          "title": "Quote",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "revision",
+        "event_time",
+        "published_at",
+        "server_received_at",
+        "source_id",
+        "document_revision_ref",
+        "title",
+        "quote"
+      ],
+      "title": "PeriodTimelineEntry",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "period-research-v1",
+      "default": "period-research-v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "metrics": {
+      "$ref": "#/$defs/PeriodReport"
+    },
+    "publication_timeline": {
+      "items": {
+        "$ref": "#/$defs/PeriodTimelineEntry"
+      },
+      "maxItems": 5000,
+      "title": "Publication Timeline",
+      "type": "array"
+    },
+    "coverage": {
+      "additionalProperties": true,
+      "title": "Coverage",
+      "type": "object"
+    },
+    "limitations": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 30,
+      "title": "Limitations",
+      "type": "array"
+    }
+  },
+  "required": [
+    "metrics"
+  ],
+  "title": "PeriodResearchReport",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

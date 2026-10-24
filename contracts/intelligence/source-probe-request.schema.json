@@ -1,0 +1,188 @@
+{
+  "$defs": {
+    "JSONAdapterMapping": {
+      "additionalProperties": false,
+      "description": "Declarative dot-path mapping only; never a URL, expression, or executable adapter.",
+      "properties": {
+        "items": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Items",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "content": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "url": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        },
+        "published_at": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Published At",
+          "type": "string"
+        },
+        "publisher": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Publisher"
+        },
+        "author": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Author"
+        },
+        "event_time": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Time"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language"
+        }
+      },
+      "required": [
+        "items",
+        "title",
+        "content",
+        "url",
+        "published_at"
+      ],
+      "title": "JSONAdapterMapping",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "One-shot Core grant to inspect a candidate URL; it never creates a source.",
+  "properties": {
+    "grant_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Grant Id",
+      "type": "string"
+    },
+    "tenant_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Tenant Id",
+      "type": "string"
+    },
+    "candidate_url": {
+      "maxLength": 4096,
+      "minLength": 1,
+      "title": "Candidate Url",
+      "type": "string"
+    },
+    "expires_at": {
+      "format": "date-time",
+      "title": "Expires At",
+      "type": "string"
+    },
+    "allowed_hosts": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 10,
+      "minItems": 1,
+      "title": "Allowed Hosts",
+      "type": "array"
+    },
+    "allowed_types": {
+      "items": {
+        "enum": [
+          "application/rss+xml",
+          "application/atom+xml",
+          "text/html",
+          "application/pdf",
+          "application/json"
+        ],
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Allowed Types",
+      "type": "array"
+    },
+    "json_mapping": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JSONAdapterMapping"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "max_bytes": {
+      "default": 2000000,
+      "maximum": 2000000,
+      "minimum": 1,
+      "title": "Max Bytes",
+      "type": "integer"
+    },
+    "timeout_seconds": {
+      "default": 15,
+      "maximum": 20,
+      "minimum": 1,
+      "title": "Timeout Seconds",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "grant_id",
+    "tenant_id",
+    "candidate_url",
+    "expires_at",
+    "allowed_hosts",
+    "allowed_types"
+  ],
+  "title": "SourceProbeRequest",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -1,0 +1,51 @@
+{
+  "schema_version": "model-routing-v1",
+  "routes": {
+    "researcher": {
+      "model": "google/gemma-4-26b-a4b-it",
+      "input_per_million": "0.08",
+      "output_per_million": "0.40",
+      "max_output_tokens": 4096
+    },
+    "extractor": {
+      "model": "google/gemma-4-26b-a4b-it",
+      "input_per_million": "0.08",
+      "output_per_million": "0.40",
+      "max_output_tokens": 4096
+    },
+    "analyst": {
+      "model": "qwen/qwen3.6-35b-a3b",
+      "input_per_million": "0.15",
+      "output_per_million": "1.20",
+      "max_output_tokens": 4096,
+      "reasoning_effort": "none"
+    },
+    "analyst:complex": {
+      "model": "qwen/qwen3.6-35b-a3b",
+      "input_per_million": "0.15",
+      "output_per_million": "1.20",
+      "max_output_tokens": 4096,
+      "reasoning_effort": "none"
+    },
+    "critic": {
+      "model": "z-ai/glm-5.3-flash",
+      "input_per_million": "0.20",
+      "output_per_million": "0.60",
+      "max_output_tokens": 4096,
+      "reasoning_effort": "low"
+    },
+    "judge": {
+      "model": "z-ai/glm-5.3-flash",
+      "input_per_million": "0.20",
+      "output_per_million": "0.60",
+      "max_output_tokens": 4096
+    },
+    "generator": {
+      "model": "qwen/qwen3.6-35b-a3b",
+      "input_per_million": "0.15",
+      "output_per_million": "1.20",
+      "max_output_tokens": 4096,
+      "reasoning_effort": "none"
+    }
+  }
+}

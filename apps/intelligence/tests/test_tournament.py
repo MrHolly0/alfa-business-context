@@ -26,6 +26,17 @@ def case(case_id, event_id, company_id, *, synthetic=True):
     return {"case_id": case_id, "request": request, "documents": [], "expected": {}}
 
 
+def shadow_case(case_id, event_id, company_id):
+    result=case(case_id,event_id,company_id,synthetic=False)
+    result["request"]["company"]["name"]="Shadow company "+company_id
+    result["request"]["event"]["title"]="Отдельная теневая публикация "+case_id
+    if "hold" in case_id:
+        result["request"]["event"]["text"]="Теневая проверка сообщает: Центральный банк изменил требования к раскрытию валютных рисков для компаний, имеющих займы в иностранной валюте."
+    else:
+        result["request"]["event"]["text"]="Теневая публикация: производитель оборудования перенёс плановое обслуживание производственных линий и обновил график запуска новых станков."
+    return result
+
+
 def test_split_identity_leak_fails_before_generation():
     dataset = {"schema_version":"tournament-dataset-v1", "synthetic":True,
         "train":[case("t1", "evt1", "co1")], "holdout":[case("h1", "evt1", "co2")]}
@@ -86,10 +97,13 @@ def test_model_tournament_evaluates_only_finalist_on_holdout_and_can_promote(tmp
         "holdout":[case("hold1","hold-event","hold-company",synthetic=False)]}
     factory=lambda corpus,config:AnalysisPipeline(corpus,llm=FakeLLM(),analyst_config=config)
     report=TournamentRunner(store,registry,pipeline_factory=factory,judge=judge).run(
-        run_id="model-run",dataset=dataset,candidate_refs=["baseline@1","candidate@1"],mode="model",execution_identity={"model":"fake-model"},target_scope="impact:any:*")
+        run_id="model-run",dataset=dataset,shadow_dataset={"schema_version":"tournament-dataset-v1","synthetic":False,
+            "train":[shadow_case("shadow1","shadow-event","shadow-company")],
+            "holdout":[shadow_case("shadow-hold","shadow-hold-event","shadow-hold-company")]},
+        candidate_refs=["baseline@1","candidate@1"],mode="model",execution_identity={"model":"fake-model"},target_scope="impact:any:*")
     assert report["winner_ref"]=="candidate@1"
     assert report["holdout"]["passed"] is True
-    assert len(judge.calls)==4 and all("evidence" in call[0] for call in judge.calls)
+    assert len(judge.calls)==8 and all("evidence" in call[0] for call in judge.calls)
     assert "review_label_map" not in report["human_review"]
     assert set(store.review_pack("model-run")[0]) >= {"company","question","evidence","A","B"}
     with store._db() as db:

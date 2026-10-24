@@ -48,6 +48,8 @@ class ChatCompletionTransport:
         body = {"model": self.config.model, "messages": clean_messages, "stream": False, "max_tokens": token_limit}
         if json_mode:
             body["response_format"] = {"type": "json_object"}
+        if self.config.profile == "openrouter" and self.config.reasoning_effort is not None:
+            body["reasoning"] = {"effort": self.config.reasoning_effort}
         if self.config.profile == "openrouter":
             body["usage"] = {"include": True}
             if self.config.is_paid_openrouter:
@@ -116,12 +118,12 @@ class ChatCompletionTransport:
             raise ProviderError("invalid_response", "Provider response has no message", billing_uncertain=True, usage=usage)
         if message.get("refusal"):
             raise ProviderError("model_refusal", "Model refused the request", billing_uncertain=True, usage=usage)
-        content = message.get("content")
-        if not isinstance(content, str):
-            raise ProviderError("invalid_response", "Provider response content is not text", billing_uncertain=True, usage=usage)
         finish_reason = choice.get("finish_reason")
         if finish_reason == "length":
             raise ProviderError("truncated_response", "Model output reached the token limit", billing_uncertain=True, usage=usage)
+        content = message.get("content")
+        if not isinstance(content, str):
+            raise ProviderError("invalid_response", "Provider response content is not text", billing_uncertain=True, usage=usage)
         model = payload.get("model")
         if isinstance(model, str):
             expected_id = self.config.model.removesuffix(":free")

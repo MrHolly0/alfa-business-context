@@ -14,6 +14,7 @@ def eligible_report(registry,scope,ref,reviewer="alice"):
     return {"schema_version":"tournament-report-v1","winner_ref":ref,"baseline_ref":baseline["ref"],
             "baseline_snapshot":baseline,"mode":"model","shadow":False,"promotion_eligible":True,
             "synthetic":False,"holdout":{"passed":True,"fresh_for_selection":True},
+            "shadow_validation":{"validated":True,"passed":True,"fresh":True},
             "human_review":{"approved":True,"reviewer":reviewer}}
 
 
@@ -59,7 +60,7 @@ def test_promotion_gates_history_conflict_and_rollback(tmp_path):
     registry.register(config)
     scope = "impact:finance:*"
     report = {"schema_version":"tournament-report-v1", "winner_ref":config.ref, "mode":"model", "shadow":False, "promotion_eligible":True,
-              "synthetic":False, "holdout":{"passed":True}, "human_review":{"approved":True,"reviewer":"alice"}}
+              "synthetic":False, "holdout":{"passed":True}, "shadow_validation":{"validated":True,"passed":True,"fresh":True}, "human_review":{"approved":True,"reviewer":"alice"}}
     report.update(baseline_ref="baseline@1",baseline_snapshot=registry.snapshot(scope))
     report["holdout"]["fresh_for_selection"]=True
     assert registry.promote(scope=scope, ref=config.ref, report=report, reviewer="alice")["revision"] == 1
@@ -97,7 +98,7 @@ def test_any_scope_exact_and_wildcard_fallback_and_case_normalization(tmp_path):
     registry.register(any_logistics)
     registry.register(any_general)
     report = {"schema_version":"tournament-report-v1", "winner_ref":any_logistics.ref, "mode":"model", "shadow":False, "promotion_eligible":True,
-              "synthetic":False, "holdout":{"passed":True}, "human_review":{"approved":True,"reviewer":"alice"}}
+              "synthetic":False, "holdout":{"passed":True}, "shadow_validation":{"validated":True,"passed":True,"fresh":True}, "human_review":{"approved":True,"reviewer":"alice"}}
     with pytest.raises(ValueError): registry.promote(scope="impact:any:*", ref=any_logistics.ref, report=report, reviewer="alice")
     report.update(baseline_ref="baseline@1",baseline_snapshot=registry.snapshot("impact:any:logistics"))
     report["holdout"]["fresh_for_selection"]=True

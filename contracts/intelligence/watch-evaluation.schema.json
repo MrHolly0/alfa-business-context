@@ -1,0 +1,98 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "condition_id": {
+      "title": "Condition Id",
+      "type": "string"
+    },
+    "company_id": {
+      "title": "Company Id",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "met",
+        "not_met",
+        "unknown"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "reason": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Reason",
+      "type": "string"
+    },
+    "evidence_refs": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 60,
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "observed_value": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Observed Value"
+    },
+    "observed_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Observed At"
+    },
+    "requires_reassessment": {
+      "default": false,
+      "title": "Requires Reassessment",
+      "type": "boolean"
+    },
+    "core_action": {
+      "default": "none",
+      "enum": [
+        "none",
+        "await_data",
+        "request_reassessment"
+      ],
+      "title": "Core Action",
+      "type": "string"
+    },
+    "next_question": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Next Question"
+    }
+  },
+  "required": [
+    "condition_id",
+    "company_id",
+    "status",
+    "reason"
+  ],
+  "title": "WatchEvaluation",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -61,6 +61,16 @@ def _parser():
     budget.add_argument("--config", required=True)
     budget.add_argument("--profile", choices=("openrouter", "hackathon"))
     budget.add_argument("--ledger", default=str(DEFAULT_LEDGER_PATH))
+    configure = commands.add_parser("configure-budget", help="explicitly change an existing ledger account's limits")
+    configure.add_argument("--scope", required=True)
+    configure.add_argument("--currency", required=True, choices=("USD", "RUB"))
+    configure.add_argument("--daily-limit", required=True)
+    configure.add_argument("--lifetime-limit", help="omit to remove the lifetime cap")
+    configure.add_argument("--expect-daily-limit", required=True)
+    configure.add_argument("--expect-lifetime-limit", help="use --expect-no-lifetime-limit when currently unset")
+    configure.add_argument("--expect-no-lifetime-limit", action="store_true")
+    configure.add_argument("--ledger", default=str(DEFAULT_LEDGER_PATH))
+    configure.add_argument("--confirm", action="store_true", help="required to apply the limit change")
     run = commands.add_parser("run", help="make one explicit live model request")
     run.add_argument("--config", required=True)
     run.add_argument("--profile", choices=("openrouter", "hackathon"))
@@ -98,6 +108,18 @@ def main(argv=None) -> int:
         _dump(_fixture())
         return 0
     try:
+        if args.command == "configure-budget":
+            if not args.confirm:
+                raise ValueError("configure-budget requires --confirm")
+            if args.expect_no_lifetime_limit == (args.expect_lifetime_limit is not None):
+                raise ValueError("provide exactly one of --expect-lifetime-limit or --expect-no-lifetime-limit")
+            ledger = BudgetLedger(args.ledger)
+            expected_life = None if args.expect_no_lifetime_limit else args.expect_lifetime_limit
+            ledger.configure_limits(args.scope, args.currency, daily_limit=args.daily_limit,
+                lifetime_limit=args.lifetime_limit, expected_daily_limit=args.expect_daily_limit,
+                expected_lifetime_limit=expected_life)
+            _dump(ledger.summary(args.scope, args.currency))
+            return 0
         config = load_config(args.config, args.profile)
         if args.command == "validate":
             _dump({"valid": True, "profile": config.profile, "model": config.model,

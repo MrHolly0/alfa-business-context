@@ -21,10 +21,11 @@ class InvalidJob(ValueError): pass
 
 class Worker:
     def __init__(self, core, pipeline, artifact_store: ArtifactStore, *, heartbeat_interval: float = 10.0,
-                 clock=time.time, tenant_ids: set[str] | None = None, max_delivery_attempts: int = 8,
+                 data_workflow=None, clock=time.time, tenant_ids: set[str] | None = None, max_delivery_attempts: int = 8,
                  delivery_batch_size: int = 10, retry_base_seconds: float = 1.0,
                  retry_cap_seconds: float = 3600.0, jitter=random.uniform):
         self.core, self.pipeline, self.artifacts = core, pipeline, artifact_store
+        self.data_workflow = data_workflow
         self.heartbeat_interval = max(.05, float(heartbeat_interval))
         self.clock = clock
         self.max_delivery_attempts = max(1, min(8, int(max_delivery_attempts)))
@@ -35,6 +36,7 @@ class Worker:
         self.tenant_ids = set(tenant_ids if tenant_ids is not None else (v.strip() for v in os.getenv("INTELLIGENCE_TENANTS", "").split(",") if v.strip()))
 
     def _check(self, job):
+        if job.get("schema_version") == "ai-job-v1": return self._check_task(job)
         request = job.get("analysis")
         scope = job.get("tenant_scope")
         versions = job.get("input_versions")
@@ -67,6 +69,33 @@ class Worker:
         from .schemas import AnalysisBudget, AnalysisRequest
         try: parsed = AnalysisRequest.model_validate(request)
         except ValidationError as exc: raise InvalidJob("invalid analysis request") from exc
+        self._budget(job, parsed)
+        return parsed, deadline, lease_until
+
+    def _check_task(self, job):
+        from .workflow import DataTask
+        if self.data_workflow is None: raise InvalidJob("data workflow unavailable")
+        try: parsed = DataTask.model_validate(job.get("task"))
+        except ValidationError as exc: raise InvalidJob("invalid data task") from exc
+        if job.get("tenant_scope") not in self.tenant_ids or parsed.tenant_id != job.get("tenant_scope") or parsed.company_id != job.get("company_id"):
+            raise InvalidJob("scope mismatch")
+        for name in ("message_id","job_id","company_id","trace_id","deadline","lease_until"):
+            if not isinstance(job.get(name),str) or not job[name] or len(job[name])>256: raise InvalidJob("invalid identifier")
+        generation=job.get("lease_generation")
+        if isinstance(generation,bool) or not isinstance(generation,int) or generation<1: raise InvalidJob("invalid generation")
+        expected={"context_version":parsed.context_version,"source_policy_version":parsed.source_policy_version,"event_versions":[]}
+        if job.get("input_versions") != expected: raise InvalidJob("input version mismatch")
+        scope=job.get("scope",{})
+        if scope.get("source_ids") != parsed.source_policy.effective_source_ids(): raise InvalidJob("source scope mismatch")
+        try:
+            deadline=datetime.fromisoformat(job["deadline"].replace("Z","+00:00"))
+            lease=datetime.fromisoformat(job["lease_until"].replace("Z","+00:00"))
+            if deadline.tzinfo is None or lease.tzinfo is None or lease.timestamp()<=self.clock() or lease>deadline: raise ValueError()
+        except (KeyError,ValueError,TypeError) as exc: raise InvalidJob("invalid deadline or lease") from exc
+        self._budget(job,parsed)
+        return parsed,deadline.timestamp(),lease.timestamp()
+
+    def _budget(self, job, parsed):
         worker_budget = job.get("budget")
         if not isinstance(worker_budget, dict): raise InvalidJob("missing worker budget")
         try:
@@ -84,7 +113,10 @@ class Worker:
         if calls < 0 or tokens < 1 or reservation_decimal < 0: raise InvalidJob("invalid worker budget")
         if parsed.budget.max_model_calls > calls or parsed.budget.max_total_tokens > tokens:
             raise InvalidJob("request exceeds reserved budget")
-        llm = getattr(self.pipeline, "llm", None)
+        executor = self.data_workflow if job.get("schema_version")=="ai-job-v1" else self.pipeline
+        llm = getattr(executor, "llm", None)
+        role_services = getattr(executor, "role_services", {})
+        if llm is None and role_services: llm = next((service for service in role_services.values() if service is not None), None)
         if llm is not None and parsed.budget.max_model_calls:
             config = getattr(llm, "config", None)
             if config is None: raise InvalidJob("model pricing configuration unavailable")
@@ -107,9 +139,17 @@ class Worker:
             elif profile != "hackathon" or getattr(config, "currency", None) != "RUB":
                 raise InvalidJob("model profile is not permitted")
             try:
-                pricing = Pricing(config.input_per_million, config.output_per_million, config.currency)
+                configs = [config]
+                services = role_services
+                for service in services.values():
+                    candidate_config = service.config
+                    if any(getattr(candidate_config,name)!=getattr(config,name) for name in ("profile","base_url","api_key_env","budget_scope","currency","daily_limit","lifetime_limit")):
+                        raise ValueError("role budget account mismatch")
+                    candidate_config.ensure_spend_allowed()
+                    configs.append(candidate_config)
+                pricing = Pricing(max(c.input_per_million for c in configs), max(c.output_per_million for c in configs), config.currency)
                 in_tokens = min(parsed.budget.max_input_tokens, tokens)
-                out_tokens = min(parsed.budget.max_output_tokens, config.max_output_tokens)
+                out_tokens = min(parsed.budget.max_output_tokens, max(c.max_output_tokens for c in configs))
                 input_capacity = in_tokens * parsed.budget.max_model_calls
                 output_capacity = out_tokens * parsed.budget.max_model_calls
                 total_capacity = min(parsed.budget.max_total_tokens, input_capacity + output_capacity)
@@ -122,7 +162,6 @@ class Worker:
                 worst_case = pricing.estimate(worst_input, worst_output)
             except (AttributeError, ValueError, TypeError) as exc: raise InvalidJob("invalid model pricing") from exc
             if worst_case > reservation_decimal: raise InvalidJob("cost reservation is too small")
-        return parsed, deadline, lease_until
 
     def _assert_live(self, job, deadline, lost, lease_state):
         if lost.is_set(): raise LeaseLost("lease lost")
@@ -243,7 +282,7 @@ class Worker:
             except Exception: pass
             return {"status": "rejected", "reason": str(exc)}
         stable_inputs = {key:job.get(key) for key in ("job_id", "tenant_scope", "company_id", "trace_id", "input_versions",
-                                                       "lease_generation", "deadline", "budget", "scope", "analysis")}
+                                                       "lease_generation", "deadline", "budget", "scope", "analysis", "task")}
         input_hash = payload_hash(stable_inputs)
         try:
             run = self.artifacts.begin_job(job["job_id"], job["lease_generation"], input_hash)
@@ -260,7 +299,8 @@ class Worker:
         beat.start()
         try:
             self._assert_live(job, deadline, lost, lease_state)
-            result = self.pipeline.run(request, checkpoint=self._checkpoint(job, request, deadline, lost, lease_state))
+            executor = self.data_workflow if job.get("schema_version")=="ai-job-v1" else self.pipeline
+            result = executor.run(request, checkpoint=self._checkpoint(job, request, deadline, lost, lease_state))
             self._assert_live(job, deadline, lost, lease_state)
             candidate = result.model_dump(mode="json") if hasattr(result, "model_dump") else result
             if (candidate.get("tenant_id") != job["tenant_scope"] or candidate.get("company_id") != job["company_id"] or
@@ -272,7 +312,7 @@ class Worker:
                 raise InvalidJob("candidate version mismatch")
             identity = canonical_json([job["job_id"], job["lease_generation"], input_hash])
             message_id = hashlib.sha256(identity.encode()).hexdigest()
-            payload = {"schema_version": "analysis-result-v1", "message_id": message_id,
+            payload = {"schema_version": "ai-result-v1" if job.get("schema_version")=="ai-job-v1" else "analysis-result-v1", "message_id": message_id,
                        "job_id": job["job_id"], "tenant_scope": job["tenant_scope"],
                        "company_id": job["company_id"], "trace_id": job["trace_id"],
                        "lease_generation": job["lease_generation"], "input_versions": job["input_versions"],

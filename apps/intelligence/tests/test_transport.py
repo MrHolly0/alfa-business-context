@@ -2,6 +2,7 @@ import json
 import os
 import unittest
 from decimal import Decimal
+from dataclasses import replace
 from unittest.mock import patch
 
 from intelligence.llm.config import ProviderConfig
@@ -57,6 +58,7 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(sent["max_tokens"], 256)
         self.assertEqual(sent["model"], "google/gemma-4-26b-a4b-it:free")
         self.assertEqual(sent["usage"], {"include": True})
+        self.assertNotIn("reasoning", sent)
         self.assertEqual(opener.timeout, 4.5)
         self.assertEqual(completion.usage.prompt_tokens, 12)
         self.assertEqual(completion.usage.cached_tokens, 3)
@@ -77,6 +79,34 @@ class TransportTests(unittest.TestCase):
             ChatCompletionTransport(config, opener).complete([{"role": "user", "content": "hello"}])
         sent = json.loads(opener.request.data)
         self.assertNotIn("usage", sent)
+        self.assertNotIn("reasoning", sent)
+
+    def test_explicit_reasoning_effort_is_forwarded_only_when_configured(self):
+        config=replace(make_config(),reasoning_effort="none")
+        opener=FakeOpener({"choices":[{"message":{"content":"{}"},"finish_reason":"stop"}]})
+        with patch.dict(os.environ,{"TEST_LLM_KEY":"x"}):
+            ChatCompletionTransport(config,opener).complete([{"role":"user","content":"x"}],json_mode=True)
+        sent=json.loads(opener.request.data)
+        self.assertEqual(sent["reasoning"],{"effort":"none"})
+
+    def test_null_content_with_length_reason_is_truncation_and_keeps_usage(self):
+        opener=FakeOpener({"choices":[{"message":{"content":None},"finish_reason":"length"}],
+            "usage":{"prompt_tokens":11,"completion_tokens":2048,"cost":"0.0004"}})
+        with patch.dict(os.environ,{"TEST_LLM_KEY":"x"}):
+            with self.assertRaises(ProviderError) as caught:
+                ChatCompletionTransport(make_config(),opener).complete([{"role":"user","content":"x"}],json_mode=True)
+        self.assertEqual(caught.exception.code,"truncated_response")
+        self.assertEqual(caught.exception.usage.completion_tokens,2048)
+        self.assertEqual(caught.exception.usage.reported_cost,Decimal("0.0004"))
+
+    def test_null_content_without_length_reason_remains_invalid_response(self):
+        opener=FakeOpener({"choices":[{"message":{"content":None},"finish_reason":"stop"}],
+            "usage":{"prompt_tokens":11,"completion_tokens":4}})
+        with patch.dict(os.environ,{"TEST_LLM_KEY":"x"}):
+            with self.assertRaises(ProviderError) as caught:
+                ChatCompletionTransport(make_config(),opener).complete([{"role":"user","content":"x"}])
+        self.assertEqual(caught.exception.code,"invalid_response")
+        self.assertEqual(caught.exception.usage.completion_tokens,4)
 
     def test_model_mismatch_is_reported_as_uncertain(self):
         opener = FakeOpener({"model": "another/model", "choices": [{"message": {"content": "ok"}}]})

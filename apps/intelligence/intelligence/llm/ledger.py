@@ -78,7 +78,8 @@ class BudgetLedger:
                 CREATE TABLE IF NOT EXISTS accounts (
                     scope TEXT PRIMARY KEY,
                     currency TEXT NOT NULL,
-                    limit_amount TEXT NOT NULL
+                    limit_amount TEXT NOT NULL,
+                    lifetime_limit TEXT
                 );
                 CREATE TABLE IF NOT EXISTS reservations (
                     id TEXT PRIMARY KEY,
@@ -97,6 +98,11 @@ class BudgetLedger:
                 CREATE INDEX IF NOT EXISTS reservations_scope_period
                     ON reservations(scope, period_start, status);
             """)
+            db.execute("BEGIN IMMEDIATE")
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(accounts)")}
+            if "lifetime_limit" not in columns:
+                db.execute("ALTER TABLE accounts ADD COLUMN lifetime_limit TEXT")
+            db.commit()
         finally:
             db.close()
 
@@ -119,20 +125,25 @@ class BudgetLedger:
             raise ValueError("currency must be a non-empty string")
         return currency.strip().upper()
 
-    def _ensure_account(self, db: sqlite3.Connection, scope: str, currency: str, limit: Decimal) -> None:
-        row = db.execute("SELECT currency, limit_amount FROM accounts WHERE scope=?", (scope,)).fetchone()
+    def _ensure_account(self, db: sqlite3.Connection, scope: str, currency: str, limit: Decimal,
+                        lifetime_limit: Decimal | None) -> None:
+        row = db.execute("SELECT currency, limit_amount, lifetime_limit FROM accounts WHERE scope=?", (scope,)).fetchone()
         if row is None:
-            db.execute("INSERT INTO accounts(scope,currency,limit_amount) VALUES(?,?,?)", (scope, currency, str(limit)))
+            db.execute("INSERT INTO accounts(scope,currency,limit_amount,lifetime_limit) VALUES(?,?,?,?)",
+                       (scope, currency, str(limit), None if lifetime_limit is None else str(lifetime_limit)))
         elif row["currency"] != currency:
             raise CurrencyMismatch(f"scope {scope!r} is already tracked in {row['currency']}")
         elif Decimal(row["limit_amount"]) != limit:
             raise ValueError(f"scope {scope!r} already has a different configured limit")
+        elif (None if row["lifetime_limit"] is None else Decimal(row["lifetime_limit"])) != lifetime_limit:
+            raise ValueError(f"scope {scope!r} already has a different configured lifetime limit")
 
     def reserve(self, scope: str, currency: str, limit: Decimal | int | str,
                 amount: Decimal | int | str, request_id: str | None = None,
-                now: datetime | None = None) -> str:
+                now: datetime | None = None, *, lifetime_limit: Decimal | int | str | None = None) -> str:
         scope, currency = self._scope(scope), self._currency(currency)
         limit, amount = _money(limit, "limit"), _money(amount, "amount")
+        lifetime_limit = None if lifetime_limit is None else _money(lifetime_limit, "lifetime_limit")
         if limit < 0 or amount < 0:
             raise ValueError("limit and reservation amount must be non-negative")
         if request_id is not None and (not isinstance(request_id, str) or not request_id.strip()):
@@ -143,7 +154,7 @@ class BudgetLedger:
         db = self._connect()
         try:
             db.execute("BEGIN IMMEDIATE")
-            self._ensure_account(db, scope, currency, limit)
+            self._ensure_account(db, scope, currency, limit, lifetime_limit)
             rows = db.execute("""SELECT period_start,status,reserved_amount,actual_amount FROM reservations
                                WHERE scope=? AND (period_start=? OR status IN ('reserved','uncertain'))""",
                               (scope, period_start)).fetchall()
@@ -151,6 +162,12 @@ class BudgetLedger:
             pending = sum((Decimal(r["reserved_amount"]) for r in rows if r["status"] != "settled"), Decimal(0))
             if committed + pending + amount > limit:
                 raise BudgetExceeded(f"reservation would exceed {currency} budget for scope {scope!r}")
+            if lifetime_limit is not None:
+                lifetime_rows = db.execute("SELECT status,reserved_amount,actual_amount FROM reservations WHERE scope=?", (scope,)).fetchall()
+                lifetime_used = sum((Decimal(r["actual_amount"]) if r["status"] == "settled"
+                                     else Decimal(r["reserved_amount"]) for r in lifetime_rows), Decimal(0))
+                if lifetime_used + amount > lifetime_limit:
+                    raise BudgetExceeded(f"reservation would exceed {currency} lifetime budget for scope {scope!r}")
             db.execute("""INSERT INTO reservations(id,scope,currency,period_start,reserved_amount,request_id,status,created_at)
                           VALUES(?,?,?,?,?,?,?,?)""",
                        (reservation_id, scope, currency, period_start, str(amount), request_id, "reserved", current))
@@ -219,13 +236,15 @@ class BudgetLedger:
         db = self._connect()
         try:
             db.execute("BEGIN")
-            account = db.execute("SELECT currency,limit_amount FROM accounts WHERE scope=?", (scope,)).fetchone()
+            account = db.execute("SELECT currency,limit_amount,lifetime_limit FROM accounts WHERE scope=?", (scope,)).fetchone()
             if account is None:
                 return {"scope": scope, "currency": currency, "period_start": period_start,
                         "period_end": period_end, "limit": Decimal(0), "spent": Decimal(0),
                         "reported_spent": Decimal(0), "estimated_spent": Decimal(0),
                         "reserved": Decimal(0), "remaining": Decimal(0), "reservation_count": 0,
-                        "uncertain_count": 0, "settled_count": 0, "blocked": False}
+                        "uncertain_count": 0, "settled_count": 0, "blocked": False,
+                        "lifetime_limit": None, "lifetime_spent": Decimal(0),
+                        "lifetime_reserved": Decimal(0), "lifetime_remaining": None}
             if account["currency"] != currency:
                 raise CurrencyMismatch(f"scope {scope!r} is tracked in {account['currency']}")
             rows = db.execute("""SELECT * FROM reservations WHERE scope=? AND (period_start=? OR status IN ('reserved','uncertain'))""",
@@ -236,12 +255,49 @@ class BudgetLedger:
             estimated_spent = sum((Decimal(r["actual_amount"]) for r in settled if r["cost_source"] == "rate_estimate"), Decimal(0))
             reserved = sum((Decimal(r["reserved_amount"]) for r in rows if r["status"] != "settled"), Decimal(0))
             limit = Decimal(account["limit_amount"])
+            all_rows = db.execute("SELECT status,reserved_amount,actual_amount FROM reservations WHERE scope=?", (scope,)).fetchall()
+            lifetime_spent = sum((Decimal(r["actual_amount"]) for r in all_rows if r["status"] == "settled"), Decimal(0))
+            lifetime_reserved = sum((Decimal(r["reserved_amount"]) for r in all_rows if r["status"] != "settled"), Decimal(0))
+            lifetime_limit = None if account["lifetime_limit"] is None else Decimal(account["lifetime_limit"])
             return {"scope": scope, "currency": currency, "period_start": period_start,
                     "period_end": period_end, "limit": limit, "spent": spent,
                     "reported_spent": reported_spent, "estimated_spent": estimated_spent,
                     "reserved": reserved, "remaining": max(Decimal(0), limit-spent-reserved),
                     "reservation_count": len(rows),
                     "uncertain_count": sum(r["status"] == "uncertain" for r in rows),
-                    "settled_count": len(settled), "blocked": spent+reserved > limit}
+                    "settled_count": len(settled), "blocked": spent+reserved > limit,
+                    "lifetime_limit": lifetime_limit, "lifetime_spent": lifetime_spent,
+                    "lifetime_reserved": lifetime_reserved,
+                    "lifetime_remaining": None if lifetime_limit is None else max(Decimal(0), lifetime_limit-lifetime_spent-lifetime_reserved)}
+        finally:
+            db.close()
+
+    def configure_limits(self, scope: str, currency: str, *, daily_limit: Decimal | int | str,
+                         lifetime_limit: Decimal | int | str | None,
+                         expected_daily_limit: Decimal | int | str,
+                         expected_lifetime_limit: Decimal | int | str | None) -> None:
+        """Explicit compare-and-set for operator-approved account caps; never resets usage."""
+        scope, currency = self._scope(scope), self._currency(currency)
+        daily = _money(daily_limit, "daily_limit")
+        life = None if lifetime_limit is None else _money(lifetime_limit, "lifetime_limit")
+        expected_daily = _money(expected_daily_limit, "expected_daily_limit")
+        expected_life = None if expected_lifetime_limit is None else _money(expected_lifetime_limit, "expected_lifetime_limit")
+        db = self._connect()
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT currency,limit_amount,lifetime_limit FROM accounts WHERE scope=?", (scope,)).fetchone()
+            if row is None:
+                raise ValueError(f"scope {scope!r} has no existing ledger account")
+            if row["currency"] != currency:
+                raise CurrencyMismatch(f"scope {scope!r} is tracked in {row['currency']}")
+            actual_life = None if row["lifetime_limit"] is None else Decimal(row["lifetime_limit"])
+            if Decimal(row["limit_amount"]) != expected_daily or actual_life != expected_life:
+                raise ValueError("configured limits changed; inspect the ledger and retry with current expected values")
+            db.execute("UPDATE accounts SET limit_amount=?,lifetime_limit=? WHERE scope=?",
+                       (str(daily), None if life is None else str(life), scope))
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import base64
 import json
 import re
 import sqlite3
@@ -102,7 +103,12 @@ class CorpusStore:
             db.executescript(SCHEMA)
             # Serialize schema inspection and additive migration. Each initializer
             # re-reads columns only after acquiring the write lock.
+            db.execute("CREATE TABLE IF NOT EXISTS document_provenance(document_revision_ref TEXT PRIMARY KEY, author TEXT NOT NULL, event_time TEXT, received_at TEXT NOT NULL, raw_sha256 TEXT NOT NULL)")
             db.execute("BEGIN IMMEDIATE")
+            provenance_columns={row[1] for row in db.execute("PRAGMA table_info(document_provenance)")}
+            if "data_classification" not in provenance_columns:
+                db.execute("ALTER TABLE document_provenance ADD COLUMN data_classification TEXT NOT NULL DEFAULT 'confidential'")
+                db.execute("UPDATE document_provenance SET data_classification='synthetic' WHERE document_revision_ref IN (SELECT r.document_revision_ref FROM revisions r JOIN documents d USING(document_id) WHERE d.synthetic=1)")
             revision_columns = {row[1] for row in db.execute("PRAGMA table_info(revisions)")}
             if "publisher" not in revision_columns:
                 db.execute("ALTER TABLE revisions ADD COLUMN publisher TEXT NOT NULL DEFAULT ''")
@@ -186,10 +192,11 @@ class CorpusStore:
             else:
                 doc_id = "doc_" + _hash("\0".join((tenant_id, source_id, canonical_uri)))[:32]
                 db.execute("INSERT INTO documents VALUES(?,?,?,?,?,?,?,?,?,?)", (doc_id, tenant_id, source_id, source_role, canonical_uri, title, str(document.get("publisher", "")), str(document.get("language", "ru")), int(bool(document["synthetic"])), now))
-            previous = db.execute("SELECT revision, content_hash, title, published_at, fetched_at, content_type, publisher, language FROM revisions WHERE document_id=? ORDER BY revision DESC LIMIT 1", (doc_id,)).fetchone()
-            if previous and (previous["content_hash"], previous["title"], previous["published_at"], previous["content_type"], previous["publisher"], previous["language"]) == (content_hash, title, published_at, content_type, publisher, language):
+            previous = db.execute("SELECT revision, content_hash, title, published_at, fetched_at, content_type, publisher, language, (SELECT p.data_classification FROM document_provenance p WHERE p.document_revision_ref=revisions.document_revision_ref) AS data_classification FROM revisions WHERE document_id=? ORDER BY revision DESC LIMIT 1", (doc_id,)).fetchone()
+            if previous and (previous["content_hash"], previous["title"], previous["published_at"], previous["content_type"], previous["publisher"], previous["language"],previous["data_classification"]) == (content_hash, title, published_at, content_type, publisher, language,"synthetic" if document["synthetic"] else document.get("data_classification","confidential")):
                 ref = f"{doc_id}:{previous['revision']}"
                 duplicate = db.execute("SELECT d.document_id FROM revisions r JOIN documents d USING(document_id) WHERE r.content_hash=? AND d.document_id<>? AND d.tenant_id=? AND d.source_role=? ORDER BY r.fetched_at,d.document_id LIMIT 1", (content_hash, doc_id, tenant_id, source_role)).fetchone()
+                self._save_original(document, ref, db)
                 return {"document_id": doc_id, "revision": previous["revision"], "document_revision_ref": ref, "content_hash": content_hash, "duplicate_of": duplicate["document_id"] if duplicate else None, "evidence_count": db.execute("SELECT count(*) FROM evidence WHERE document_revision_ref=?", (ref,)).fetchone()[0], "parse_warnings": list(parsed.warnings), "synthetic": bool(document["synthetic"])}
             revision = (previous["revision"] + 1) if previous else 1
             ref = f"{doc_id}:{revision}"
@@ -198,6 +205,7 @@ class CorpusStore:
                 fetched_at = (prior_known_at + timedelta(microseconds=1)).astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
             duplicate = db.execute("SELECT d.document_id FROM revisions r JOIN documents d USING(document_id) WHERE r.content_hash=? AND d.document_id<>? AND d.tenant_id=? AND d.source_role=? ORDER BY r.fetched_at,d.document_id LIMIT 1", (content_hash, doc_id, tenant_id, source_role)).fetchone()
             db.execute("INSERT INTO revisions(document_revision_ref,document_id,revision,content_hash,title,published_at,fetched_at,content_type,extracted_text,warnings,publisher,language) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (ref, doc_id, revision, content_hash, title, published_at, fetched_at, content_type, extracted, json.dumps(parsed.warnings), publisher, language))
+            self._save_original(document, ref, db)
             for ordinal, (locator, quote) in enumerate(_chunks(extracted)):
                 evidence_id = "ev_" + _hash(f"{ref}\0{ordinal}\0{quote}")[:40]
                 db.execute("INSERT INTO evidence VALUES(?,?,?,?,?,?)", (evidence_id, ref, ordinal, locator, quote, _hash(quote)))
@@ -222,8 +230,8 @@ class CorpusStore:
         placeholders = ",".join("?" for _ in source_ids)
         params: list[Any] = [tenant_id, *source_ids, as_of_value, as_of_value]
         sql = f"""SELECT e.*, d.document_id,d.tenant_id,d.source_id,d.source_role,r.title,r.publisher,r.language,d.canonical_uri,d.synthetic,
-                         r.revision,r.document_revision_ref,r.published_at,r.fetched_at
-                  FROM evidence e JOIN revisions r USING(document_revision_ref) JOIN documents d USING(document_id)
+                         r.revision,r.document_revision_ref,r.published_at,r.fetched_at,p.author,p.event_time,p.received_at,p.raw_sha256,p.data_classification
+                  FROM evidence e JOIN revisions r USING(document_revision_ref) JOIN documents d USING(document_id) LEFT JOIN document_provenance p USING(document_revision_ref)
                   WHERE d.tenant_id=? AND d.source_id IN ({placeholders}) AND d.source_role IN ('external','bank')
                     AND r.fetched_at<=? AND r.published_at<=?"""
         if role:
@@ -278,7 +286,7 @@ class CorpusStore:
 
     @staticmethod
     def _result(row: sqlite3.Row, score: float) -> dict:
-        return {"evidence_id": row["evidence_id"], "document_id": row["document_id"], "document_revision_ref": row["document_revision_ref"], "source_id": row["source_id"], "source_role": row["source_role"], "title": row["title"], "canonical_uri": row["canonical_uri"], "published_at": row["published_at"], "fetched_at": row["fetched_at"], "locator": row["locator"], "quote": row["quote"][:1000], "content_hash": row["content_hash"], "synthetic": bool(row["synthetic"]), "score": float(score)}
+        return {"evidence_id": row["evidence_id"], "document_id": row["document_id"], "document_revision_ref": row["document_revision_ref"], "source_id": row["source_id"], "source_role": row["source_role"], "title": row["title"], "canonical_uri": row["canonical_uri"], "published_at": row["published_at"], "fetched_at": row["fetched_at"], "locator": row["locator"], "quote": row["quote"][:1000], "content_hash": row["content_hash"], "synthetic": bool(row["synthetic"]), "score": float(score), "author":row["author"] or "", "event_time":row["event_time"], "received_at":row["received_at"], "raw_sha256":row["raw_sha256"],"data_classification":row["data_classification"] or "confidential"}
 
     def get_evidence(self, *, tenant_id: str, source_ids: list[str], as_of: str, evidence_id: str) -> dict | None:
         if not isinstance(evidence_id, str) or not evidence_id:
@@ -291,11 +299,73 @@ class CorpusStore:
         marks = ",".join("?" for _ in source_ids)
         with self._connect() as db:
             row = db.execute(f"""SELECT e.*,d.document_id,d.tenant_id,d.source_id,d.source_role,r.title,r.publisher,r.language,d.canonical_uri,d.synthetic,
-                                      r.revision,r.document_revision_ref,r.published_at,r.fetched_at
-                               FROM evidence e JOIN revisions r USING(document_revision_ref) JOIN documents d USING(document_id)
+                                      r.revision,r.document_revision_ref,r.published_at,r.fetched_at,p.author,p.event_time,p.received_at,p.raw_sha256,p.data_classification
+                               FROM evidence e JOIN revisions r USING(document_revision_ref) JOIN documents d USING(document_id) LEFT JOIN document_provenance p USING(document_revision_ref)
                                WHERE e.evidence_id=? AND d.tenant_id=? AND d.source_id IN ({marks})
                                  AND r.fetched_at<=? AND r.published_at<=?
                                  AND r.revision=(SELECT MAX(r2.revision) FROM revisions r2 WHERE r2.document_id=d.document_id AND r2.fetched_at<=? AND r2.published_at<=?)""", (evidence_id, tenant_id, *source_ids, as_of_value, as_of_value, as_of_value, as_of_value)).fetchone()
         if row is None:
             return None
         return self._result(row, 0.0)
+
+
+    def _save_original(self, document, ref, db):
+        """Store an immutable original and a server receipt; client fetched_at is not receipt time."""
+        raw = base64.b64decode(document["content"], validate=True) if document["content_type"] == "application/pdf" else document["content"].encode("utf-8")
+        # Only the internal collector can pass an upstream raw reference. Never read
+        # arbitrary paths from an ingest payload, even when a matching hash is supplied.
+        raw_ref = document.get("raw_ref")
+        if raw_ref:
+            candidate = Path(raw_ref).resolve()
+            managed = (Path(self.path).parent / "raw").resolve()
+            if not candidate.is_relative_to(managed) or not candidate.is_file():
+                raise ValueError("raw_ref_outside_managed_storage")
+            upstream = candidate.read_bytes()
+            if len(upstream) > 20_000_000 or hashlib.sha256(upstream).hexdigest() != document.get("raw_sha256"):
+                raise ValueError("raw_receipt_hash_mismatch")
+            raw = upstream
+        digest = hashlib.sha256(raw).hexdigest()
+        folder = Path(self.path).parent / "raw" / "corpus" / _hash(document["tenant_id"])
+        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+        target = folder / digest
+        if not target.exists():
+            try:
+                with target.open("xb") as out: out.write(raw)
+                target.chmod(0o600)
+            except FileExistsError: pass
+        event_time = document.get("event_time")
+        if event_time: event_time = _aware(event_time, "event_time")
+        classification="synthetic" if document["synthetic"] else document.get("data_classification","confidential")
+        if classification not in {"public","synthetic","confidential"}: raise ValueError("invalid_data_classification")
+        db.execute("INSERT OR IGNORE INTO document_provenance(document_revision_ref,author,event_time,received_at,raw_sha256,data_classification) VALUES(?,?,?,?,?,?)", (ref, str(document.get("author", "")), event_time,
+            datetime.now(timezone.utc).isoformat(), digest, classification))
+
+    def list_documents(self, *, tenant_id, source_ids, as_of, policy=None, as_known=False):
+        """Latest eligible versions, with policy exclusions applied before retrieval."""
+        if not source_ids: return []
+        instant = _aware(as_of, "as_of")
+        marks = ",".join("?" for _ in source_ids)
+        with self._connect() as db:
+            rows = db.execute(f"""SELECT d.*,r.*,p.author,p.event_time,p.received_at,p.raw_sha256,p.data_classification
+                FROM documents d JOIN revisions r USING(document_id)
+                LEFT JOIN document_provenance p USING(document_revision_ref)
+                WHERE d.tenant_id=? AND d.source_id IN ({marks}) AND r.published_at<=? AND r.fetched_at<=?
+                ORDER BY d.document_id,r.revision DESC""", (tenant_id,*source_ids,instant,instant)).fetchall()
+        selected = {}
+        cutoff = datetime.fromisoformat(instant.replace("Z", "+00:00"))
+        for row in rows:
+            item = dict(row)
+            if as_known and (not item.get("received_at") or datetime.fromisoformat(item["received_at"]) > cutoff): continue
+            if item["document_id"] in selected: continue
+            if policy and not policy.permits_document(item): continue
+            item["content"] = item.pop("extracted_text")
+            item["content_type"] = "text/plain"
+            item["synthetic"] = bool(item["synthetic"])
+            selected[item["document_id"]] = item
+        return list(selected.values())
+
+    def read_original(self, *, tenant_id, source_ids, document_revision_ref, as_of, policy=None):
+        documents = self.list_documents(tenant_id=tenant_id, source_ids=source_ids, as_of=as_of, policy=policy)
+        item = next((d for d in documents if d["document_revision_ref"] == document_revision_ref), None)
+        if item is None or not item.get("raw_sha256"): raise ValueError("original_not_permitted")
+        return (Path(self.path).parent / "raw" / "corpus" / _hash(tenant_id) / item["raw_sha256"]).read_bytes()

@@ -177,6 +177,27 @@
           ],
           "default": null,
           "title": "Origin"
+        },
+        "horizon": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Horizon"
+        },
+        "confirmation_conditions": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Confirmation Conditions",
+          "type": "array"
         }
       },
       "required": [
@@ -209,6 +230,33 @@
           "minimum": 0,
           "title": "Company Facts",
           "type": "integer"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 30,
+          "title": "Limitations",
+          "type": "array"
+        },
+        "checked_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Checked At"
+        },
+        "independent_origins": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Independent Origins",
+          "type": "integer"
         }
       },
       "required": [
@@ -223,6 +271,59 @@
     "EvidenceRecord": {
       "additionalProperties": false,
       "properties": {
+        "data_classification": {
+          "default": "confidential",
+          "enum": [
+            "public",
+            "synthetic",
+            "confidential"
+          ],
+          "title": "Data Classification",
+          "type": "string"
+        },
+        "author": {
+          "default": "",
+          "title": "Author",
+          "type": "string"
+        },
+        "event_time": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Time"
+        },
+        "received_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Received At"
+        },
+        "raw_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Raw Sha256"
+        },
         "evidence_id": {
           "maxLength": 8000,
           "minLength": 1,
@@ -323,6 +424,32 @@
     "InfluenceEdge": {
       "additionalProperties": false,
       "properties": {
+        "source_node": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Node"
+        },
+        "target_node": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Node"
+        },
         "edge_id": {
           "maxLength": 8000,
           "minLength": 1,
@@ -380,6 +507,45 @@
           "maxItems": 20,
           "title": "Falsifiers",
           "type": "array"
+        },
+        "horizon": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Horizon"
+        },
+        "valid_from": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid From"
+        },
+        "valid_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid Until"
         }
       },
       "required": [
@@ -572,6 +738,31 @@
           "format": "date-time",
           "title": "Created At",
           "type": "string"
+        },
+        "watch_conditions": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Watch Conditions",
+          "type": "array"
+        },
+        "changes": {
+          "additionalProperties": true,
+          "title": "Changes",
+          "type": "object"
+        },
+        "shared_package_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Shared Package Ref"
         }
       },
       "required": [

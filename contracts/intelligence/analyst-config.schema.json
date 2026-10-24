@@ -1,4 +1,60 @@
 {
+  "$defs": {
+    "AnalystExample": {
+      "additionalProperties": false,
+      "description": "Closed example pattern; cannot store company-specific narrative or instructions.",
+      "properties": {
+        "scenario": {
+          "enum": [
+            "supply_disruption",
+            "regulatory_change",
+            "demand_shift",
+            "currency_move",
+            "capacity_change",
+            "data_gap",
+            "other"
+          ],
+          "title": "Scenario",
+          "type": "string"
+        },
+        "focus": {
+          "items": {
+            "enum": [
+              "costs",
+              "liquidity",
+              "supply",
+              "regulation",
+              "growth",
+              "uncertainty"
+            ],
+            "type": "string"
+          },
+          "maxItems": 3,
+          "title": "Focus",
+          "type": "array"
+        },
+        "check_kind": {
+          "enum": [
+            "contract_dates",
+            "alternative_supplier",
+            "order_status",
+            "price_formula",
+            "region_exposure",
+            "regulatory_scope",
+            "unknown_data"
+          ],
+          "title": "Check Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenario",
+        "check_kind"
+      ],
+      "title": "AnalystExample",
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
   "properties": {
     "config_id": {
@@ -91,6 +147,31 @@
       "minimum": 4,
       "title": "Evidence Limit",
       "type": "integer"
+    },
+    "max_depth": {
+      "default": 2,
+      "maximum": 3,
+      "minimum": 2,
+      "title": "Max Depth",
+      "type": "integer"
+    },
+    "retrieval_expansions": {
+      "items": {
+        "maxLength": 80,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 6,
+      "title": "Retrieval Expansions",
+      "type": "array"
+    },
+    "examples": {
+      "items": {
+        "$ref": "#/$defs/AnalystExample"
+      },
+      "maxItems": 3,
+      "title": "Examples",
+      "type": "array"
     }
   },
   "required": [

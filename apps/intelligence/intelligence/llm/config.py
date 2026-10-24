@@ -24,6 +24,7 @@ CANONICAL_MODELS = frozenset({
     "qwen/qwen3-vl-30b-a3b-instruct",
     "moonshotai/kimi-k2.6",
 })
+REASONING_EFFORTS = frozenset({"none", "low", "medium", "high"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +42,8 @@ class ProviderConfig:
     max_output_tokens: int
     allow_paid: bool = False
     max_request_cost: Decimal | None = None
+    lifetime_limit: Decimal | None = None
+    reasoning_effort: str | None = None
 
     def __post_init__(self) -> None:
         _validate_base(self.profile, self.base_url)
@@ -68,10 +71,17 @@ class ProviderConfig:
             raise ValueError("allow_paid must be a boolean")
         if self.max_request_cost is not None:
             object.__setattr__(self, "max_request_cost", _decimal(self.max_request_cost, "max_request_cost"))
+        if self.lifetime_limit is not None:
+            object.__setattr__(self, "lifetime_limit", _decimal(self.lifetime_limit, "lifetime_limit"))
         if isinstance(self.timeout_seconds, bool) or not isinstance(self.timeout_seconds, (int, float)) or not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be a positive finite number")
         if isinstance(self.max_output_tokens, bool) or not isinstance(self.max_output_tokens, int) or self.max_output_tokens <= 0:
             raise ValueError("max_output_tokens must be a positive integer")
+        if self.reasoning_effort is not None:
+            if self.profile != "openrouter":
+                raise ValueError("reasoning_effort is supported only by the OpenRouter profile")
+            if not isinstance(self.reasoning_effort, str) or self.reasoning_effort not in REASONING_EFFORTS:
+                raise ValueError("reasoning_effort must be none, low, medium, high, or null")
 
     @property
     def is_paid_openrouter(self) -> bool:
@@ -83,12 +93,19 @@ class ProviderConfig:
             return
         if not self.allow_paid:
             raise ValueError("paid OpenRouter use requires allow_paid=true")
-        if self.daily_limit <= 0 or self.daily_limit > Decimal("0.20"):
-            raise ValueError("paid OpenRouter daily_limit must be positive and at most 0.20 USD")
+        expanded = self.daily_limit > Decimal("0.20") or (self.max_request_cost is not None and self.max_request_cost > Decimal("0.01"))
+        if self.daily_limit <= 0 or self.daily_limit > Decimal("5"):
+            raise ValueError("paid OpenRouter daily_limit must be positive and at most 5 USD")
+        if expanded and (self.lifetime_limit is None or self.lifetime_limit <= 0 or self.lifetime_limit > Decimal("5")):
+            raise ValueError("expanded paid OpenRouter limits require explicit lifetime_limit from 0 to 5 USD")
+        if self.lifetime_limit is not None and (self.lifetime_limit <= 0 or self.lifetime_limit > Decimal("5")):
+            raise ValueError("paid OpenRouter lifetime_limit must be positive and at most 5 USD")
         if (self.max_request_cost is None or self.max_request_cost <= 0
-                or self.max_request_cost > Decimal("0.01")
+                or self.max_request_cost > Decimal("0.25")
                 or self.max_request_cost > self.daily_limit):
-            raise ValueError("paid OpenRouter max_request_cost must be positive, at most 0.01 USD, and no greater than daily_limit")
+            raise ValueError("paid OpenRouter max_request_cost must be positive, at most 0.25 USD, and no greater than daily_limit")
+        if not expanded and self.max_request_cost > Decimal("0.01"):
+            raise ValueError("max_request_cost above 0.01 USD requires expanded limits and lifetime_limit")
         if self.input_per_million <= 0 or self.output_per_million <= 0:
             raise ValueError("paid OpenRouter input and output rates must be explicit positive USD per-million caps")
         try:
@@ -171,8 +188,12 @@ def _from_mapping(profile: str, value: dict[str, Any]) -> ProviderConfig:
         raise ValueError("allow_paid must be a boolean")
     raw_request_cost = value.get("max_request_cost")
     request_cost = None if raw_request_cost is None else _decimal(raw_request_cost, "max_request_cost")
+    raw_lifetime = value.get("lifetime_limit")
+    lifetime_limit = None if raw_lifetime is None else _decimal(raw_lifetime, "lifetime_limit")
+    reasoning_effort = value.get("reasoning_effort")
     return ProviderConfig(profile, base_url, api_key_env, model, scope.strip(), currency, limit,
-                          input_rate, output_rate, float(timeout), max_tokens, allow_paid, request_cost)
+                          input_rate, output_rate, float(timeout), max_tokens, allow_paid, request_cost,
+                          lifetime_limit, reasoning_effort)
 
 
 def load_config(path: str | Path, profile: str | None = None) -> ProviderConfig:

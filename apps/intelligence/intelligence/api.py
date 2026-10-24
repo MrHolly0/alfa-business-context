@@ -3,6 +3,8 @@ from __future__ import annotations
 import hmac
 import os
 from datetime import datetime
+from pathlib import Path
+import hashlib
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -10,6 +12,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from .artifacts import ArtifactStore, payload_hash
 from .schemas import AnalysisRequest, CandidateAssessment
+from .workflow import DataTask, DataResult, DataWorkflow
+from .collection import SourcePolicySnapshot, SourceProbeRequest, SourceProbeResult
+from .client_data import CompanyContextPrepareRequest, CompanyContextPrepareResult, prepare_company_contexts
 from .relevance import RankRequest, RankResult, rank_events
 
 
@@ -28,8 +33,11 @@ class DocumentInput(_StrictBody):
     published_at: datetime
     fetched_at: datetime
     synthetic: bool = False
+    data_classification: Literal["public","synthetic","confidential"] = "confidential"
     publisher: str = Field(default="", max_length=500)
     language: str = Field(default="ru", max_length=24)
+    author: str = Field(default="", max_length=500)
+    event_time: datetime | None = None
 
     @field_validator("published_at", "fetched_at")
     @classmethod
@@ -45,6 +53,7 @@ class DocumentInput(_StrictBody):
 
 
 class SearchInput(_StrictBody):
+    source_policy: SourcePolicySnapshot | None = None
     tenant_id: str = Field(min_length=1, max_length=128)
     source_ids: list[str] = Field(min_length=1, max_length=100)
     as_of: datetime
@@ -58,6 +67,13 @@ class SearchInput(_StrictBody):
     def date_must_be_aware(cls, value):
         if value.tzinfo is None or value.utcoffset() is None: raise ValueError("timestamp must include timezone")
         return value
+
+
+class OriginalInput(_StrictBody):
+    tenant_id: str = Field(min_length=1,max_length=128)
+    source_policy: SourcePolicySnapshot
+    document_revision_ref: str = Field(min_length=1,max_length=512)
+    as_of: datetime
 
 
 class _BodyLimit:
@@ -92,7 +108,7 @@ class _BodyLimit:
 
 
 def create_app(*, store, pipeline, artifact_store: ArtifactStore | None = None,
-               service_token: str | None = None, tenant_ids: set[str] | list[str] | None = None) -> FastAPI:
+               data_workflow=None, service_token: str | None = None, tenant_ids: set[str] | list[str] | None = None) -> FastAPI:
     """Build private service API. Missing identity configuration denies all private calls."""
     token = service_token if service_token is not None else os.getenv("INTELLIGENCE_SERVICE_TOKEN", "")
     tenants = set(tenant_ids if tenant_ids is not None else (v.strip() for v in os.getenv("INTELLIGENCE_TENANTS", "").split(",") if v.strip()))
@@ -137,8 +153,16 @@ def create_app(*, store, pipeline, artifact_store: ArtifactStore | None = None,
         values = body.model_dump(mode="json")
         tenant_id = tenant(values)
         try:
+            refs = body.document_revision_refs
+            if body.source_policy is not None:
+                if body.source_policy.tenant_id != tenant_id or not set(body.source_ids).issubset(body.source_policy.effective_source_ids()):
+                    raise HTTPException(403,"policy_scope_mismatch")
+                documents = store.list_documents(tenant_id=tenant_id,source_ids=body.source_ids,as_of=body.as_of.isoformat(),policy=body.source_policy)
+                permitted = {item["document_revision_ref"] for item in documents}
+                refs = [ref for ref in (refs if refs is not None else permitted) if ref in permitted]
+                if not refs: return []
             return store.search(tenant_id=tenant_id, source_ids=body.source_ids, as_of=body.as_of.isoformat(),
-                                query=body.query, document_revision_refs=body.document_revision_refs,
+                                query=body.query, document_revision_refs=refs,
                                 role=body.role, limit=body.limit)
         except (KeyError, TypeError, ValueError) as e: raise HTTPException(422, "invalid_search_request") from e
 
@@ -149,8 +173,8 @@ def create_app(*, store, pipeline, artifact_store: ArtifactStore | None = None,
         try: return rank_events(**values)
         except ValueError as exc: raise HTTPException(422,"invalid_ranking_request") from exc
 
-    @app.post("/internal/v1/analyze", response_model=CandidateAssessment)
-    def analyze(request: AnalysisRequest, _: bool = Depends(auth)):
+    @app.post("/internal/v1/analyze", response_model=CandidateAssessment | DataResult)
+    def analyze(request: AnalysisRequest | DataTask, _: bool = Depends(auth)):
         body = request.model_dump(mode="json")
         tenant_id = tenant(body)
         req_id = str(request.request_id)
@@ -166,10 +190,51 @@ def create_app(*, store, pipeline, artifact_store: ArtifactStore | None = None,
             # An identical request is already executing, or is awaiting operator recovery after a crash.
             raise HTTPException(409, "request_in_progress")
         try:
-            result = CandidateAssessment.model_validate(pipeline.run(request))
+            if isinstance(request, DataTask):
+                result = DataResult.model_validate(get_workflow().run(request))
+            else:
+                result = CandidateAssessment.model_validate(pipeline.run(request))
             return artifacts.save_candidate(tenant_id, req_id, digest, result)
         except ValueError as e:
             if str(e) == "idempotency_conflict": raise HTTPException(409, "idempotency_conflict") from e
-            raise
+            code = str(e)
+            if code in {"capacity_exhausted","request_in_progress"}: raise HTTPException(409,code) from e
+            raise HTTPException(422,"analysis_input_or_configuration_error") from e
+
+    def get_workflow():
+        nonlocal data_workflow
+        if data_workflow is None:
+            data_workflow = DataWorkflow(Path(artifacts.path).parent,llm=getattr(pipeline,"llm",None),role_services=getattr(pipeline,"role_services",None))
+        return data_workflow
+
+    @app.post("/internal/v1/company-context/prepare",response_model=CompanyContextPrepareResult)
+    def prepare_context(request: CompanyContextPrepareRequest, _: bool = Depends(auth)):
+        tenant(request.model_dump(mode="json"))
+        return prepare_company_contexts(**request.model_dump())
+
+    @app.post("/internal/v1/sources/probe", response_model=SourceProbeResult)
+    def probe(request: SourceProbeRequest, _: bool = Depends(auth)):
+        tenant(request.model_dump(mode="json"))
+        return get_workflow().collector.probe(request)
+
+    @app.post("/internal/v1/originals")
+    def original(request: OriginalInput, _: bool = Depends(auth)):
+        tenant(request.model_dump(mode="json"))
+        if request.source_policy.tenant_id != request.tenant_id: raise HTTPException(403,"policy_scope_mismatch")
+        try:
+            raw = get_workflow().store.read_original(tenant_id=request.tenant_id,source_ids=request.source_policy.effective_source_ids(),
+                document_revision_ref=request.document_revision_ref,as_of=request.as_of.isoformat(),policy=request.source_policy)
+        except ValueError as exc: raise HTTPException(404,"original_not_permitted") from exc
+        from starlette.responses import Response
+        return Response(raw,media_type="application/octet-stream",headers={"X-Content-SHA256":hashlib.sha256(raw).hexdigest(),"Content-Disposition":"attachment"})
+
+    @app.get("/internal/v1/executions/{request_id}")
+    def progress(request_id: str, tenant_id: str, _: bool = Depends(auth)):
+        tenant({"tenant_id":tenant_id})
+        workflow=get_workflow()
+        with workflow.state.db() as db:
+            rows=db.execute("SELECT stage,payload FROM workflow_stages WHERE tenant=? AND request=? ORDER BY rowid",(tenant_id,request_id)).fetchall()
+        import json
+        return {"request_id":request_id,"stages":[{"stage":row[0],"details":json.loads(row[1])} for row in rows]}
 
     return app

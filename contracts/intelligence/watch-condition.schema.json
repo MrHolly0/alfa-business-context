@@ -1,0 +1,149 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "condition_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Condition Id",
+      "type": "string"
+    },
+    "company_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Company Id",
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "date_due",
+        "metric_threshold",
+        "context_revision",
+        "document_revision"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "provenance": {
+      "maxLength": 1000,
+      "minLength": 1,
+      "title": "Provenance",
+      "type": "string"
+    },
+    "evidence_refs": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 30,
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "target_ref": {
+      "anyOf": [
+        {
+          "maxLength": 512,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Target Ref"
+    },
+    "metric": {
+      "anyOf": [
+        {
+          "maxLength": 300,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Metric"
+    },
+    "unit": {
+      "anyOf": [
+        {
+          "maxLength": 100,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Unit"
+    },
+    "operator": {
+      "anyOf": [
+        {
+          "enum": [
+            "ge",
+            "le",
+            "eq"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Operator"
+    },
+    "threshold": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Threshold"
+    },
+    "due_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Due At"
+    },
+    "expected_revision": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expected Revision"
+    }
+  },
+  "required": [
+    "condition_id",
+    "company_id",
+    "kind",
+    "provenance"
+  ],
+  "title": "WatchCondition",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

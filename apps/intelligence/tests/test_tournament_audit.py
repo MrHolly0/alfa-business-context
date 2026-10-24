@@ -7,13 +7,19 @@ from intelligence.analysts import AnalystConfig,PromptRegistry
 from intelligence.pipeline import AnalysisPipeline
 from intelligence.tournament import TournamentRunner,TournamentStore
 from test_analysts import eligible_report
-from test_tournament import case,FakeLLM,FlipJudge
+from test_tournament import case,shadow_case,FakeLLM,FlipJudge
 
 
 def dataset():
     return {'schema_version':'tournament-dataset-v1','synthetic':False,
             'train':[case('train','train-event','train-company',synthetic=False)],
             'holdout':[case('hold','hold-event','hold-company',synthetic=False)]}
+
+
+def shadow_dataset():
+    return {'schema_version':'tournament-dataset-v1','synthetic':False,
+            'train':[shadow_case('shadow','shadow-event','shadow-company')],
+            'holdout':[shadow_case('shadow-hold','shadow-hold-event','shadow-hold-company')]}
 
 
 def runner(tmp_path,registry):
@@ -50,7 +56,7 @@ def test_compare_to_active_baseline_and_publish_only_while_snapshot_current(tmp_
     scope='impact:any:*'
     registry.promote(scope=scope,ref='stable@1',reviewer='alice',report=eligible_report(registry,scope,'stable@1'))
     arena=runner(tmp_path,registry)
-    report=arena.run(run_id='against-active',dataset=dataset(),candidate_refs=['stable@1','candidate@1'],mode='model',execution_identity={'model':'fake'},target_scope=scope)
+    report=arena.run(run_id='against-active',dataset=dataset(),shadow_dataset=shadow_dataset(),candidate_refs=['stable@1','candidate@1'],mode='model',execution_identity={'model':'fake'},target_scope=scope)
     assert report['baseline_ref']=='stable@1'
     assert 'baseline@1' not in report['training']
     reviewed=approve(arena,'against-active')
@@ -74,7 +80,7 @@ def test_fallback_activation_change_also_invalidates_comparison(tmp_path):
 def test_reused_holdout_is_visible_and_never_eligible_for_second_selection(tmp_path):
     registry=PromptRegistry(tmp_path/'registry.sqlite');registry.register(AnalystConfig(config_id='candidate'))
     arena=runner(tmp_path,registry)
-    args=dict(dataset=dataset(),candidate_refs=['baseline@1','candidate@1'],mode='model',execution_identity={'model':'fake'},target_scope='impact:any:*')
+    args=dict(dataset=dataset(),shadow_dataset=shadow_dataset(),candidate_refs=['baseline@1','candidate@1'],mode='model',execution_identity={'model':'fake'},target_scope='impact:any:*')
     first=arena.run(run_id='first',**args)
     assert first['holdout']['fresh_for_selection'] is True
     assert approve(arena,'first')['promotion_eligible'] is True
@@ -86,6 +92,15 @@ def test_reused_holdout_is_visible_and_never_eligible_for_second_selection(tmp_p
     new['dataset']['holdout'][0]['request']['event']['event_id']='renamed'
     third=arena.run(run_id='third',**new)
     assert third['holdout']['fresh_for_selection'] is False
+
+
+def test_missing_fresh_shadow_comparison_blocks_promotion(tmp_path):
+    registry=PromptRegistry(tmp_path/'registry.sqlite');registry.register(AnalystConfig(config_id='candidate'))
+    arena=runner(tmp_path,registry)
+    report=arena.run(run_id='without-shadow',dataset=dataset(),candidate_refs=['baseline@1','candidate@1'],mode='model',
+        execution_identity={'model':'fake'},target_scope='impact:any:*')
+    assert report['shadow_validation']['validated'] is False
+    assert approve(arena,'without-shadow')['promotion_eligible'] is False
 
 
 def test_legacy_report_without_active_comparison_is_not_publishable(tmp_path):

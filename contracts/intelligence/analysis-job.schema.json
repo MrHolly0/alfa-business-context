@@ -289,6 +289,19 @@
     "EventInput": {
       "additionalProperties": false,
       "properties": {
+        "document_revision_ref": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Document Revision Ref"
+        },
         "event_id": {
           "maxLength": 8000,
           "minLength": 1,
@@ -373,6 +386,59 @@
           "minLength": 1,
           "title": "Provenance",
           "type": "string"
+        },
+        "source_node": {
+          "default": "company",
+          "maxLength": 256,
+          "title": "Source Node",
+          "type": "string"
+        },
+        "target_node": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Node"
+        },
+        "evidence_refs": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "valid_from": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid From"
+        },
+        "valid_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid Until"
         }
       },
       "required": [

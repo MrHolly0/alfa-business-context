@@ -1,6 +1,367 @@
 {
+  "$defs": {
+    "JSONAdapterMapping": {
+      "additionalProperties": false,
+      "description": "Declarative dot-path mapping only; never a URL, expression, or executable adapter.",
+      "properties": {
+        "items": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Items",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "content": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "url": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        },
+        "published_at": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Published At",
+          "type": "string"
+        },
+        "publisher": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Publisher"
+        },
+        "author": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Author"
+        },
+        "event_time": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Time"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language"
+        }
+      },
+      "required": [
+        "items",
+        "title",
+        "content",
+        "url",
+        "published_at"
+      ],
+      "title": "JSONAdapterMapping",
+      "type": "object"
+    },
+    "SourceGrant": {
+      "additionalProperties": false,
+      "properties": {
+        "source_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Source Id",
+          "type": "string"
+        },
+        "source_role": {
+          "enum": [
+            "external",
+            "bank"
+          ],
+          "title": "Source Role",
+          "type": "string"
+        },
+        "data_classification": {
+          "default": "confidential",
+          "enum": [
+            "public",
+            "synthetic",
+            "confidential"
+          ],
+          "title": "Data Classification",
+          "type": "string"
+        },
+        "uri": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Uri",
+          "type": "string"
+        },
+        "content_type": {
+          "enum": [
+            "application/rss+xml",
+            "application/atom+xml",
+            "text/html",
+            "application/pdf",
+            "application/json"
+          ],
+          "title": "Content Type",
+          "type": "string"
+        },
+        "title": {
+          "default": "",
+          "maxLength": 1000,
+          "title": "Title",
+          "type": "string"
+        },
+        "publisher": {
+          "default": "",
+          "maxLength": 1000,
+          "title": "Publisher",
+          "type": "string"
+        },
+        "language": {
+          "default": "",
+          "maxLength": 32,
+          "title": "Language",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "poll_interval_seconds": {
+          "default": 3600,
+          "maximum": 31536000,
+          "minimum": 60,
+          "title": "Poll Interval Seconds",
+          "type": "integer"
+        },
+        "timeout_seconds": {
+          "default": 15,
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        },
+        "max_bytes": {
+          "default": 2000000,
+          "maximum": 2000000,
+          "minimum": 1,
+          "title": "Max Bytes",
+          "type": "integer"
+        },
+        "allowed_redirect_hosts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 5,
+          "title": "Allowed Redirect Hosts",
+          "type": "array"
+        },
+        "fetch_articles": {
+          "default": false,
+          "title": "Fetch Articles",
+          "type": "boolean"
+        },
+        "article_hosts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 5,
+          "title": "Article Hosts",
+          "type": "array"
+        },
+        "published_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Published At"
+        },
+        "event_time": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Time"
+        },
+        "json_mapping": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JSONAdapterMapping"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "source_id",
+        "source_role",
+        "uri",
+        "content_type"
+      ],
+      "title": "SourceGrant",
+      "type": "object"
+    },
+    "SourcePolicySnapshot": {
+      "additionalProperties": false,
+      "description": "Effective tenant policy version issued by Core for a single job.",
+      "properties": {
+        "policy_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Policy Id",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "tenant_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Tenant Id",
+          "type": "string"
+        },
+        "issued_at": {
+          "format": "date-time",
+          "title": "Issued At",
+          "type": "string"
+        },
+        "sources": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SourceGrant"
+          },
+          "maxItems": 1000,
+          "title": "Sources",
+          "type": "array"
+        },
+        "excluded_source_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Excluded Source Ids",
+          "type": "array"
+        },
+        "excluded_publishers": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Excluded Publishers",
+          "type": "array"
+        },
+        "user_excluded_source_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "User Excluded Source Ids",
+          "type": "array"
+        },
+        "user_excluded_publishers": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "User Excluded Publishers",
+          "type": "array"
+        },
+        "excluded_document_uris": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Excluded Document Uris",
+          "type": "array"
+        },
+        "user_excluded_document_uris": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "User Excluded Document Uris",
+          "type": "array"
+        }
+      },
+      "required": [
+        "policy_id",
+        "revision",
+        "tenant_id",
+        "issued_at"
+      ],
+      "title": "SourcePolicySnapshot",
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
   "properties": {
+    "source_policy": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SourcePolicySnapshot"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "tenant_id": {
       "maxLength": 128,
       "minLength": 1,

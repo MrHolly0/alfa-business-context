@@ -1,81 +1,78 @@
-# Поиск и анализ
+# AI/Data: поиск и анализ
 
-Наша Python-часть получает профиль компании и новость, ищет основания в документах и возвращает кандидата оценки. PHP Core проверяет доступ, выдаёт задания и сохраняет опубликованный результат. Его код здесь не реализуется.
+Python получает из Core разрешённый snapshot: source policy, контекст, даты и версии. Он собирает только выданные источники, сохраняет оригиналы и нормализованные ревизии, формирует события и доказательства, затем возвращает кандидатов. Настоящий PHP Core пока отсутствует; контрактный fixture stand — только средство локальной проверки.
 
-## Что работает
+## Быстрый запуск без сети и ключей
 
-- Импорт текста, HTML, RSS и PDF; версии, даты, устранение точных дублей.
-- Объяснимый предварительный отбор событий по профилю компании.
-- Лексический поиск с ограничением tenant, источников, даты и ревизий.
-- План → поиск → проверка → дополнительный поиск при нехватке оснований → анализ → проверка ответа.
-- Разделение внешних фактов, банковской аналитики, гипотез, рекомендаций и неизвестного.
-- Вызовы разрешённых моделей через хакатонный шлюз или Gemma на OpenRouter: бесплатный профиль и отдельно разрешённый платный с лимитами; журнал расходов SQLite.
-- Внутренний HTTP API и worker с heartbeat, защитой от устаревшего результата и сохранением исходящего сообщения до подтверждения Core.
-- Версии настроек аналитика, выбор по роли/отрасли и отдельный турнир промптов: слепое сравнение, отложенная проверка, ручная оценка, публикация и откат.
-- Учебный набор сценариев и тесты без сети.
-
-Проверка ссылок и структуры не доказывает истинность вывода модели. Реальные CSV и банковские PDF из кейса ещё нужно предоставить и проверить на отложенных примерах. Демо помечено как синтетическое.
-
-## Быстрый запуск из корня репозитория
+Из каталога `apps/intelligence`:
 
 ```sh
-docker compose run --build --rm intelligence demo
-docker compose run --build --rm intelligence evaluate
-docker compose run --build --rm intelligence-test
+.venv/bin/python -m intelligence --help
+.venv/bin/python -m intelligence demo
+.venv/bin/python -m intelligence demo-data --state-dir /tmp/alfa-data-demo
+.venv/bin/python -m intelligence evaluate --mode baseline
+.venv/bin/python -m pytest -q -p no:cacheprovider tests
 ```
 
-`demo` и `evaluate` по умолчанию работают без модели, ключей и сетевых запросов. Режим `baseline` показывает найденные цитаты и неизвестные данные, но не имитирует рассуждение модели.
+`demo-data` выполняет Collector → Corpus → события/общий пакет → анализ двух синтетических компаний на локальном RSS fixture. Он не обращается к сети или модели. `evaluate --mode baseline` — функциональная проверка сценариев, не оценка смысла или полезности на реальных данных.
 
-Для живого анализа добавьте `OPENROUTER_API_KEY` в корневой `.env`:
+Пример полного разрешённого task snapshot:
 
 ```sh
-docker compose run --build --rm intelligence analyze \
-  --input /app/examples/analysis-request.json --mode model \
-  --config /config/providers.json --profile openrouter
+.venv/bin/python -m intelligence run-task --mode baseline \
+  --input examples/data-task.json --state-dir /tmp/alfa-data-task \
+  --output /tmp/alfa-data-result.json
 ```
 
-Исходный шаблон выбирает бесплатную Gemma `:free`. Для разрешённых платных тестов выберите `examples/providers.paid.template.json` через `INTELLIGENCE_CONFIG_FILE` в корневом `.env`: лимит $0.20 в сутки, $0.01 на вызов, цена провайдера ограничена. Самостоятельного переключения между профилями нет. Профиль хакатона включается через `--profile hackathon` после заполнения его тарифов. Образец запроса содержит учебную новость; для банковского материала сначала выполните импорт:
+`run-task` исполняет `ai-data-task-v1` локально и обходит durable Core job lifecycle. В продуктовой интеграции Core создаёт `ai-job-v1`; worker делает claim/heartbeat/result и возвращает `ai-result-v1`. Детали полей — [контракты](../../contracts/intelligence/README.md) и [интеграция](../../docs/ai-integration.md).
+
+## Контрактный Core stand
+
+Стенд требует явного fixture opt-in и слушает loopback. Он не содержит бизнес-интерфейс, production-права или настоящий PHP:
 
 ```sh
-docker compose run --rm intelligence ingest --input /app/examples/documents.json
+.venv/bin/python -m intelligence core-stand --fixture-mode \
+  --state-dir /tmp/alfa-core-stand --seed examples/core-stand-ai-job.json
 ```
 
-Свой JSON можно примонтировать read-only: `docker compose run --rm -v /absolute/path/input.json:/input.json:ro intelligence analyze --input /input.json`. Для локального PDF используйте `ingest --input /metadata.json --file /document.pdf` с обоими смонтированными файлами.
+Периодическая фикстура (минимум 60 секунд):
 
-## Где что менять
+```sh
+.venv/bin/python -m intelligence core-stand --fixture-mode \
+  --state-dir /tmp/alfa-core-stand \
+  --schedule examples/core-stand-ai-task.json \
+  --schedule-id demo-collect --interval 3600
+```
 
-| Файл | Задача |
+Scheduler создаёт обычные fixture jobs. Реальную очередь и планировщик владеет Core.
+
+## API и публичные операции
+
+Внутренний FastAPI требует service bearer token и tenant allowlist. Основные маршруты: `/internal/v1/analyze` (legacy `AnalysisRequest` или `DataTask`), `/internal/v1/search`, `/internal/v1/rank`, `/internal/v1/company-context/prepare`, `/internal/v1/sources/probe`, `/internal/v1/originals` и `/internal/v1/executions/{request_id}`. Frontend обращается к PHP/Core, а не к Python API.
+
+`prepare-context` и `/company-context/prepare` преобразуют обезличенные строки в предложение CompanyContext; профиль не сохраняется автоматически и модель не вызывается. Единица выручки должна быть подтверждена явно. Исходный CSV кейса не предоставлен.
+
+Для URL используется одноразовый grant Core (`probe-source`/`sources/probe`); probe — не подписка. `NewsCollector` принимает неизменяемый snapshot источников и ограничивает HTTPS, DNS/IP, redirect, время и размер ответа. `collect` может быть отдельной task operation. RSS/Atom, HTML, PDF и ограниченный JSON adapter поддерживаются кодом; оригинальные байты хранятся с hash в tenant-scoped private raw store.
+
+## Анализ, роли и конфигурации
+
+Исследователь, аналитик и критик — этапы одного общего pipeline, а не три обязательных независимых агента. Поиск идёт в разрешённом corpus. Общий event impact package переиспользуется между бизнесами; кандидаты содержат версии, evidence, coverage, unknowns и `publication_revision_required`. Только Core решает, публиковать ли новую business revision.
+
+Обычный workflow использует baseline-конфигурацию или подходящую активную analyst config. `arena` — отдельный эксперимент с одинаковыми входами, hard gates, blind review, holdout/shadow и ручной публикацией/rollback. Малые синтетические прогонки подтверждают механику, но не выигрыш по качеству. Настроенные модели запускаются только явно; конфиденциальные данные остаются в baseline.
+
+## Где менять код
+
+| Файлы | Назначение |
 |---|---|
-| `parsers.py`, `corpus.py` | Извлечение текста, версии и поиск |
-| `relevance.py` | Отбор и порядок событий |
-| `schemas.py` | Формат запроса и кандидата |
-| `pipeline.py`, `prompts/` | Шаги анализа и неизменяемые правила модели |
-| `analysts.py` | Версии настроек, выбор по роли/отрасли, публикация и откат |
-| `tournament.py`, `experiments.py`, `contenders.py` | Прогоны, слепое сравнение и бюджет экспериментов |
-| `llm/` | Провайдер, ограничения и расходы |
-| `api.py`, `core_client.py`, `worker.py`, `artifacts.py` | Обмен с Core и надёжная доставка результата |
-| `cli.py`, `evaluation.py`, `evaluation/` | Запуск и проверка сценариев |
+| `collection.py`, `parsers.py`, `corpus.py` | Ограниченный сбор, разбор, raw receipts, ревизии и поиск |
+| `events.py`, `relevance.py`, `research.py` | События, claims, отбор воздействия, пути и периодный анализ |
+| `workflow.py`, `watches.py`, `periods.py` | DataTask orchestration, повторная оценка и watch условия |
+| `pipeline.py`, `multi_agent.py`, `prompts/` | Кандидат, структурные проверки и логические роли |
+| `analysts.py`, `tournament.py`, `experiments.py` | Версии конфигураций и экспериментальный турнир |
+| `api.py`, `core_client.py`, `worker.py`, `core_stand.py` | Внутренние API, Core job transport, worker и fixture стенд |
+| `client_data.py` | Чистая подготовка анонимизированного CSV-профиля |
+| `llm/` | Model registry, маршрутизация, лимитирование и ledger |
 
-Подробнее: [документы и поиск](docs/corpus.md), [анализ](docs/pipeline.md), [HTTP и worker](docs/runtime.md), [провайдеры и стоимость](../../docs/llm-providers.md), [контракты для Backend](../../contracts/intelligence/README.md).
+Читайте [процесс](../../docs/ai-process.md), [границы и готовность](../../docs/ai-scope-and-readiness.md), [сбор источников](docs/collection.md), [проверки](docs/checks.md), [аналитические конфигурации](docs/analysts.md) и [турнир](docs/tournament.md). Актуальный отчёт о live-проверках: [ai-live-checks.md](../../docs/ai-live-checks.md).
 
-Отбор событий: `docker compose run --rm intelligence rank --input /app/examples/rank-request.json`. [Метод и ограничения](docs/relevance.md).
-
-[Что проверено и что осталось подтвердить](docs/checks.md).
-
-## Подбор настроек и турнир
-
-Обычный запрос использует опубликованную конфигурацию для роли/отрасли; если её нет — `baseline@1` с промптом `analysis-v2`. Новый клиент не запускает турнир. Для разового анализа можно передать `analyze --analyst procurement@1`.
-
-Проверить турнир без модели и расходов:
-
-```sh
-docker compose run --build --rm intelligence arena list
-docker compose run --rm intelligence arena generate
-docker compose run --rm intelligence arena run --run-id demo-1
-```
-
-Для публикации турнир сравнивает текущую активную версию области (`--scope`) и до трёх конкурентов на одинаковых входных данных. Сначала проверяет структуру и основания, затем даёт судье ответы в двух порядках. Победитель проходит отдельные отложенные примеры. Судья помогает с оценкой, публикацию подтверждает человек. Учебный набор проверяет работу этого пути; по нему нельзя опубликовать победителя или заявить качество модели.
-
-Для платного прогона нужны явные `--mode model --config /config/providers.json --profile openrouter`. Эксперименты делят общий счёт с анализом и дополнительно ограничены $0.03 в сутки (не более 20% общего лимита), максимум 40 вызовов за период. Для хакатона сначала заполните тарифы; наличие ключа их не заменяет. Параметры и команды ручной оценки: [турниры](docs/tournament.md), [настройки аналитика](docs/analysts.md), [экспериментальные роли и расходы](docs/experiments.md).
-
-После исправлений: RSS сохраняет URL и ревизии исправлений, метаданные документа имеют историю, PDF допускает заявленные 20 МБ. Сбой одной доставки worker не блокирует следующие результаты и новые задания; `inspect` показывает отложенные доставки и причины окончательного отказа. Судья получает также цепочки влияния и вопросы кандидата.
+Успешные schema/tests не доказывают точность выводов. В репозитории нет реальных 9 банковских PDF и CSV кейса, PHP интеграции, лицензированных production источников или независимой оценки на 200–300 примерах.

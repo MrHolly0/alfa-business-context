@@ -1,0 +1,168 @@
+{
+  "schema_version": "ai-data-task-v1",
+  "request_id": "offline-demo-template",
+  "tenant_id": "demo-tenant",
+  "company_id": "north-haulage",
+  "context_version": 1,
+  "source_policy_version": 1,
+  "operation": "collect",
+  "trigger": "manual",
+  "knowledge_mode": "latest",
+  "as_of": "2026-10-24T12:00:00Z",
+  "source_policy": {
+    "policy_id": "offline-demo-policy-v1",
+    "tenant_id": "demo-tenant",
+    "revision": 1,
+    "issued_at": "2026-10-24T12:00:00Z",
+    "sources": [
+      {
+        "source_id": "demo-news-feed",
+        "source_role": "external",
+        "data_classification": "synthetic",
+        "uri": "https://feeds.example/demo.rss",
+        "content_type": "application/rss+xml",
+        "title": "Синтетическая демо-лента",
+        "publisher": "Демо-издание (синтетический пример)",
+        "language": "ru",
+        "enabled": true,
+        "poll_interval_seconds": 3600,
+        "timeout_seconds": 5,
+        "max_bytes": 2000000,
+        "fetch_articles": false,
+        "article_hosts": ["news.example"]
+      },
+      {
+        "source_id": "demo-bank-note",
+        "source_role": "bank",
+        "data_classification": "synthetic",
+        "uri": "https://bank.example/demo-feed.rss",
+        "content_type": "application/rss+xml",
+        "title": "Локальная синтетическая учебная записка",
+        "publisher": "Учебная фикстура; не Альфа-Банк",
+        "language": "ru",
+        "enabled": true,
+        "poll_interval_seconds": 3600,
+        "timeout_seconds": 5,
+        "max_bytes": 2000000
+      }
+    ],
+    "excluded_source_ids": [],
+    "excluded_publishers": [],
+    "user_excluded_source_ids": [],
+    "user_excluded_publishers": [],
+    "excluded_document_uris": [],
+    "user_excluded_document_uris": []
+  },
+  "businesses": [
+    {
+      "company_id": "north-haulage",
+      "context_version": 1,
+      "company": {
+        "name": "СеверТранс (вымышленная демо-компания)",
+        "industry": "логистика",
+        "description": "Учебный пример регионального грузоперевозчика; фактическая компания не подразумевается.",
+        "role": "операционный директор",
+        "dependencies": [
+          {
+            "dependency_id": "north-port-route-context",
+            "label": "Возможный маршрут через Северный порт",
+            "kind": "logistics_route",
+            "status": "hypothesis",
+            "provenance": "Синтетический контекст из примера data-task.json",
+            "source_node": "north-haulage",
+            "target_node": "Северный порт",
+            "evidence_refs": ["fixture:data-task:north-port-route"]
+          }
+        ],
+        "facts": [
+          {
+            "fact_id": "demo-north-haulage",
+            "text": "Вымышленная учебная компания; договоры, запасы и клиенты не заданы.",
+            "provenance": "Синтетическая фикстура репозитория"
+          }
+        ]
+      },
+      "dependency_graph": [
+        {
+          "edge_id": "north-haulage-route",
+          "subject": "north-haulage",
+          "predicate": "may_route_through",
+          "object": "Региональный маршрут",
+          "status": "assumed",
+          "evidence_ref": "fixture:data-task:north-port-route",
+          "evidence_basis": "user_statement"
+        },
+        {
+          "edge_id": "north-route-port",
+          "subject": "Региональный маршрут",
+          "predicate": "may_use_port",
+          "object": "Северный порт",
+          "status": "assumed",
+          "evidence_ref": "fixture:data-task:north-port-route",
+          "evidence_basis": "user_statement"
+        }
+      ]
+    },
+    {
+      "company_id": "volga-machinery",
+      "context_version": 1,
+      "company": {
+        "name": "ВолгаМаш (вымышленная демо-компания)",
+        "industry": "машиностроение",
+        "description": "Учебный пример завода оборудования; фактическая компания не подразумевается.",
+        "role": "руководитель производства",
+        "dependencies": [
+          {
+            "dependency_id": "volga-bearing-context",
+            "label": "Возможная зависимость от подшипников",
+            "kind": "maintenance_input",
+            "status": "hypothesis",
+            "provenance": "Синтетический контекст из примера data-task.json",
+            "source_node": "volga-machinery",
+            "target_node": "Подшипники",
+            "evidence_refs": ["fixture:data-task:volga-bearing"]
+          }
+        ],
+        "facts": [
+          {
+            "fact_id": "demo-volga-machinery",
+            "text": "Вымышленная учебная компания; реальные поставщики и складские остатки не заданы.",
+            "provenance": "Синтетическая фикстура репозитория"
+          }
+        ]
+      },
+      "dependency_graph": [
+        {
+          "edge_id": "volga-machinery-parts",
+          "subject": "volga-machinery",
+          "predicate": "may_depend_on",
+          "object": "Сервисные детали",
+          "status": "assumed",
+          "evidence_ref": "fixture:data-task:volga-bearing",
+          "evidence_basis": "user_statement"
+        },
+        {
+          "edge_id": "volga-parts-bearing",
+          "subject": "Сервисные детали",
+          "predicate": "may_include",
+          "object": "Подшипники",
+          "status": "assumed",
+          "evidence_ref": "fixture:data-task:volga-bearing",
+          "evidence_basis": "user_statement"
+        }
+      ]
+    }
+  ],
+  "event_ids": [],
+  "published_assessments": [],
+  "budget": {
+    "max_model_calls": 0,
+    "max_input_tokens": 24000,
+    "max_output_tokens": 2048,
+    "max_total_tokens": 60000,
+    "max_steps": 12
+  },
+  "data_classification": "synthetic",
+  "synthetic": true,
+  "max_events": 10
+}

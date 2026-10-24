@@ -23,6 +23,20 @@ class ParserTests(unittest.TestCase):
         self.assertEqual("Цепочка поставок", result.items[0].text)
         self.assertEqual("Mon", result.items[0].published_at)
 
+    def test_rss_html_cdata_and_escaped_markup_are_normalized_but_plaintext_comparison_survives(self):
+        xml = '''<rss><channel>
+          <item><title>CDATA</title><description><![CDATA[<p>Спрос <b>растёт</b> &amp; предложение.</p><script>steal()</script><style>.x{display:none}</style>]]></description></item>
+          <item><title>Escaped</title><description>&lt;div&gt;Цена &amp;amp; спрос&lt;/div&gt;</description></item>
+          <item><title>Plain</title><description>Падение цены &lt; 5 процентов</description></item>
+        </channel></rss>'''
+        items = parse_content(xml, "application/rss+xml").items
+        self.assertEqual("Спрос растёт & предложение.", items[0].text)
+        self.assertNotIn("<p>", items[0].text)
+        self.assertNotIn("steal", items[0].text)
+        self.assertNotIn("display:none", items[0].text)
+        self.assertEqual("Цена & спрос", items[1].text)
+        self.assertEqual("Падение цены < 5 процентов", items[2].text)
+
     def test_rss_text_link_and_atom_canonical_link_preserve_identity(self):
         rss = '<rss><channel><item><title>A</title><link>https://example.test/a</link><description>Body</description></item></channel></rss>'
         atom = '<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>A</title><link rel="alternate" href="https://example.test/alt"/><link rel="canonical" href="https://example.test/canonical"/><summary>Body</summary></entry></feed>'

@@ -104,6 +104,7 @@ def test_grounded_hypothesis_uses_confirmed_context_and_keeps_provenance(tmp_pat
         "claims": [{"claim_id": "impact-hypothesis", "kind": "model_hypothesis",
                     "text": "Если перевозки компании идут через порт, задержка может повлиять на сроки.",
                     "evidence_refs": [evidence_id], "context_refs": ["dep-port"],
+                    "confirmation_conditions": ["Зафиксирован рост срока доставки по этому маршруту."],
                     "assumptions": ["Маршрут проходит через закрытый порт."],
                     "alternatives": ["Есть резервный маршрут."],
                     "falsifiers": ["Данные перевозок покажут, что маршрут не затронут."]}],
@@ -306,3 +307,27 @@ def test_profile_fact_is_not_external_fact_and_repair_gets_exact_location():
     errors=AnalysisPipeline._repair_diagnostics(caught.value)
     assert errors==[{"type":"external_fact_requires_external_evidence","loc":["claims",0,"evidence_refs"]}]
     assert "автопарк" not in json.dumps(errors,ensure_ascii=False)
+
+
+def test_verbose_rejected_answer_regenerates_inside_same_input_cap(tmp_path):
+    corpus=store(tmp_path)
+    ref=corpus.search(tenant_id="tenant-a",source_ids=["news"],as_of="2026-10-24T12:00:00Z",query="порт",role="external")[0]["evidence_id"]
+    answer={"summary":"Закрытие порта требует проверки маршрута.","claims":[{"claim_id":"fact","kind":"external_fact","text":"Порт закрыт.","evidence_refs":[ref]}],"influence_chain":[],"clarifications":[]}
+    llm=FakeLLM(["x"*24000,json.dumps(answer,ensure_ascii=False)])
+    result=AnalysisPipeline(corpus,llm).run(req())
+    assert len(llm.calls)==2
+    assert any(item["stage"]=="repair_regeneration" for item in result.trace)
+    assert "x"*100 not in llm.calls[1][0][-1]["content"]
+    assert any(item.kind=="external_fact" for item in result.claims)
+    assert not result.usage["errors"]
+
+
+def test_hackathon_legacy_request_does_not_send_confidential_evidence(tmp_path):
+    from types import SimpleNamespace
+    corpus=store(tmp_path,with_bank=False)
+    corpus.ingest({"tenant_id":"tenant-a","source_id":"bank","source_role":"bank", "canonical_uri":"https://private.invalid/note","title":"Порт закрыт","content":"Закрытая банковская записка: порт закрыт после шторма, грузовые перевозки временно остановлены.","content_type":"text/plain","published_at":"2026-10-24T09:00:00Z","fetched_at":"2026-10-24T09:00:00Z","data_classification":"confidential","synthetic":False})
+    llm=FakeLLM([]);llm.config=SimpleNamespace(profile="hackathon")
+    result=AnalysisPipeline(corpus,llm).run(req())
+    assert not llm.calls
+    assert "external_model_data_classification_denied" in result.usage["errors"]
+    assert result.status=="partial"

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Демо-лента новостей (синтетическая)</title>
+    <language>ru</language>
+    <item>
+      <title>Северный порт временно ограничил перевалку грузов</title>
+      <description>СИНТЕТИЧЕСКИЙ УЧЕБНЫЙ ПРИМЕР. Сообщается о временном ограничении перевалки в Северном порту 23 октября 2026 года. Реальное событие не утверждается.</description>
+      <pubDate>Fri, 23 Oct 2026 08:15:00 +0000</pubDate>
+      <link>https://news.example/demo/northern-port</link>
+      <guid>https://news.example/demo/northern-port</guid>
+    </item>
+    <item>
+      <title>Поставщик сообщил о переносе отгрузки подшипников</title>
+      <description>СИНТЕТИЧЕСКИЙ УЧЕБНЫЙ ПРИМЕР. В демо поставщик перенёс отгрузку партии подшипников на два дня. Реальный поставщик или контракт не подразумеваются.</description>
+      <pubDate>Fri, 23 Oct 2026 10:40:00 +0000</pubDate>
+      <link>https://news.example/demo/bearing-shipment</link>
+      <guid>https://news.example/demo/bearing-shipment</guid>
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,572 @@
+{
+  "$defs": {
+    "CompanyContext": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "industry": {
+          "default": "",
+          "maxLength": 1000,
+          "title": "Industry",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Description",
+          "type": "string"
+        },
+        "role": {
+          "default": "",
+          "maxLength": 1000,
+          "title": "Role",
+          "type": "string"
+        },
+        "dependencies": {
+          "items": {
+            "$ref": "#/$defs/ProvenancedDependency"
+          },
+          "maxItems": 100,
+          "title": "Dependencies",
+          "type": "array"
+        },
+        "facts": {
+          "items": {
+            "$ref": "#/$defs/CompanyFact"
+          },
+          "maxItems": 100,
+          "title": "Facts",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "CompanyContext",
+      "type": "object"
+    },
+    "CompanyContextProposal": {
+      "additionalProperties": false,
+      "description": "A proposed projection only; Core remains the profile owner.",
+      "properties": {
+        "tenant_id": {
+          "title": "Tenant Id",
+          "type": "string"
+        },
+        "company_id": {
+          "title": "Company Id",
+          "type": "string"
+        },
+        "context": {
+          "$ref": "#/$defs/CompanyContext"
+        },
+        "source_filename": {
+          "title": "Source Filename",
+          "type": "string"
+        },
+        "source_origin": {
+          "title": "Source Origin",
+          "type": "string"
+        },
+        "source_row": {
+          "minimum": 2,
+          "title": "Source Row",
+          "type": "integer"
+        },
+        "synthetic_u_id": {
+          "title": "Synthetic U Id",
+          "type": "string"
+        },
+        "revenue": {
+          "$ref": "#/$defs/RevenueQualification"
+        },
+        "product_flags": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Product Flags",
+          "type": "object"
+        },
+        "country": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Country"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region"
+        },
+        "group_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Group Ids",
+          "type": "array"
+        },
+        "payment_observations": {
+          "items": {
+            "$ref": "#/$defs/PaymentObservation"
+          },
+          "title": "Payment Observations",
+          "type": "array"
+        },
+        "relationship_observations": {
+          "items": {
+            "$ref": "#/$defs/ProvenancedDependency"
+          },
+          "title": "Relationship Observations",
+          "type": "array"
+        },
+        "field_provenance": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Field Provenance",
+          "type": "object"
+        },
+        "missing_fields": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Missing Fields",
+          "type": "array"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "tenant_id",
+        "company_id",
+        "context",
+        "source_filename",
+        "source_origin",
+        "source_row",
+        "synthetic_u_id",
+        "revenue"
+      ],
+      "title": "CompanyContextProposal",
+      "type": "object"
+    },
+    "CompanyFact": {
+      "additionalProperties": false,
+      "properties": {
+        "fact_id": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Fact Id",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "provenance": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Provenance",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fact_id",
+        "text",
+        "provenance"
+      ],
+      "title": "CompanyFact",
+      "type": "object"
+    },
+    "PaymentObservation": {
+      "additionalProperties": false,
+      "description": "Raw payment aggregate; it makes no commercial relationship assertion.",
+      "properties": {
+        "payer_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Payer Id"
+        },
+        "beneficiary_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Beneficiary Id"
+        },
+        "amount": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Amount"
+        },
+        "amount_unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Amount Unit"
+        },
+        "count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Count"
+        },
+        "provenance": {
+          "title": "Provenance",
+          "type": "string"
+        },
+        "relationship": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProvenancedDependency"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "provenance"
+      ],
+      "title": "PaymentObservation",
+      "type": "object"
+    },
+    "ProvenancedDependency": {
+      "additionalProperties": false,
+      "properties": {
+        "dependency_id": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Dependency Id",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "kind": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "confirmed",
+            "hypothesis"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "provenance": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Provenance",
+          "type": "string"
+        },
+        "source_node": {
+          "default": "company",
+          "maxLength": 256,
+          "title": "Source Node",
+          "type": "string"
+        },
+        "target_node": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Node"
+        },
+        "evidence_refs": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "valid_from": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid From"
+        },
+        "valid_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid Until"
+        }
+      },
+      "required": [
+        "dependency_id",
+        "label",
+        "kind",
+        "status",
+        "provenance"
+      ],
+      "title": "ProvenancedDependency",
+      "type": "object"
+    },
+    "RevenueQualification": {
+      "additionalProperties": false,
+      "properties": {
+        "raw_amount": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Raw Amount"
+        },
+        "input_unit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RevenueUnit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "amount_rub": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Amount Rub"
+        },
+        "threshold_rub": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "default": "15000000000",
+          "title": "Threshold Rub"
+        },
+        "over_15bn_rub": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Over 15Bn Rub"
+        },
+        "qualification": {
+          "default": "unknown",
+          "enum": [
+            "over_threshold",
+            "at_or_below_threshold",
+            "unknown"
+          ],
+          "title": "Qualification",
+          "type": "string"
+        }
+      },
+      "title": "RevenueQualification",
+      "type": "object"
+    },
+    "RevenueUnit": {
+      "enum": [
+        "RUB",
+        "thousand_RUB"
+      ],
+      "title": "RevenueUnit",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "company-context-proposal-v1",
+      "default": "company-context-proposal-v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "tenant_id": {
+      "title": "Tenant Id",
+      "type": "string"
+    },
+    "filename": {
+      "title": "Filename",
+      "type": "string"
+    },
+    "origin": {
+      "title": "Origin",
+      "type": "string"
+    },
+    "input_rows": {
+      "minimum": 0,
+      "title": "Input Rows",
+      "type": "integer"
+    },
+    "matched_rows": {
+      "minimum": 0,
+      "title": "Matched Rows",
+      "type": "integer"
+    },
+    "excluded_rows": {
+      "minimum": 0,
+      "title": "Excluded Rows",
+      "type": "integer"
+    },
+    "affected_filter_applied": {
+      "title": "Affected Filter Applied",
+      "type": "boolean"
+    },
+    "unknown_affected_company_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Unknown Affected Company Ids",
+      "type": "array"
+    },
+    "proposals": {
+      "items": {
+        "$ref": "#/$defs/CompanyContextProposal"
+      },
+      "maxItems": 500,
+      "title": "Proposals",
+      "type": "array"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "tenant_id",
+    "filename",
+    "origin",
+    "input_rows",
+    "matched_rows",
+    "excluded_rows",
+    "affected_filter_applied"
+  ],
+  "title": "CompanyContextPrepareResult",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

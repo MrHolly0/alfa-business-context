@@ -1,0 +1,59 @@
+{
+  "policy_id": "replace-with-core-policy-id",
+  "revision": 1,
+  "tenant_id": "replace-with-core-tenant-id",
+  "issued_at": "2026-10-24T00:00:00Z",
+  "sources": [
+    {
+      "source_id": "replace-with-core-source-id",
+      "source_role": "external",
+      "data_classification": "confidential",
+      "uri": "https://approved.example/feed.xml",
+      "content_type": "application/rss+xml",
+      "title": "Approved source label",
+      "publisher": "Publisher confirmed by operator",
+      "language": "ru",
+      "enabled": true,
+      "poll_interval_seconds": 3600,
+      "timeout_seconds": 15,
+      "max_bytes": 2000000,
+      "allowed_redirect_hosts": [],
+      "fetch_articles": false,
+      "article_hosts": []
+    },
+    {
+      "source_id": "replace-with-core-api-source-id",
+      "source_role": "external",
+      "data_classification": "confidential",
+      "uri": "https://api.approved.example/v1/news",
+      "content_type": "application/json",
+      "title": "Approved API source",
+      "publisher": "Publisher confirmed by operator",
+      "language": "ru",
+      "enabled": false,
+      "poll_interval_seconds": 3600,
+      "timeout_seconds": 15,
+      "max_bytes": 2000000,
+      "allowed_redirect_hosts": [],
+      "fetch_articles": false,
+      "article_hosts": [],
+      "json_mapping": {
+        "items": "data.items",
+        "title": "title",
+        "content": "body.text",
+        "url": "url",
+        "published_at": "published_at",
+        "publisher": "publisher.name",
+        "author": "author.name",
+        "event_time": "event_time",
+        "language": "language"
+      }
+    }
+  ],
+  "excluded_source_ids": [],
+  "excluded_publishers": [],
+  "user_excluded_source_ids": [],
+  "user_excluded_publishers": [],
+  "excluded_document_uris": [],
+  "user_excluded_document_uris": []
+}

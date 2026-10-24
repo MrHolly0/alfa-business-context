@@ -61,6 +61,16 @@
       "title": "Synthetic",
       "type": "boolean"
     },
+    "data_classification": {
+      "default": "confidential",
+      "enum": [
+        "public",
+        "synthetic",
+        "confidential"
+      ],
+      "title": "Data Classification",
+      "type": "string"
+    },
     "publisher": {
       "default": "",
       "maxLength": 500,
@@ -72,6 +82,25 @@
       "maxLength": 24,
       "title": "Language",
       "type": "string"
+    },
+    "author": {
+      "default": "",
+      "maxLength": 500,
+      "title": "Author",
+      "type": "string"
+    },
+    "event_time": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Event Time"
     }
   },
   "required": [

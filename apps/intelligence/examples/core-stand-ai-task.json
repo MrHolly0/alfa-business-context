@@ -1,0 +1,38 @@
+{
+  "schema_version": "ai-data-task-v1",
+  "request_id": "fixture-schedule-template",
+  "tenant_id": "demo-tenant",
+  "company_id": "demo-company",
+  "context_version": 1,
+  "source_policy_version": 1,
+  "operation": "collect",
+  "trigger": "manual",
+  "knowledge_mode": "as_of",
+  "as_of": "2030-01-01T00:00:00Z",
+  "source_policy": {
+    "policy_id": "fixture-policy",
+    "tenant_id": "demo-tenant",
+    "revision": 1,
+    "issued_at": "2030-01-01T00:00:00Z",
+    "sources": [],
+    "excluded_source_ids": [],
+    "excluded_publishers": [],
+    "user_excluded_source_ids": [],
+    "user_excluded_publishers": [],
+    "excluded_document_uris": [],
+    "user_excluded_document_uris": []
+  },
+  "businesses": [],
+  "event_ids": [],
+  "published_assessments": [],
+  "budget": {
+    "max_model_calls": 0,
+    "max_input_tokens": 24000,
+    "max_output_tokens": 2048,
+    "max_total_tokens": 60000,
+    "max_steps": 12
+  },
+  "data_classification": "synthetic",
+  "synthetic": true,
+  "max_events": 1
+}

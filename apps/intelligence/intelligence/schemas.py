@@ -27,6 +27,13 @@ class ProvenancedDependency(StrictModel):
     kind: NonEmpty
     status: Literal["confirmed", "hypothesis"]
     provenance: NonEmpty
+    source_node: str = Field(default="company", max_length=256)
+    target_node: str | None = Field(default=None, max_length=256)
+    evidence_refs: list[str] = Field(default_factory=list, max_length=20)
+    valid_from: datetime | None = None
+    valid_until: datetime | None = None
+
+    _valid_dates = field_validator("valid_from", "valid_until")(lambda v: _aware(v) if v else v)
 
 
 class CompanyFact(StrictModel):
@@ -45,6 +52,7 @@ class CompanyContext(StrictModel):
 
 
 class EventInput(StrictModel):
+    document_revision_ref: str | None = Field(default=None, max_length=512)
     event_id: NonEmpty
     revision: int = Field(default=1, ge=1)
     title: NonEmpty
@@ -111,9 +119,16 @@ class CandidateClaim(StrictModel):
     alternatives: list[str] = Field(default_factory=list, max_length=30)
     falsifiers: list[str] = Field(default_factory=list, max_length=30)
     origin: str | None = None
+    horizon: str | None = Field(default=None, max_length=500)
+    confirmation_conditions: list[str] = Field(default_factory=list, max_length=20)
 
 
 class EvidenceRecord(StrictModel):
+    data_classification: Literal["public","synthetic","confidential"] = "confidential"
+    author: str = ""
+    event_time: datetime | None = None
+    received_at: datetime | None = None
+    raw_sha256: str | None = None
     evidence_id: NonEmpty
     document_id: NonEmpty
     document_revision_ref: NonEmpty
@@ -133,6 +148,8 @@ class EvidenceRecord(StrictModel):
 
 
 class InfluenceEdge(StrictModel):
+    source_node: str | None = Field(default=None, max_length=256)
+    target_node: str | None = Field(default=None, max_length=256)
     edge_id: NonEmpty
     description: Annotated[str, Field(min_length=1, max_length=1000)]
     evidence_refs: list[str] = Field(default_factory=list, max_length=20)
@@ -141,6 +158,12 @@ class InfluenceEdge(StrictModel):
     status: Literal["confirmed", "hypothesis"]
     alternatives: list[str] = Field(default_factory=list, max_length=20)
     falsifiers: list[str] = Field(default_factory=list, max_length=20)
+
+    horizon: str | None = Field(default=None, max_length=500)
+    valid_from: datetime | None = None
+    valid_until: datetime | None = None
+
+    _valid_dates = field_validator("valid_from", "valid_until")(lambda v: _aware(v) if v else v)
 
 
 class ModelAnswer(StrictModel):
@@ -156,6 +179,9 @@ class Coverage(StrictModel):
     bank: int = Field(ge=0)
     confirmed_dependencies: int = Field(ge=0)
     company_facts: int = Field(ge=0)
+    limitations: list[str] = Field(default_factory=list, max_length=30)
+    checked_at: datetime | None = None
+    independent_origins: int = Field(default=0, ge=0)
 
 
 class Versions(StrictModel):
@@ -191,5 +217,8 @@ class CandidateAssessment(StrictModel):
     usage: dict
     trace: list[dict]
     created_at: datetime
+    watch_conditions: list[str] = Field(default_factory=list, max_length=50)
+    changes: dict = Field(default_factory=dict)
+    shared_package_ref: str | None = None
 
     _created_at_aware = field_validator("created_at")(_aware)

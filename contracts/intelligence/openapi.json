@@ -227,7 +227,15 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AnalysisRequest"
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/AnalysisRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/DataTask"
+                  }
+                ],
+                "title": "Request"
               }
             }
           }
@@ -238,8 +246,264 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CandidateAssessment"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/CandidateAssessment"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DataResult"
+                    }
+                  ],
+                  "title": "Response Analyze Internal V1 Analyze Post"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ]
+      }
+    },
+    "/internal/v1/company-context/prepare": {
+      "post": {
+        "summary": "Prepare Context",
+        "operationId": "prepare_context_internal_v1_company_context_prepare_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompanyContextPrepareRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyContextPrepareResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ]
+      }
+    },
+    "/internal/v1/sources/probe": {
+      "post": {
+        "summary": "Probe",
+        "operationId": "probe_internal_v1_sources_probe_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceProbeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceProbeResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ]
+      }
+    },
+    "/internal/v1/originals": {
+      "post": {
+        "summary": "Original",
+        "operationId": "original_internal_v1_originals_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OriginalInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ]
+      }
+    },
+    "/internal/v1/executions/{request_id}": {
+      "get": {
+        "summary": "Progress",
+        "operationId": "progress_internal_v1_executions__request_id__get",
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Request Id"
+            }
+          },
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tenant Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -398,6 +662,40 @@
         ],
         "title": "AnalysisRequest"
       },
+      "BusinessSnapshot": {
+        "properties": {
+          "company_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Company Id"
+          },
+          "context_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Context Version"
+          },
+          "company": {
+            "$ref": "#/components/schemas/CompanyContext"
+          },
+          "dependency_graph": {
+            "items": {
+              "$ref": "#/components/schemas/DependencyEdge"
+            },
+            "type": "array",
+            "maxItems": 300,
+            "title": "Dependency Graph"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "company_id",
+          "context_version",
+          "company"
+        ],
+        "title": "BusinessSnapshot"
+      },
       "CandidateAssessment": {
         "properties": {
           "schema_version": {
@@ -493,6 +791,30 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "watch_conditions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Watch Conditions"
+          },
+          "changes": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Changes"
+          },
+          "shared_package_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shared Package Ref"
           }
         },
         "additionalProperties": false,
@@ -587,6 +909,26 @@
               }
             ],
             "title": "Origin"
+          },
+          "horizon": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Horizon"
+          },
+          "confirmation_conditions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Confirmation Conditions"
           }
         },
         "additionalProperties": false,
@@ -648,6 +990,292 @@
         ],
         "title": "CompanyContext"
       },
+      "CompanyContextPrepareRequest": {
+        "properties": {
+          "tenant_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Tenant Id"
+          },
+          "filename": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename"
+          },
+          "origin": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Origin"
+          },
+          "rows": {
+            "items": {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Rows"
+          },
+          "roles_by_synthetic_u": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "maxProperties": 500,
+            "title": "Roles By Synthetic U"
+          },
+          "revenue_unit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RevenueUnit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "affected_company_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Affected Company Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "filename",
+          "origin",
+          "rows"
+        ],
+        "title": "CompanyContextPrepareRequest",
+        "description": "Typed internal API input. Core must authenticate tenant_id before use."
+      },
+      "CompanyContextPrepareResult": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "company-context-proposal-v1",
+            "title": "Schema Version",
+            "default": "company-context-proposal-v1"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename"
+          },
+          "origin": {
+            "type": "string",
+            "title": "Origin"
+          },
+          "input_rows": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Input Rows"
+          },
+          "matched_rows": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Matched Rows"
+          },
+          "excluded_rows": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Excluded Rows"
+          },
+          "affected_filter_applied": {
+            "type": "boolean",
+            "title": "Affected Filter Applied"
+          },
+          "unknown_affected_company_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unknown Affected Company Ids"
+          },
+          "proposals": {
+            "items": {
+              "$ref": "#/components/schemas/CompanyContextProposal"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "title": "Proposals"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "filename",
+          "origin",
+          "input_rows",
+          "matched_rows",
+          "excluded_rows",
+          "affected_filter_applied"
+        ],
+        "title": "CompanyContextPrepareResult"
+      },
+      "CompanyContextProposal": {
+        "properties": {
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "company_id": {
+            "type": "string",
+            "title": "Company Id"
+          },
+          "context": {
+            "$ref": "#/components/schemas/CompanyContext"
+          },
+          "source_filename": {
+            "type": "string",
+            "title": "Source Filename"
+          },
+          "source_origin": {
+            "type": "string",
+            "title": "Source Origin"
+          },
+          "source_row": {
+            "type": "integer",
+            "minimum": 2.0,
+            "title": "Source Row"
+          },
+          "synthetic_u_id": {
+            "type": "string",
+            "title": "Synthetic U Id"
+          },
+          "revenue": {
+            "$ref": "#/components/schemas/RevenueQualification"
+          },
+          "product_flags": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Product Flags"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "group_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Group Ids"
+          },
+          "payment_observations": {
+            "items": {
+              "$ref": "#/components/schemas/PaymentObservation"
+            },
+            "type": "array",
+            "title": "Payment Observations"
+          },
+          "relationship_observations": {
+            "items": {
+              "$ref": "#/components/schemas/ProvenancedDependency"
+            },
+            "type": "array",
+            "title": "Relationship Observations"
+          },
+          "field_provenance": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Field Provenance"
+          },
+          "missing_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing Fields"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "company_id",
+          "context",
+          "source_filename",
+          "source_origin",
+          "source_row",
+          "synthetic_u_id",
+          "revenue"
+        ],
+        "title": "CompanyContextProposal",
+        "description": "A proposed projection only; Core remains the profile owner."
+      },
       "CompanyFact": {
         "properties": {
           "fact_id": {
@@ -699,6 +1327,32 @@
             "type": "integer",
             "minimum": 0.0,
             "title": "Company Facts"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Limitations"
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          },
+          "independent_origins": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Independent Origins",
+            "default": 0
           }
         },
         "additionalProperties": false,
@@ -710,6 +1364,406 @@
           "company_facts"
         ],
         "title": "Coverage"
+      },
+      "DataResult": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "ai-data-result-v1",
+            "title": "Schema Version",
+            "default": "ai-data-result-v1"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "company_id": {
+            "type": "string",
+            "title": "Company Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "partial",
+              "no_change",
+              "unknown"
+            ],
+            "title": "Status"
+          },
+          "versions": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Versions"
+          },
+          "collection": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection"
+          },
+          "events": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "selections": {
+            "items": {
+              "$ref": "#/components/schemas/ImpactSelection"
+            },
+            "type": "array",
+            "title": "Selections"
+          },
+          "invalidations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Invalidations"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateAssessment"
+            },
+            "type": "array",
+            "title": "Candidates"
+          },
+          "revisions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Revisions"
+          },
+          "configurations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Configurations"
+          },
+          "period_report": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period Report"
+          },
+          "watch_results": {
+            "items": {
+              "$ref": "#/components/schemas/WatchEvaluation"
+            },
+            "type": "array",
+            "title": "Watch Results"
+          },
+          "coverage": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Coverage"
+          },
+          "trace": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Trace"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request_id",
+          "tenant_id",
+          "company_id",
+          "status",
+          "versions",
+          "created_at"
+        ],
+        "title": "DataResult"
+      },
+      "DataTask": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "ai-data-task-v1",
+            "title": "Schema Version",
+            "default": "ai-data-task-v1"
+          },
+          "request_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Request Id"
+          },
+          "tenant_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Tenant Id"
+          },
+          "company_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Company Id"
+          },
+          "context_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Context Version"
+          },
+          "source_policy_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Source Policy Version"
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "collect",
+              "analyze",
+              "reassess",
+              "period",
+              "onboard"
+            ],
+            "title": "Operation",
+            "default": "analyze"
+          },
+          "trigger": {
+            "type": "string",
+            "enum": [
+              "scheduled",
+              "manual",
+              "context_changed",
+              "policy_changed",
+              "evidence_changed",
+              "watch_due"
+            ],
+            "title": "Trigger",
+            "default": "manual"
+          },
+          "knowledge_mode": {
+            "type": "string",
+            "enum": [
+              "as_of",
+              "latest"
+            ],
+            "title": "Knowledge Mode",
+            "default": "as_of"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          },
+          "source_policy": {
+            "$ref": "#/components/schemas/SourcePolicySnapshot"
+          },
+          "businesses": {
+            "items": {
+              "$ref": "#/components/schemas/BusinessSnapshot"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Businesses"
+          },
+          "event_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Event Ids"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PeriodSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "watches": {
+            "items": {
+              "$ref": "#/components/schemas/WatchCondition"
+            },
+            "type": "array",
+            "maxItems": 300,
+            "title": "Watches"
+          },
+          "watch_observations": {
+            "items": {
+              "$ref": "#/components/schemas/WatchObservation"
+            },
+            "type": "array",
+            "maxItems": 5000,
+            "title": "Watch Observations"
+          },
+          "published_assessments": {
+            "items": {
+              "$ref": "#/components/schemas/PublishedAssessment"
+            },
+            "type": "array",
+            "maxItems": 600,
+            "title": "Published Assessments"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/AnalysisBudget"
+          },
+          "data_classification": {
+            "type": "string",
+            "enum": [
+              "synthetic",
+              "public",
+              "confidential"
+            ],
+            "title": "Data Classification",
+            "default": "confidential"
+          },
+          "synthetic": {
+            "type": "boolean",
+            "title": "Synthetic",
+            "default": false
+          },
+          "max_events": {
+            "type": "integer",
+            "maximum": 30.0,
+            "minimum": 1.0,
+            "title": "Max Events",
+            "default": 10
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request_id",
+          "tenant_id",
+          "company_id",
+          "context_version",
+          "source_policy_version",
+          "as_of",
+          "source_policy"
+        ],
+        "title": "DataTask"
+      },
+      "DependencyEdge": {
+        "properties": {
+          "edge_id": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Edge Id"
+          },
+          "subject": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Subject"
+          },
+          "predicate": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Predicate"
+          },
+          "object": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Object"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "confirmed",
+              "user_reported",
+              "assumed"
+            ],
+            "title": "Status"
+          },
+          "evidence_ref": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Evidence Ref"
+          },
+          "evidence_basis": {
+            "type": "string",
+            "enum": [
+              "contract",
+              "official_record",
+              "operational_record",
+              "user_statement",
+              "payment_observation",
+              "other"
+            ],
+            "title": "Evidence Basis"
+          },
+          "valid_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid From"
+          },
+          "valid_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid To"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "edge_id",
+          "subject",
+          "predicate",
+          "object",
+          "status",
+          "evidence_ref",
+          "evidence_basis"
+        ],
+        "title": "DependencyEdge",
+        "description": "One asserted business dependency; edges require traceable evidence and time bounds."
       },
       "DocumentInput": {
         "properties": {
@@ -773,6 +1827,16 @@
             "title": "Synthetic",
             "default": false
           },
+          "data_classification": {
+            "type": "string",
+            "enum": [
+              "public",
+              "synthetic",
+              "confidential"
+            ],
+            "title": "Data Classification",
+            "default": "confidential"
+          },
           "publisher": {
             "type": "string",
             "maxLength": 500,
@@ -784,6 +1848,24 @@
             "maxLength": 24,
             "title": "Language",
             "default": "ru"
+          },
+          "author": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Author",
+            "default": ""
+          },
+          "event_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Time"
           }
         },
         "additionalProperties": false,
@@ -803,6 +1885,18 @@
       },
       "EventInput": {
         "properties": {
+          "document_revision_ref": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Revision Ref"
+          },
           "event_id": {
             "type": "string",
             "maxLength": 8000,
@@ -856,6 +1950,56 @@
       },
       "EvidenceRecord": {
         "properties": {
+          "data_classification": {
+            "type": "string",
+            "enum": [
+              "public",
+              "synthetic",
+              "confidential"
+            ],
+            "title": "Data Classification",
+            "default": "confidential"
+          },
+          "author": {
+            "type": "string",
+            "title": "Author",
+            "default": ""
+          },
+          "event_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Time"
+          },
+          "received_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Received At"
+          },
+          "raw_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Sha256"
+          },
           "evidence_id": {
             "type": "string",
             "maxLength": 8000,
@@ -991,8 +2135,193 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "ImpactPath": {
+        "properties": {
+          "company_id": {
+            "type": "string",
+            "title": "Company Id"
+          },
+          "event_id": {
+            "type": "string",
+            "title": "Event Id"
+          },
+          "event_revision": {
+            "type": "integer",
+            "title": "Event Revision"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target"
+          },
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Path"
+          },
+          "edge_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Edge Ids"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidence Refs"
+          },
+          "statuses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Statuses"
+          },
+          "hop_count": {
+            "type": "integer",
+            "title": "Hop Count"
+          },
+          "interpretation": {
+            "type": "string",
+            "title": "Interpretation"
+          },
+          "causal_claim": {
+            "type": "boolean",
+            "const": false,
+            "title": "Causal Claim",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "company_id",
+          "event_id",
+          "event_revision",
+          "target",
+          "path",
+          "edge_ids",
+          "evidence_refs",
+          "statuses",
+          "hop_count",
+          "interpretation"
+        ],
+        "title": "ImpactPath"
+      },
+      "ImpactSelection": {
+        "properties": {
+          "company_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Company Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "signal_found",
+              "no_signal_found"
+            ],
+            "title": "Status"
+          },
+          "score_type": {
+            "type": "string",
+            "const": "heuristic_priority",
+            "title": "Score Type",
+            "default": "heuristic_priority"
+          },
+          "score": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Score"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Reasons"
+          },
+          "roots": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Roots"
+          },
+          "matched_nodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Matched Nodes"
+          },
+          "paths": {
+            "items": {
+              "$ref": "#/components/schemas/ImpactPath"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Paths"
+          },
+          "coverage": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Coverage"
+          },
+          "uncertainty": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Uncertainty"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "company_id",
+          "status",
+          "score"
+        ],
+        "title": "ImpactSelection",
+        "description": "Heuristic queue-prioritization record, not a semantic impact conclusion."
+      },
       "InfluenceEdge": {
         "properties": {
+          "source_node": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Node"
+          },
+          "target_node": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Node"
+          },
           "edge_id": {
             "type": "string",
             "maxLength": 8000,
@@ -1050,6 +2379,42 @@
             "type": "array",
             "maxItems": 20,
             "title": "Falsifiers"
+          },
+          "horizon": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Horizon"
+          },
+          "valid_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid From"
+          },
+          "valid_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Until"
           }
         },
         "additionalProperties": false,
@@ -1061,6 +2426,99 @@
           "status"
         ],
         "title": "InfluenceEdge"
+      },
+      "JSONAdapterMapping": {
+        "properties": {
+          "items": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Items"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Content"
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Url"
+          },
+          "published_at": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Published At"
+          },
+          "publisher": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publisher"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "event_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Time"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "title",
+          "content",
+          "url",
+          "published_at"
+        ],
+        "title": "JSONAdapterMapping",
+        "description": "Declarative dot-path mapping only; never a URL, expression, or executable adapter."
       },
       "MatchReason": {
         "properties": {
@@ -1101,6 +2559,230 @@
         ],
         "title": "MatchReason"
       },
+      "OriginalInput": {
+        "properties": {
+          "tenant_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Tenant Id"
+          },
+          "source_policy": {
+            "$ref": "#/components/schemas/SourcePolicySnapshot"
+          },
+          "document_revision_ref": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Document Revision Ref"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "source_policy",
+          "document_revision_ref",
+          "as_of"
+        ],
+        "title": "OriginalInput"
+      },
+      "PaymentObservation": {
+        "properties": {
+          "payer_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payer Id"
+          },
+          "beneficiary_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Beneficiary Id"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "amount_unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Unit"
+          },
+          "count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count"
+          },
+          "provenance": {
+            "type": "string",
+            "title": "Provenance"
+          },
+          "relationship": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProvenancedDependency"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provenance"
+        ],
+        "title": "PaymentObservation",
+        "description": "Raw payment aggregate; it makes no commercial relationship assertion."
+      },
+      "PeriodObservation": {
+        "properties": {
+          "observation_id": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Observation Id"
+          },
+          "metric": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Metric"
+          },
+          "observed_at": {
+            "type": "string",
+            "title": "Observed At"
+          },
+          "available_at": {
+            "type": "string",
+            "title": "Available At"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Value"
+          },
+          "unit": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Unit"
+          },
+          "source_ref": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Source Ref"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Revision",
+            "default": 1
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "observation_id",
+          "metric",
+          "observed_at",
+          "available_at",
+          "value",
+          "unit",
+          "source_ref"
+        ],
+        "title": "PeriodObservation",
+        "description": "A provided numeric observation or revision. No value is inferred from event text."
+      },
+      "PeriodSpec": {
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "retrospective",
+              "as_known"
+            ],
+            "title": "Mode"
+          },
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/PeriodObservation"
+            },
+            "type": "array",
+            "maxItems": 5000,
+            "title": "Observations"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "mode"
+        ],
+        "title": "PeriodSpec"
+      },
       "ProvenancedDependency": {
         "properties": {
           "dependency_id": {
@@ -1134,6 +2816,56 @@
             "maxLength": 8000,
             "minLength": 1,
             "title": "Provenance"
+          },
+          "source_node": {
+            "type": "string",
+            "maxLength": 256,
+            "title": "Source Node",
+            "default": "company"
+          },
+          "target_node": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Node"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Evidence Refs"
+          },
+          "valid_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid From"
+          },
+          "valid_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Until"
           }
         },
         "additionalProperties": false,
@@ -1146,6 +2878,43 @@
           "provenance"
         ],
         "title": "ProvenancedDependency"
+      },
+      "PublishedAssessment": {
+        "properties": {
+          "company_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Company Id"
+          },
+          "event_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Event Id"
+          },
+          "input_signature": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Input Signature"
+          },
+          "assessment_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Assessment Revision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "company_id",
+          "event_id",
+          "input_signature",
+          "assessment_revision"
+        ],
+        "title": "PublishedAssessment",
+        "description": "Core acknowledgement that a particular assessment signature was published."
       },
       "RankRequest": {
         "properties": {
@@ -1290,8 +3059,91 @@
         ],
         "title": "RankedEvent"
       },
+      "RevenueQualification": {
+        "properties": {
+          "raw_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Amount"
+          },
+          "input_unit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RevenueUnit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "amount_rub": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Rub"
+          },
+          "threshold_rub": {
+            "type": "string",
+            "title": "Threshold Rub",
+            "default": "15000000000"
+          },
+          "over_15bn_rub": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Over 15Bn Rub"
+          },
+          "qualification": {
+            "type": "string",
+            "enum": [
+              "over_threshold",
+              "at_or_below_threshold",
+              "unknown"
+            ],
+            "title": "Qualification",
+            "default": "unknown"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "RevenueQualification"
+      },
+      "RevenueUnit": {
+        "type": "string",
+        "enum": [
+          "RUB",
+          "thousand_RUB"
+        ],
+        "title": "RevenueUnit"
+      },
       "SearchInput": {
         "properties": {
+          "source_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourcePolicySnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "tenant_id": {
             "type": "string",
             "maxLength": 128,
@@ -1365,6 +3217,497 @@
           "query"
         ],
         "title": "SearchInput"
+      },
+      "SourceGrant": {
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Source Id"
+          },
+          "source_role": {
+            "type": "string",
+            "enum": [
+              "external",
+              "bank"
+            ],
+            "title": "Source Role"
+          },
+          "data_classification": {
+            "type": "string",
+            "enum": [
+              "public",
+              "synthetic",
+              "confidential"
+            ],
+            "title": "Data Classification",
+            "default": "confidential"
+          },
+          "uri": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Uri"
+          },
+          "content_type": {
+            "type": "string",
+            "enum": [
+              "application/rss+xml",
+              "application/atom+xml",
+              "text/html",
+              "application/pdf",
+              "application/json"
+            ],
+            "title": "Content Type"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Title",
+            "default": ""
+          },
+          "publisher": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Publisher",
+            "default": ""
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 32,
+            "title": "Language",
+            "default": ""
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          },
+          "poll_interval_seconds": {
+            "type": "integer",
+            "maximum": 31536000.0,
+            "minimum": 60.0,
+            "title": "Poll Interval Seconds",
+            "default": 3600
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Timeout Seconds",
+            "default": 15
+          },
+          "max_bytes": {
+            "type": "integer",
+            "maximum": 2000000.0,
+            "minimum": 1.0,
+            "title": "Max Bytes",
+            "default": 2000000
+          },
+          "allowed_redirect_hosts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 5,
+            "title": "Allowed Redirect Hosts",
+            "default": []
+          },
+          "fetch_articles": {
+            "type": "boolean",
+            "title": "Fetch Articles",
+            "default": false
+          },
+          "article_hosts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 5,
+            "title": "Article Hosts",
+            "default": []
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "event_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Time"
+          },
+          "json_mapping": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JSONAdapterMapping"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source_id",
+          "source_role",
+          "uri",
+          "content_type"
+        ],
+        "title": "SourceGrant"
+      },
+      "SourcePolicySnapshot": {
+        "properties": {
+          "policy_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Policy Id"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Revision"
+          },
+          "tenant_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Tenant Id"
+          },
+          "issued_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Issued At"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceGrant"
+            },
+            "type": "array",
+            "maxItems": 1000,
+            "title": "Sources",
+            "default": []
+          },
+          "excluded_source_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Excluded Source Ids",
+            "default": []
+          },
+          "excluded_publishers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Excluded Publishers",
+            "default": []
+          },
+          "user_excluded_source_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "User Excluded Source Ids",
+            "default": []
+          },
+          "user_excluded_publishers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "User Excluded Publishers",
+            "default": []
+          },
+          "excluded_document_uris": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Excluded Document Uris",
+            "default": []
+          },
+          "user_excluded_document_uris": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "User Excluded Document Uris",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "policy_id",
+          "revision",
+          "tenant_id",
+          "issued_at"
+        ],
+        "title": "SourcePolicySnapshot",
+        "description": "Effective tenant policy version issued by Core for a single job."
+      },
+      "SourceProbeRequest": {
+        "properties": {
+          "grant_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Grant Id"
+          },
+          "tenant_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Tenant Id"
+          },
+          "candidate_url": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Candidate Url"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "allowed_hosts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Allowed Hosts"
+          },
+          "allowed_types": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "application/rss+xml",
+                "application/atom+xml",
+                "text/html",
+                "application/pdf",
+                "application/json"
+              ]
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Allowed Types"
+          },
+          "json_mapping": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JSONAdapterMapping"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "max_bytes": {
+            "type": "integer",
+            "maximum": 2000000.0,
+            "minimum": 1.0,
+            "title": "Max Bytes",
+            "default": 2000000
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Timeout Seconds",
+            "default": 15
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "grant_id",
+          "tenant_id",
+          "candidate_url",
+          "expires_at",
+          "allowed_hosts",
+          "allowed_types"
+        ],
+        "title": "SourceProbeRequest",
+        "description": "One-shot Core grant to inspect a candidate URL; it never creates a source."
+      },
+      "SourceProbeResult": {
+        "properties": {
+          "grant_id": {
+            "type": "string",
+            "title": "Grant Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "needs_metadata",
+              "unsupported",
+              "error"
+            ],
+            "title": "Status"
+          },
+          "requested_url": {
+            "type": "string",
+            "title": "Requested Url"
+          },
+          "final_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Url"
+          },
+          "detected_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detected Type"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "publisher": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publisher"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "event_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Time"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "missing_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing Fields",
+            "default": []
+          },
+          "preview_text": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Preview Text",
+            "default": ""
+          },
+          "raw_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Sha256"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "grant_id",
+          "status",
+          "requested_url"
+        ],
+        "title": "SourceProbeResult"
       },
       "ValidationError": {
         "properties": {
@@ -1489,6 +3832,312 @@
           "synthetic"
         ],
         "title": "Versions"
+      },
+      "WatchCondition": {
+        "properties": {
+          "condition_id": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Condition Id"
+          },
+          "company_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Company Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "date_due",
+              "metric_threshold",
+              "context_revision",
+              "document_revision"
+            ],
+            "title": "Kind"
+          },
+          "provenance": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Provenance"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Evidence Refs"
+          },
+          "target_ref": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Ref"
+          },
+          "metric": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 300
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ge",
+                  "le",
+                  "eq"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threshold"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Revision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "condition_id",
+          "company_id",
+          "kind",
+          "provenance"
+        ],
+        "title": "WatchCondition"
+      },
+      "WatchEvaluation": {
+        "properties": {
+          "condition_id": {
+            "type": "string",
+            "title": "Condition Id"
+          },
+          "company_id": {
+            "type": "string",
+            "title": "Company Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "met",
+              "not_met",
+              "unknown"
+            ],
+            "title": "Status"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 60,
+            "title": "Evidence Refs"
+          },
+          "observed_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Value"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "requires_reassessment": {
+            "type": "boolean",
+            "title": "Requires Reassessment",
+            "default": false
+          },
+          "core_action": {
+            "type": "string",
+            "enum": [
+              "none",
+              "await_data",
+              "request_reassessment"
+            ],
+            "title": "Core Action",
+            "default": "none"
+          },
+          "next_question": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Question"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "condition_id",
+          "company_id",
+          "status",
+          "reason"
+        ],
+        "title": "WatchEvaluation"
+      },
+      "WatchObservation": {
+        "properties": {
+          "observation_id": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Observation Id"
+          },
+          "company_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Company Id"
+          },
+          "metric": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Metric"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Value"
+          },
+          "unit": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Unit"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Observed At"
+          },
+          "available_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Available At"
+          },
+          "source_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "minItems": 1,
+            "title": "Source Refs"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "observation_id",
+          "company_id",
+          "metric",
+          "value",
+          "unit",
+          "observed_at",
+          "available_at",
+          "source_refs"
+        ],
+        "title": "WatchObservation"
       }
     },
     "securitySchemes": {

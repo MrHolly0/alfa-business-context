@@ -5,6 +5,13 @@
 | `apps/web/src` | React-интерфейс | Статическая сборка и учебные данные |
 | `apps/web/public` | HTML, стили, изображения | Копируются в сборку |
 | `apps/core` | Описание PHP-ядра | Реализация принадлежит Backend |
+| `apps/intelligence/intelligence/workflow.py` | Сквозное исполнение DataTask | Сбор, общий пакет, отбор компаний, пересмотр, период и watch evaluation |
+| `apps/intelligence/intelligence/collection.py` | RSS/API/HTML/PDF и probe | Источники только из Core snapshot, исключения, polling/backoff, сырые оригиналы |
+| `apps/intelligence/intelligence/events.py` | События и общие пакеты | Ревизии, группы перепечаток, цитаты, классификация и кеш |
+| `apps/intelligence/intelligence/multi_agent.py` | Исследователь, аналитик, критик | Общий бюджет, ограниченный repair и поиск после критики |
+| `apps/intelligence/intelligence/research.py` | Отбор компаний и зависимости | Подтверждённые/предполагаемые пути до трёх переходов |
+| `apps/intelligence/intelligence/client_data.py` | Подготовка CSV контекста | Предложения Core, без LLM и записи бизнес-профиля |
+| `apps/intelligence/intelligence/core_stand.py` | Контрактный стенд Core | Только fixture mode; не промышленный Backend |
 | `apps/intelligence/intelligence/corpus.py` | Документы, версии, фрагменты и поиск | SQLite, фильтры по источникам/дате/tenant |
 | `apps/intelligence/intelligence/pipeline.py` | План, поиск, анализ, проверка результата | Baseline и явный вызов модели |
 | `apps/intelligence/intelligence/llm` | Адаптеры и учёт расходов | Хакатонный шлюз, бесплатный и отдельный платный профиль OpenRouter |

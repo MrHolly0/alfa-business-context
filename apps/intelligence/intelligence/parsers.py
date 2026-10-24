@@ -61,6 +61,14 @@ def _clean(text: str) -> str:
     return re.sub(r"[ \t\xa0]+", " ", re.sub(r"\n\s*\n+", "\n", text)).strip()
 
 
+def _html_text(text: str) -> str:
+    """Extract readable text from markup without interpreting embedded code."""
+    parser = _TextExtractor()
+    parser.feed(text)
+    parser.close()
+    return _clean("".join(parser.parts))
+
+
 def _bounded_text(value: Any) -> str:
     if not isinstance(value, str):
         raise ValueError("content must be a string")
@@ -74,10 +82,7 @@ def parse_content(content: str, content_type: str) -> ParseResult:
     if content_type == "text/plain":
         return ParseResult(_clean(_bounded_text(content)))
     if content_type == "text/html":
-        parser = _TextExtractor()
-        parser.feed(_bounded_text(content))
-        parser.close()
-        return ParseResult(_clean("".join(parser.parts)))
+        return ParseResult(_html_text(_bounded_text(content)))
     if content_type == "application/rss+xml":
         raw = _bounded_text(content)
         try:
@@ -94,6 +99,11 @@ def parse_content(content: str, content_type: str) -> ParseResult:
                 if key in {"title", "description", "summary", "content", "pubdate", "published", "updated", "link", "guid", "id"}:
                     fields[key] = child.attrib.get("href", "") if key == "link" and child.attrib.get("href") else " ".join(child.itertext()).strip()
             body = fields.get("description") or fields.get("summary") or fields.get("content") or ""
+            # Feeds often wrap HTML in CDATA, or XML-escape markup. The XML
+            # parser above decodes both forms; run the resulting string through
+            # the same inert extractor as standalone HTML. Plain text (including
+            # comparisons such as "< 5") remains data; scripts/styles are hidden.
+            body_text = _html_text(body)
             # Atom may provide several links; prefer an explicit canonical link,
             # then the alternate link. RSS's ordinary text-valued <link> is read
             # from itertext above, just like Atom's href value.
@@ -101,7 +111,7 @@ def parse_content(content: str, content_type: str) -> ParseResult:
             canonical_link = next((link.attrib.get("href", "").strip() for link in links if link.attrib.get("href", "").strip() and link.attrib.get("rel", "").lower() == "canonical"), "")
             alternate_link = next((link.attrib.get("href", "").strip() for link in links if link.attrib.get("href", "").strip() and link.attrib.get("rel", "alternate").lower() == "alternate"), "")
             uri = canonical_link or alternate_link or fields.get("link") or fields.get("guid") or fields.get("id")
-            items.append(ParsedItem(fields.get("title", ""), _clean(body), fields.get("pubdate") or fields.get("published") or fields.get("updated"), uri))
+            items.append(ParsedItem(fields.get("title", ""), body_text, fields.get("pubdate") or fields.get("published") or fields.get("updated"), uri))
             if len(items) >= 500:
                 return ParseResult("", tuple(items), ("RSS item limit reached (500)",))
         return ParseResult("", tuple(items))

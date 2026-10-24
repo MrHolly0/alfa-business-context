@@ -1,0 +1,1226 @@
+{
+  "$defs": {
+    "AnalysisBudget": {
+      "additionalProperties": false,
+      "properties": {
+        "max_model_calls": {
+          "default": 2,
+          "maximum": 3,
+          "minimum": 0,
+          "title": "Max Model Calls",
+          "type": "integer"
+        },
+        "max_input_tokens": {
+          "default": 24000,
+          "maximum": 24000,
+          "minimum": 1,
+          "title": "Max Input Tokens",
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "default": 2048,
+          "maximum": 2048,
+          "minimum": 1,
+          "title": "Max Output Tokens",
+          "type": "integer"
+        },
+        "max_total_tokens": {
+          "default": 60000,
+          "maximum": 60000,
+          "minimum": 1,
+          "title": "Max Total Tokens",
+          "type": "integer"
+        },
+        "max_steps": {
+          "default": 12,
+          "maximum": 12,
+          "minimum": 1,
+          "title": "Max Steps",
+          "type": "integer"
+        }
+      },
+      "title": "AnalysisBudget",
+      "type": "object"
+    },
+    "BusinessSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "company_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Company Id",
+          "type": "string"
+        },
+        "context_version": {
+          "minimum": 1,
+          "title": "Context Version",
+          "type": "integer"
+        },
+        "company": {
+          "$ref": "#/$defs/CompanyContext"
+        },
+        "dependency_graph": {
+          "items": {
+            "$ref": "#/$defs/DependencyEdge"
+          },
+          "maxItems": 300,
+          "title": "Dependency Graph",
+          "type": "array"
+        }
+      },
+      "required": [
+        "company_id",
+        "context_version",
+        "company"
+      ],
+      "title": "BusinessSnapshot",
+      "type": "object"
+    },
+    "CompanyContext": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "industry": {
+          "default": "",
+          "maxLength": 1000,
+          "title": "Industry",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Description",
+          "type": "string"
+        },
+        "role": {
+          "default": "",
+          "maxLength": 1000,
+          "title": "Role",
+          "type": "string"
+        },
+        "dependencies": {
+          "items": {
+            "$ref": "#/$defs/ProvenancedDependency"
+          },
+          "maxItems": 100,
+          "title": "Dependencies",
+          "type": "array"
+        },
+        "facts": {
+          "items": {
+            "$ref": "#/$defs/CompanyFact"
+          },
+          "maxItems": 100,
+          "title": "Facts",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "CompanyContext",
+      "type": "object"
+    },
+    "CompanyFact": {
+      "additionalProperties": false,
+      "properties": {
+        "fact_id": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Fact Id",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "provenance": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Provenance",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fact_id",
+        "text",
+        "provenance"
+      ],
+      "title": "CompanyFact",
+      "type": "object"
+    },
+    "DependencyEdge": {
+      "additionalProperties": false,
+      "description": "One asserted business dependency; edges require traceable evidence and time bounds.",
+      "properties": {
+        "edge_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Edge Id",
+          "type": "string"
+        },
+        "subject": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Subject",
+          "type": "string"
+        },
+        "predicate": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Predicate",
+          "type": "string"
+        },
+        "object": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Object",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "confirmed",
+            "user_reported",
+            "assumed"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "evidence_ref": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Evidence Ref",
+          "type": "string"
+        },
+        "evidence_basis": {
+          "enum": [
+            "contract",
+            "official_record",
+            "operational_record",
+            "user_statement",
+            "payment_observation",
+            "other"
+          ],
+          "title": "Evidence Basis",
+          "type": "string"
+        },
+        "valid_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid From"
+        },
+        "valid_to": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid To"
+        }
+      },
+      "required": [
+        "edge_id",
+        "subject",
+        "predicate",
+        "object",
+        "status",
+        "evidence_ref",
+        "evidence_basis"
+      ],
+      "title": "DependencyEdge",
+      "type": "object"
+    },
+    "JSONAdapterMapping": {
+      "additionalProperties": false,
+      "description": "Declarative dot-path mapping only; never a URL, expression, or executable adapter.",
+      "properties": {
+        "items": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Items",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "content": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "url": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        },
+        "published_at": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Published At",
+          "type": "string"
+        },
+        "publisher": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Publisher"
+        },
+        "author": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Author"
+        },
+        "event_time": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Time"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language"
+        }
+      },
+      "required": [
+        "items",
+        "title",
+        "content",
+        "url",
+        "published_at"
+      ],
+      "title": "JSONAdapterMapping",
+      "type": "object"
+    },
+    "PeriodObservation": {
+      "additionalProperties": false,
+      "description": "A provided numeric observation or revision. No value is inferred from event text.",
+      "properties": {
+        "observation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Observation Id",
+          "type": "string"
+        },
+        "metric": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Metric",
+          "type": "string"
+        },
+        "observed_at": {
+          "title": "Observed At",
+          "type": "string"
+        },
+        "available_at": {
+          "title": "Available At",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        },
+        "unit": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        },
+        "source_ref": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Source Ref",
+          "type": "string"
+        },
+        "revision": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "observation_id",
+        "metric",
+        "observed_at",
+        "available_at",
+        "value",
+        "unit",
+        "source_ref"
+      ],
+      "title": "PeriodObservation",
+      "type": "object"
+    },
+    "PeriodSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "format": "date-time",
+          "title": "Start",
+          "type": "string"
+        },
+        "end": {
+          "format": "date-time",
+          "title": "End",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "retrospective",
+            "as_known"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "observations": {
+          "items": {
+            "$ref": "#/$defs/PeriodObservation"
+          },
+          "maxItems": 5000,
+          "title": "Observations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "mode"
+      ],
+      "title": "PeriodSpec",
+      "type": "object"
+    },
+    "ProvenancedDependency": {
+      "additionalProperties": false,
+      "properties": {
+        "dependency_id": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Dependency Id",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "kind": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "confirmed",
+            "hypothesis"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "provenance": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Provenance",
+          "type": "string"
+        },
+        "source_node": {
+          "default": "company",
+          "maxLength": 256,
+          "title": "Source Node",
+          "type": "string"
+        },
+        "target_node": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Node"
+        },
+        "evidence_refs": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "valid_from": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid From"
+        },
+        "valid_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid Until"
+        }
+      },
+      "required": [
+        "dependency_id",
+        "label",
+        "kind",
+        "status",
+        "provenance"
+      ],
+      "title": "ProvenancedDependency",
+      "type": "object"
+    },
+    "PublishedAssessment": {
+      "additionalProperties": false,
+      "description": "Core acknowledgement that a particular assessment signature was published.",
+      "properties": {
+        "company_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Company Id",
+          "type": "string"
+        },
+        "event_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Event Id",
+          "type": "string"
+        },
+        "input_signature": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Input Signature",
+          "type": "string"
+        },
+        "assessment_revision": {
+          "minimum": 1,
+          "title": "Assessment Revision",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "company_id",
+        "event_id",
+        "input_signature",
+        "assessment_revision"
+      ],
+      "title": "PublishedAssessment",
+      "type": "object"
+    },
+    "SourceGrant": {
+      "additionalProperties": false,
+      "properties": {
+        "source_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Source Id",
+          "type": "string"
+        },
+        "source_role": {
+          "enum": [
+            "external",
+            "bank"
+          ],
+          "title": "Source Role",
+          "type": "string"
+        },
+        "data_classification": {
+          "default": "confidential",
+          "enum": [
+            "public",
+            "synthetic",
+            "confidential"
+          ],
+          "title": "Data Classification",
+          "type": "string"
+        },
+        "uri": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Uri",
+          "type": "string"
+        },
+        "content_type": {
+          "enum": [
+            "application/rss+xml",
+            "application/atom+xml",
+            "text/html",
+            "application/pdf",
+            "application/json"
+          ],
+          "title": "Content Type",
+          "type": "string"
+        },
+        "title": {
+          "default": "",
+          "maxLength": 1000,
+          "title": "Title",
+          "type": "string"
+        },
+        "publisher": {
+          "default": "",
+          "maxLength": 1000,
+          "title": "Publisher",
+          "type": "string"
+        },
+        "language": {
+          "default": "",
+          "maxLength": 32,
+          "title": "Language",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "poll_interval_seconds": {
+          "default": 3600,
+          "maximum": 31536000,
+          "minimum": 60,
+          "title": "Poll Interval Seconds",
+          "type": "integer"
+        },
+        "timeout_seconds": {
+          "default": 15,
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        },
+        "max_bytes": {
+          "default": 2000000,
+          "maximum": 2000000,
+          "minimum": 1,
+          "title": "Max Bytes",
+          "type": "integer"
+        },
+        "allowed_redirect_hosts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 5,
+          "title": "Allowed Redirect Hosts",
+          "type": "array"
+        },
+        "fetch_articles": {
+          "default": false,
+          "title": "Fetch Articles",
+          "type": "boolean"
+        },
+        "article_hosts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 5,
+          "title": "Article Hosts",
+          "type": "array"
+        },
+        "published_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Published At"
+        },
+        "event_time": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Time"
+        },
+        "json_mapping": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JSONAdapterMapping"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "source_id",
+        "source_role",
+        "uri",
+        "content_type"
+      ],
+      "title": "SourceGrant",
+      "type": "object"
+    },
+    "SourcePolicySnapshot": {
+      "additionalProperties": false,
+      "description": "Effective tenant policy version issued by Core for a single job.",
+      "properties": {
+        "policy_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Policy Id",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "tenant_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Tenant Id",
+          "type": "string"
+        },
+        "issued_at": {
+          "format": "date-time",
+          "title": "Issued At",
+          "type": "string"
+        },
+        "sources": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SourceGrant"
+          },
+          "maxItems": 1000,
+          "title": "Sources",
+          "type": "array"
+        },
+        "excluded_source_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Excluded Source Ids",
+          "type": "array"
+        },
+        "excluded_publishers": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Excluded Publishers",
+          "type": "array"
+        },
+        "user_excluded_source_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "User Excluded Source Ids",
+          "type": "array"
+        },
+        "user_excluded_publishers": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "User Excluded Publishers",
+          "type": "array"
+        },
+        "excluded_document_uris": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Excluded Document Uris",
+          "type": "array"
+        },
+        "user_excluded_document_uris": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "User Excluded Document Uris",
+          "type": "array"
+        }
+      },
+      "required": [
+        "policy_id",
+        "revision",
+        "tenant_id",
+        "issued_at"
+      ],
+      "title": "SourcePolicySnapshot",
+      "type": "object"
+    },
+    "WatchCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "condition_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Condition Id",
+          "type": "string"
+        },
+        "company_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Company Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "date_due",
+            "metric_threshold",
+            "context_revision",
+            "document_revision"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "provenance": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Provenance",
+          "type": "string"
+        },
+        "evidence_refs": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 30,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "target_ref": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Ref"
+        },
+        "metric": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metric"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "operator": {
+          "anyOf": [
+            {
+              "enum": [
+                "ge",
+                "le",
+                "eq"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Operator"
+        },
+        "threshold": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Threshold"
+        },
+        "due_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Due At"
+        },
+        "expected_revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Revision"
+        }
+      },
+      "required": [
+        "condition_id",
+        "company_id",
+        "kind",
+        "provenance"
+      ],
+      "title": "WatchCondition",
+      "type": "object"
+    },
+    "WatchObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "observation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Observation Id",
+          "type": "string"
+        },
+        "company_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Company Id",
+          "type": "string"
+        },
+        "metric": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Metric",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        },
+        "unit": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "available_at": {
+          "format": "date-time",
+          "title": "Available At",
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 30,
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "observation_id",
+        "company_id",
+        "metric",
+        "value",
+        "unit",
+        "observed_at",
+        "available_at",
+        "source_refs"
+      ],
+      "title": "WatchObservation",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "ai-data-task-v1",
+      "default": "ai-data-task-v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "request_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Request Id",
+      "type": "string"
+    },
+    "tenant_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Tenant Id",
+      "type": "string"
+    },
+    "company_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Company Id",
+      "type": "string"
+    },
+    "context_version": {
+      "minimum": 1,
+      "title": "Context Version",
+      "type": "integer"
+    },
+    "source_policy_version": {
+      "minimum": 1,
+      "title": "Source Policy Version",
+      "type": "integer"
+    },
+    "operation": {
+      "default": "analyze",
+      "enum": [
+        "collect",
+        "analyze",
+        "reassess",
+        "period",
+        "onboard"
+      ],
+      "title": "Operation",
+      "type": "string"
+    },
+    "trigger": {
+      "default": "manual",
+      "enum": [
+        "scheduled",
+        "manual",
+        "context_changed",
+        "policy_changed",
+        "evidence_changed",
+        "watch_due"
+      ],
+      "title": "Trigger",
+      "type": "string"
+    },
+    "knowledge_mode": {
+      "default": "as_of",
+      "enum": [
+        "as_of",
+        "latest"
+      ],
+      "title": "Knowledge Mode",
+      "type": "string"
+    },
+    "as_of": {
+      "format": "date-time",
+      "title": "As Of",
+      "type": "string"
+    },
+    "source_policy": {
+      "$ref": "#/$defs/SourcePolicySnapshot"
+    },
+    "businesses": {
+      "items": {
+        "$ref": "#/$defs/BusinessSnapshot"
+      },
+      "maxItems": 20,
+      "title": "Businesses",
+      "type": "array"
+    },
+    "event_ids": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 30,
+      "title": "Event Ids",
+      "type": "array"
+    },
+    "period": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PeriodSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "watches": {
+      "items": {
+        "$ref": "#/$defs/WatchCondition"
+      },
+      "maxItems": 300,
+      "title": "Watches",
+      "type": "array"
+    },
+    "watch_observations": {
+      "items": {
+        "$ref": "#/$defs/WatchObservation"
+      },
+      "maxItems": 5000,
+      "title": "Watch Observations",
+      "type": "array"
+    },
+    "published_assessments": {
+      "items": {
+        "$ref": "#/$defs/PublishedAssessment"
+      },
+      "maxItems": 600,
+      "title": "Published Assessments",
+      "type": "array"
+    },
+    "budget": {
+      "$ref": "#/$defs/AnalysisBudget"
+    },
+    "data_classification": {
+      "default": "confidential",
+      "enum": [
+        "synthetic",
+        "public",
+        "confidential"
+      ],
+      "title": "Data Classification",
+      "type": "string"
+    },
+    "synthetic": {
+      "default": false,
+      "title": "Synthetic",
+      "type": "boolean"
+    },
+    "max_events": {
+      "default": 10,
+      "maximum": 30,
+      "minimum": 1,
+      "title": "Max Events",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "request_id",
+    "tenant_id",
+    "company_id",
+    "context_version",
+    "source_policy_version",
+    "as_of",
+    "source_policy"
+  ],
+  "title": "DataTask",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

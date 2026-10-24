@@ -5,7 +5,13 @@ import json
 import tempfile
 from pathlib import Path
 
-from intelligence.api import create_app,DocumentInput,SearchInput
+from intelligence.api import create_app,DocumentInput,SearchInput,OriginalInput
+from intelligence.workflow import DataTask, DataResult
+from intelligence.events import ImpactPackage
+from intelligence.watches import WatchCondition, WatchEvaluation
+from intelligence.periods import PeriodResearchReport
+from intelligence.client_data import CompanyContextPrepareRequest, CompanyContextPrepareResult
+from intelligence.collection import SourcePolicySnapshot, SourceProbeRequest, SourceProbeResult
 from intelligence.artifacts import ArtifactStore
 from intelligence.corpus import CorpusStore
 from intelligence.pipeline import AnalysisPipeline
@@ -19,9 +25,9 @@ DEST=REPO/'contracts/intelligence'
 
 def contracts():
     output={name: model.model_json_schema() for name,model in [
-        ('analyst-config.schema.json',AnalystConfig),('analysis-request.schema.json',AnalysisRequest),('candidate-assessment.schema.json',CandidateAssessment),
+        ('analyst-config.schema.json',AnalystConfig),('impact-package.schema.json',ImpactPackage),('watch-condition.schema.json',WatchCondition),('watch-evaluation.schema.json',WatchEvaluation),('period-research.schema.json',PeriodResearchReport),('company-context-prepare.schema.json',CompanyContextPrepareRequest),('company-context-proposal.schema.json',CompanyContextPrepareResult),('analysis-request.schema.json',AnalysisRequest),('candidate-assessment.schema.json',CandidateAssessment),
         ('model-answer.schema.json',ModelAnswer),('document.schema.json',DocumentInput),
-        ('search.schema.json',SearchInput),('rank-request.schema.json',RankRequest),('rank-result.schema.json',RankResult)]}
+        ('search.schema.json',SearchInput),('source-policy.schema.json',SourcePolicySnapshot),('source-probe-request.schema.json',SourceProbeRequest),('source-probe-result.schema.json',SourceProbeResult),('original-request.schema.json',OriginalInput),('ai-data-task.schema.json',DataTask),('ai-data-result.schema.json',DataResult),('rank-request.schema.json',RankRequest),('rank-result.schema.json',RankResult)]}
     identifier={'type':'string','minLength':1,'maxLength':256}
     versions={'type':'object','additionalProperties':False,'required':['context_version','source_policy_version','event_versions'],
         'properties':{'context_version':{'type':'integer','minimum':1},'source_policy_version':{'type':'integer','minimum':1},
@@ -31,7 +37,7 @@ def contracts():
         return {'type':'object','additionalProperties':False,'required':['schema_version','message_id','job_id','tenant_scope',
                     'company_id','trace_id','lease_generation','input_versions'],
                 'properties':{'schema_version':{'const':version},'message_id':identifier,'job_id':identifier,'tenant_scope':identifier,
-                              'company_id':identifier,'trace_id':identifier,'lease_generation':{'type':'integer','minimum':1},'input_versions':versions}}
+                              'company_id':identifier,'trace_id':identifier,'lease_generation':{'type':'integer','minimum':1},'input_versions':copy.deepcopy(versions)}}
     request=copy.deepcopy(output['analysis-request.schema.json'])
     job=envelope('analysis-job-v1')
     job['$defs']=request.pop('$defs',{})
@@ -55,6 +61,25 @@ def contracts():
     result['properties'].update(candidate={'$ref':'#/$defs/CandidateAssessment'},result_ref={'type':['string','null']})
     output['analysis-job.schema.json']=job
     output['analysis-result.schema.json']=result
+    task=copy.deepcopy(output['ai-data-task.schema.json'])
+    data_job=copy.deepcopy(job)
+    data_job['properties']['schema_version']={'const':'ai-job-v1'}
+    data_job['required']=[key for key in data_job['required'] if key!='analysis']+['task']
+    del data_job['properties']['analysis']
+    data_job['$defs']=task.pop('$defs',{})
+    data_job['$defs']['DataTask']=task
+    data_job['properties']['task']={'$ref':'#/$defs/DataTask'}
+    data_job['properties']['scope']['properties']['source_ids']['minItems']=0
+    data_job['properties']['input_versions']['properties']['event_versions'].update(minItems=0,maxItems=0)
+    output['ai-job.schema.json']=data_job
+    data_result=copy.deepcopy(output['ai-data-result.schema.json'])
+    result_envelope=envelope('ai-result-v1')
+    result_envelope['properties']['input_versions']['properties']['event_versions'].update(minItems=0,maxItems=0)
+    result_envelope['$defs']=data_result.pop('$defs',{})
+    result_envelope['$defs']['DataResult']=data_result
+    result_envelope['required']+=['candidate','result_ref']
+    result_envelope['properties'].update(candidate={'$ref':'#/$defs/DataResult'},result_ref={'type':['string','null']})
+    output['ai-result.schema.json']=result_envelope
     with tempfile.TemporaryDirectory() as tmp:
         store=CorpusStore(Path(tmp)/'corpus.db')
         app=create_app(store=store,pipeline=AnalysisPipeline(store),artifact_store=ArtifactStore(Path(tmp)/'artifacts.db'),service_token='schema-only',tenant_ids={'demo'})

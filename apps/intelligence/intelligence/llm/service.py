@@ -68,7 +68,8 @@ class LLMService:
         if self.config.is_paid_openrouter and reserve > self.config.max_request_cost:
             raise ValueError("estimated paid OpenRouter request cost exceeds max_request_cost")
         reservation_id = self.ledger.reserve(self.config.budget_scope, self.config.currency,
-            self.config.daily_limit, reserve, request_id=str(uuid4()))
+            self.config.daily_limit, reserve, request_id=str(uuid4()),
+            lifetime_limit=self.config.lifetime_limit)
         try:
             result = self.transport.complete(messages, json_mode=json_mode, max_output_tokens=output_cap)
         except ProviderError as exc:

@@ -149,3 +149,58 @@ def test_critic_accepts_known_claim_and_evidence_id_only():
         ]})}
     result=critic_round(Fake(),case={"evidence":[{"evidence_id":"known-evidence"}]},answer={"claims":[{"claim_id":"known-claim"}]},opponent={})
     assert result["critiques"] == [{"claim_id":"known-claim","issue":"grounding unclear","evidence_refs":["known-evidence"]}]
+
+
+def test_refinement_is_one_bounded_round_and_preserves_identity_and_evidence():
+    from copy import deepcopy
+    from datetime import datetime, timezone
+    from intelligence.experiments import refine_candidate_answer
+    from intelligence.schemas import AnalysisRequest, CandidateAssessment
+    from test_tournament import case
+
+    request = AnalysisRequest.model_validate(case("refine", "refine-event", "refine-company")["request"])
+    timestamp = datetime(2026, 10, 24, 10, tzinfo=timezone.utc)
+    evidence = {
+        "evidence_id":"evidence-1", "document_id":"doc-1", "document_revision_ref":"doc-1@1",
+        "source_id":request.event.source_id, "source_role":"external", "title":"Notice",
+        "canonical_uri":"https://example.invalid/notice", "published_at":timestamp,
+        "fetched_at":timestamp, "locator":"paragraph:1", "quote":"The delivery window moved by two weeks.",
+        "content_hash":"sha256-fixture", "synthetic":False, "score":0.9,
+    }
+    original = CandidateAssessment.model_validate({
+        "request_id":request.request_id,"tenant_id":request.tenant_id,"company_id":request.company_id,
+        "status":"ready","execution_mode":"model","summary":"Delivery is delayed.",
+        "claims":[{"claim_id":"claim-1","kind":"external_fact","text":"Delivery is delayed.","evidence_refs":["evidence-1"]}],
+        "evidence":[evidence],"influence_chain":[],"clarifications":[],
+        "coverage":{"external":1,"bank":0,"confirmed_dependencies":0,"company_facts":0},
+        "versions":{"prompt":"analysis-v2","pipeline":"test","context":1,"source_policy":1,
+            "as_of":request.as_of,"event_id":request.event.event_id,"event_revision":request.event.revision,
+            "event_document_revision_ref":"event-doc@1","synthetic":False},
+        "usage":{"model_calls":1},"trace":[],"created_at":timestamp,
+    }).model_dump(mode="json")
+    revised_answer = {
+        "summary":"The source reports that the delivery window moved by two weeks.",
+        "claims":[{"claim_id":"claim-1","kind":"external_fact",
+                   "text":"The source reports that the delivery window moved by two weeks.",
+                   "evidence_refs":["evidence-1"]}],
+        "influence_chain":[],"clarifications":[],
+    }
+
+    class FakeRefiner:
+        config = type("Config", (), {"model":"fake-refiner", "max_output_tokens":2400})()
+        def __init__(self): self.calls = 0
+        def complete(self, messages, **kwargs):
+            self.calls += 1
+            return {"content":json.dumps({"candidate":revised_answer}),"model":"fake-refiner",
+                    "cost":"0.002","cost_currency":"USD","cost_source":"provider_reported",
+                    "usage":{"prompt_tokens":10,"completion_tokens":10}}
+
+    llm=FakeRefiner()
+    output=refine_candidate_answer(llm,case={"request":request.model_dump(mode="json")},answer=original,
+        critiques=[{"claim_id":"claim-1","issue":"Do not imply an outage; evidence only gives a changed window.","evidence_refs":["evidence-1"]}])
+    assert output["refined"] is True and llm.calls == 1
+    checked=CandidateAssessment.model_validate(output["candidate"])
+    assert checked.summary == revised_answer["summary"]
+    assert checked.evidence == CandidateAssessment.model_validate(original).evidence
+    assert checked.request_id == original["request_id"] and checked.versions.model_dump() == CandidateAssessment.model_validate(original).versions.model_dump()
+    assert output["cost"] == "0.002" and output["cost_currency"] == "USD"

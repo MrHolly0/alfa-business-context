@@ -44,7 +44,7 @@ def write_json(value, output=None):
         sys.stdout.write(text)
 
 
-def make_pipeline(state_dir: str | Path, *, mode='baseline', config=None, profile=None, compare_hackathon=False, analyst=None):
+def make_pipeline(state_dir: str | Path, *, mode='baseline', config=None, profile=None, compare_hackathon=False, analyst=None, routes=None):
     state = Path(state_dir)
     state.mkdir(parents=True, exist_ok=True)
     store = CorpusStore(state / 'corpus.sqlite3')
@@ -67,7 +67,13 @@ def make_pipeline(state_dir: str | Path, *, mode='baseline', config=None, profil
     from .analysts import PromptRegistry, builtin_configs
     registry = PromptRegistry(state/'analysts.sqlite3')
     for item in builtin_configs(): registry.register(item)
-    return store, AnalysisPipeline(store, llm, analyst_config=registry.get(analyst) if analyst else None, registry=registry)
+    pipeline = AnalysisPipeline(store, llm, analyst_config=registry.get(analyst) if analyst else None, registry=registry)
+    if routes:
+        if llm is None: raise ValueError('routes_require_model_mode')
+        from .llm.routing import ModelRouter
+        route_data = read_json(routes)
+        pipeline.role_services = ModelRouter(llm.config,state/'llm-budget.sqlite3',route_data.get('routes',route_data)).services()
+    return store, pipeline
 
 
 def _options(parser):
@@ -75,6 +81,7 @@ def _options(parser):
     parser.add_argument('--mode', choices=['baseline', 'model'], default='baseline')
     parser.add_argument('--config', help='Provider configuration, without credentials')
     parser.add_argument('--profile', choices=['openrouter', 'hackathon'])
+    parser.add_argument('--routes', default=os.getenv('INTELLIGENCE_ROUTING_FILE') or None, help='Operator-owned JSON model routes; same provider account and ledger')
     parser.add_argument('--analyst', help='Explicit analyst configuration ref; otherwise select active role/industry configuration')
     parser.add_argument('--compare-hackathon', action='store_true', help='Project RUB cost with explicit hackathon tariffs; same model only')
 
@@ -87,8 +94,24 @@ def main(argv=None):
     if arguments and arguments[0] == 'llm':
         from .llm.cli import main as llm_main
         return llm_main(arguments[1:])
+    if arguments and arguments[0] == 'core-stand':
+        from .core_stand import main as stand_main
+        return stand_main(arguments[1:])
     parser = argparse.ArgumentParser(description='Загрузка материалов, поиск и анализ бизнес-контекста')
     commands = parser.add_subparsers(dest='command', required=True)
+    prepare = commands.add_parser('prepare-context', help='Подготовить контекст из предоставленных строк CSV без изменения данных Core')
+    prepare.add_argument('--input', required=True)
+    prepare.add_argument('--output')
+    workflow = commands.add_parser('run-task', help='Выполнить разрешённый снимок AI/Data локально; в продукте запуск через Core jobs')
+    _options(workflow)
+    workflow.add_argument('--input', required=True)
+    workflow.add_argument('--output')
+    probe = commands.add_parser('probe-source', help='Проверить URL по одноразовому разрешению Core')
+    probe.add_argument('--input', required=True)
+    probe.add_argument('--state-dir', default=str(DEFAULT_STATE))
+    demo_data = commands.add_parser('demo-data', help='Полный AI/Data пример с локальным RSS вместо сети')
+    demo_data.add_argument('--state-dir')
+    demo_data.add_argument('--output')
     demo = commands.add_parser('demo', help='Учебный сквозной пример, без сети и ключей')
     demo.add_argument('--output')
     ingest = commands.add_parser('ingest', help='Импорт одного документа или JSON-массива документов')
@@ -137,7 +160,14 @@ def main(argv=None):
     worker.add_argument('--heartbeat-seconds', type=float, default=10)
     args = parser.parse_args(arguments)
     try:
-        if args.command == 'demo':
+        if args.command == 'prepare-context':
+            from .client_data import CompanyContextPrepareRequest,prepare_company_contexts
+            request=CompanyContextPrepareRequest.model_validate(read_json(args.input))
+            write_json(prepare_company_contexts(**request.model_dump()),args.output)
+        elif args.command == 'demo-data':
+            from .demo_data import run_demo
+            write_json(run_demo(args.state_dir),args.output)
+        elif args.command == 'demo':
             with tempfile.TemporaryDirectory(prefix='business-context-demo-') as tmp:
                 store, pipeline = make_pipeline(tmp)
                 for document in read_json(APP_ROOT/'examples/documents.json'): store.ingest(document)
@@ -175,9 +205,17 @@ def main(argv=None):
             store = CorpusStore(Path(args.state_dir)/'corpus.sqlite3')
             write_json(store.search(tenant_id=args.tenant,source_ids=args.sources.split(','),as_of=args.as_of,
                                    query=args.query,role=args.role,limit=args.limit))
-        elif args.command in {'analyze','evaluate','serve','worker'}:
-            store, pipeline = make_pipeline(args.state_dir,mode=args.mode,config=args.config,profile=args.profile,compare_hackathon=args.compare_hackathon,analyst=args.analyst)
-            if args.command == 'analyze':
+        elif args.command == 'probe-source':
+            from .collection import NewsCollector, SourceProbeRequest
+            corpus = CorpusStore(Path(args.state_dir)/'corpus.sqlite3')
+            collector = NewsCollector(corpus,state_path=Path(args.state_dir)/'collection.sqlite3')
+            write_json(collector.probe(SourceProbeRequest.model_validate(read_json(args.input))))
+        elif args.command in {'analyze','evaluate','serve','worker','run-task'}:
+            store, pipeline = make_pipeline(args.state_dir,mode=args.mode,config=args.config,profile=args.profile,compare_hackathon=args.compare_hackathon,analyst=args.analyst,routes=args.routes)
+            if args.command == 'run-task':
+                from .workflow import DataWorkflow, DataTask
+                write_json(DataWorkflow(args.state_dir,llm=pipeline.llm,role_services=getattr(pipeline,"role_services",None)).run(DataTask.model_validate(read_json(args.input))),args.output)
+            elif args.command == 'analyze':
                 request = AnalysisRequest.model_validate(read_json(args.input))
                 write_json(pipeline.run(request), args.output)
             elif args.command == 'evaluate':
@@ -198,7 +236,8 @@ def main(argv=None):
                 if not 0.1 <= args.poll_seconds <= 3600: raise ValueError('invalid_poll_interval')
                 if not 0.05 <= args.heartbeat_seconds <= 60: raise ValueError('invalid_heartbeat_interval')
                 core = CoreClient()
-                executor = Worker(core,pipeline,ArtifactStore(Path(args.state_dir)/'artifacts.sqlite3'),heartbeat_interval=args.heartbeat_seconds)
+                from .workflow import DataWorkflow
+                executor = Worker(core,pipeline,ArtifactStore(Path(args.state_dir)/'artifacts.sqlite3'),data_workflow=DataWorkflow(args.state_dir,llm=pipeline.llm,role_services=getattr(pipeline,"role_services",None)),heartbeat_interval=args.heartbeat_seconds)
                 stop = threading.Event()
                 def halt(*_): stop.set()
                 signal.signal(signal.SIGINT,halt)
