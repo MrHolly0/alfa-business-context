@@ -1,0 +1,10 @@
+{
+  "tenant_id": "tenant-a",
+  "company_id": "транссевер",
+  "name": "ТрансСевер",
+  "description": "Компания производит промышленное оборудование. Зависит от: поставок через Северный порт.",
+  "provenance": "Synthetic company onboarding description",
+  "as_of": "2026-10-25T14:15:12.778364Z",
+  "data_classification": "synthetic",
+  "statement_status": "core_confirmed"
+}

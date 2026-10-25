@@ -89,6 +89,8 @@ class AutoOptimizationPolicy(StrictModel):
     max_steps: int = Field(ge=1, le=12)
     cost_reservation_rub: float = Field(ge=0, allow_inf_nan=False)
     cost_reservation_usd: float = Field(ge=0, allow_inf_nan=False)
+    cooldown_seconds: int = Field(default=3600, ge=0, le=604800)
+    max_jobs_per_company_per_day: int = Field(default=2, ge=1, le=100)
 
     @model_validator(mode="after")
     def explicit_nonzero_allocation(self):

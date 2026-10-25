@@ -122,3 +122,32 @@ def iter_active_confirmed_context(context: CompanyContext | dict, as_of: datetim
     projection = project_company_context(context, as_of=as_of)
     for group in (projection.activities, projection.assertions, projection.dependencies, projection.facts):
         yield from group
+
+
+def context_research_leads(projection: CompanyContextProjection) -> list[dict[str, Any]]:
+    """Bounded assumptions not excluded by known dates, never impact evidence.
+
+    Future items are absent from the projection; expired/contradictory and
+    explicitly negated relationships are not fresh research leads.
+    """
+    import re
+    result = []
+    for item in projection.unresolved:
+        if not item.get("in_effect") or item.get("status") not in {"unknown", "assumption", "hypothesis"}:
+            continue
+        if item.get("group") != "dependencies" and not (item.get("group") == "assertions" and
+                item.get("kind") in {"dependency", "supplier", "resource", "customer_group", "market", "contract"}):
+            continue
+        label = str(item.get("label", ""))
+        if not label or re.search(r"\b(?:не\s+(?:зависит|использует|поставляет)|нет\s+зависимости|без\s+зависимости)\b", label, re.IGNORECASE):
+            continue
+        item_id = str(item.get("dependency_id", item.get("assertion_id", "")))
+        if len(item_id)>256:
+            item_id="lead-"+hashlib.sha256(item_id.encode()).hexdigest()[:24]
+        result.append({"item_id": item_id,
+            "label": label[:320], "status": item["status"], "use": "search_and_questions_only",
+            "freshness_unknown": bool(item.get("freshness_unknown")),
+            "observed_at": item.get("observed_at")})
+        if len(result) == 6:
+            break
+    return result

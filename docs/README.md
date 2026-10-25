@@ -8,13 +8,13 @@
 4. [Профиль и персонализация](personalization.md) — описание → профиль → Core follow-up → персональный результат.
 5. [Архитектура](architecture.md) — границы интерфейса, PHP и Python.
 6. [Ревью и исправления](ai-review-and-fixes.md) — дополнительные сценарии, результаты и ограничения восстановления.
-7. [Персонализация и расходы](ai-personalization-checks.md) — автоматизация, сравнение компаний и границы проверки; [ранние живые прогоны](ai-live-checks.md).
+7. [Косвенное исследование и турнир](research-and-tournament-checks.md) — автоматизация, сравнение компаний и границы проверки; [ранние живые прогоны](ai-live-checks.md).
 8. [Матрица готовности](ai-scope-and-readiness.md) — реализация и проверка каждого требования.
 
 ## Разработка и интеграция
 
 - [Установка и команды](development.md), [Docker](../infra/README.md).
-- [Подключение Backend/Frontend](ai-integration.md), [контракты Python](../contracts/intelligence/README.md).
+- [Точные подключения Symfony и примеры](symfony-integration.md), [общая интеграция](ai-integration.md), [контракты Python](../contracts/intelligence/README.md).
 - [Python-модуль](../apps/intelligence/README.md), [состояние интерфейса](web-status.md).
 - [Настройки аналитика](../apps/intelligence/docs/analysts.md), [турнир](../apps/intelligence/docs/tournament.md).
 - [Источники моделей и бюджеты](llm-providers.md), [подготовка CSV](client-data.md).

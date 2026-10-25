@@ -153,17 +153,46 @@ class PairJudge:
 
 def _zero_scores(): return {name: 0 for name in ("grounding", "business", "coverage", "usefulness")}
 
+
+_BLIND_EVIDENCE_FIELDS = (
+    "evidence_id", "document_id", "document_revision_ref", "source_id", "source_role",
+    "title", "canonical_uri", "publisher", "author", "published_at", "fetched_at",
+    "received_at", "event_time", "locator", "quote", "synthetic", "data_classification",
+)
+
+
+def blind_evidence(evidence: list[dict]) -> list[dict]:
+    """Project one evidence list for judges and blind review, retaining source support only."""
+    if not isinstance(evidence, list):
+        raise ValueError("case evidence must be a list")
+    projected = []
+    seen = set()
+    for item in evidence:
+        if not isinstance(item, dict):
+            raise ValueError("case evidence rows must be objects")
+        evidence_id = item.get("evidence_id")
+        if isinstance(evidence_id, str) and evidence_id in seen:
+            continue
+        if isinstance(evidence_id, str):
+            seen.add(evidence_id)
+        projected.append({key: item[key] for key in _BLIND_EVIDENCE_FIELDS if key in item})
+    return projected
+
+
 def _case_context(case: dict) -> dict:
     if not isinstance(case, dict): raise ValueError("case must be an object")
     evidence = case.get("evidence", [])
-    context = {k: case[k] for k in ("context", "company", "question", "evidence") if k in case}
     if not isinstance(evidence, list): raise ValueError("case evidence must be a list")
+    context = {k: case[k] for k in ("context", "company", "question") if k in case}
+    if "evidence" in case:
+        context["evidence"] = blind_evidence(evidence)
     return context
 
 def blind_answer(answer: dict) -> dict:
     if not isinstance(answer, dict): raise ValueError("answer must be an object")
-    # Shared projection for model judging and critique; preserve product content, never run metadata.
-    return {k: answer[k] for k in ("summary", "relevance", "impacts", "risks", "opportunities", "actions", "evidence", "claims", "influence_chain", "clarifications", "answer") if k in answer}
+    # Evidence is supplied once by the surrounding case context. Claims retain
+    # their evidence_refs; answer-level evidence would duplicate long quotations.
+    return {k: answer[k] for k in ("summary", "relevance", "impacts", "risks", "opportunities", "actions", "claims", "influence_chain", "clarifications", "answer") if k in answer}
 
 def _validate_judgement(raw: Any) -> dict:
     if not isinstance(raw, dict) or set(raw) != {"winner", "scores", "reason", "advisory"} or raw["winner"] not in {"A", "B", "tie"} or raw["advisory"] is not True or not isinstance(raw["reason"], str):

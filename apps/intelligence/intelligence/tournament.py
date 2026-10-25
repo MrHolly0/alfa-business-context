@@ -202,6 +202,11 @@ class TournamentRunner:
         from .experiments import blind_answer
         return blind_answer(candidate)
 
+    @staticmethod
+    def _blind_evidence(evidence):
+        from .experiments import blind_evidence
+        return blind_evidence(evidence)
+
     def _run_case(self, run_id, case, config, split, execution_identity, mode, shadow, candidate_override=None):
         req=AnalysisRequest.model_validate(case["request"])
         pipeline_version="bounded-pipeline-v1"
@@ -278,25 +283,46 @@ class TournamentRunner:
         # Reserve each potentially billable judge call before it leaves this process.
         key_a=_digest({"kind":"judge","version":"pair-judge-v1","runtime":_runtime_hashes(),"case":judge_case,"a":a,"b":b,"orientation":"candidate_first","execution_identity":execution_identity or {}})
         key_b=_digest({"kind":"judge","version":"pair-judge-v1","runtime":_runtime_hashes(),"case":judge_case,"a":b,"b":a,"orientation":"candidate_second","execution_identity":execution_identity or {}})
+        orientation="candidate_first"
         try:
             first=self.store._reserve("judge",key_a)
             if first is None:
                 first=self.judge.judge(case=judge_case,a=a,b=b,orientation="candidate_first")
                 if first.get("advisory") is not True: raise ValueError("judge_not_advisory")
                 self.store._complete(key_a,first)
+            orientation="candidate_second"
             second=self.store._reserve("judge",key_b)
             if second is None:
                 second=self.judge.judge(case=judge_case,a=b,b=a,orientation="candidate_second")
                 if second.get("advisory") is not True: raise ValueError("judge_not_advisory")
                 self.store._complete(key_b,second)
-        except Exception:
-            return {"winner":"tie","reason":"judge_failed_or_interrupted","advisory":True}
+        except Exception as exc:
+            return {"winner":"tie","reason":"judge_failed_or_interrupted","advisory":True,
+                    "judge_error_type":type(exc).__name__[:64],
+                    "judge_error_reason":self._judge_error_reason(exc),
+                    "failed_orientation":orientation}
         # First call: challenger is A. Second call: challenger is B. Same identity
         # across positions is agreement; same letter means position bias.
         first_identity={"A":"challenger","B":"baseline","tie":"tie"}.get(first.get("winner"),"tie")
         second_identity={"B":"challenger","A":"baseline","tie":"tie"}.get(second.get("winner"),"tie")
         winner=first_identity if first_identity==second_identity else "tie"
         return {"winner":winner,"reason":"paired_advisory_judgment","advisory":True,"scores":[first.get("scores"),second.get("scores")],"flip_disagreement":first_identity!=second_identity}
+
+    @staticmethod
+    def _judge_error_reason(exc):
+        message=str(exc)
+        known={
+            "input exceeds the configured text-token estimate limit":"judge_input_cap_exceeded",
+            "experiment role returned invalid JSON":"judge_invalid_json",
+            "judge response has invalid structure":"judge_invalid_structure",
+            "judge_not_advisory":"judge_not_advisory",
+            "experiment maximum call count reached for this budget period":"experiment_call_limit_reached",
+        }
+        if message in known:return known[message]
+        code=getattr(exc,"code",None)
+        if isinstance(code,str) and re.fullmatch(r"[a-z][a-z0-9_]{0,80}",code):return code
+        if isinstance(exc,TimeoutError):return "judge_timeout"
+        return "judge_call_failed"
 
     def run(self, *, run_id: str, dataset: dict, candidate_refs: list[str], mode: str="baseline", shadow: bool=False, execution_identity: dict|None=None, target_scope: str|None=None, baseline_ref: str|None=None, shadow_dataset: dict|None=None, refinement: bool=True) -> dict:
         train,holdout=self._validate_dataset(dataset)
@@ -473,7 +499,7 @@ class TournamentRunner:
             a=outputs[labels["A"]][review_split][i]["candidate"]
             b=outputs[labels["B"]][review_split][i]["candidate"]
             evidence={e["evidence_id"]:e for out in (a,b) for e in out.get("evidence",[])}
-            pack.append({"blind_id":blind_id,"case_id":case["case_id"],"company":case["request"].get("company"),"question":case["request"].get("event"),"evidence":list(evidence.values()),"A":self._blind(a),"B":self._blind(b)})
+            pack.append({"blind_id":blind_id,"case_id":case["case_id"],"company":case["request"].get("company"),"question":case["request"].get("event"),"evidence":self._blind_evidence(list(evidence.values())),"A":self._blind(a),"B":self._blind(b)})
         report={"schema_version":"tournament-report-v1","run_id":run_id,"baseline_ref":baseline_ref,"baseline_snapshot":snapshot,"winner_ref":winner,"synthetic":dataset["synthetic"],"mode":mode,"shadow":bool(shadow),"shadow_validation":shadow_validation,"measured_quality":False,"training":scores,"pairings":pairings,"refinement":critique_result,
                 "candidate_metrics":{r:[{"case_id":x["case_id"],"cost":x["measured_cost"],"known_partial_cost":x["known_partial_cost"],"cost_currency":x["cost_currency"],"cost_complete":x["cost_complete"],"latency_ms":x["latency_ms"]} for x in outputs[r]["train"]] for r in candidate_refs},
                 "holdout":{**exposure,"passed":bool(hold_pass),"case_count":len(holdout),"judgments":holdout_judgments,"winner_cases":winner_cases,"baseline_cases":base_cases},"hard_failures":failures,

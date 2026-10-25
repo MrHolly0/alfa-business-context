@@ -93,3 +93,5 @@ HTTP `409` дополнительно обозначает `stale_or_conflicting
 `revision_conflict` и отсутствие предыдущей стабильной конфигурации при откате — завершённые результаты `partial` с прежней настройкой, а не неопределённая повторяемая HTTP-операция. Backend не должен повторять платную генерацию по такому результату автоматически.
 
 Невалидный/недоступный модельный разбор возвращает `execution_mode=baseline`, `status=partial` и явное ограничение; доступны цитаты источников, а непроверенный модельный текст не публикуется. `usage` по-прежнему содержит совершённые платные попытки.
+
+[Связанные примеры Symfony](../../docs/symfony-integration.md) содержат реальные fixture request/result envelopes, обработку follow-up, collect/analyze и publication proof. `AutoOptimizationPolicy` также ограничивает cooldown_seconds и max_jobs_per_company_per_day; Core фиксирует `skipped_frequency` при достижении частотного лимита.

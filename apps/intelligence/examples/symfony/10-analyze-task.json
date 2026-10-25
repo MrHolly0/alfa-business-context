@@ -1,0 +1,120 @@
+{
+  "schema_version": "ai-data-task-v1",
+  "request_id": "symfony-analyze",
+  "tenant_id": "tenant-a",
+  "company_id": "транссевер",
+  "context_version": 1,
+  "source_policy_version": 7,
+  "operation": "analyze",
+  "trigger": "manual",
+  "knowledge_mode": "as_of",
+  "as_of": "2026-10-25T14:15:12.778364Z",
+  "source_policy": {
+    "policy_id": "policy-a",
+    "revision": 7,
+    "tenant_id": "tenant-a",
+    "issued_at": "2026-10-24T12:00:00Z",
+    "sources": [
+      {
+        "source_id": "news",
+        "source_role": "external",
+        "data_classification": "synthetic",
+        "uri": "https://feed-news.example/rss",
+        "content_type": "application/rss+xml",
+        "title": "",
+        "publisher": "Синтетический вестник",
+        "language": "",
+        "enabled": true,
+        "poll_interval_seconds": 3600,
+        "timeout_seconds": 15,
+        "max_bytes": 2000000,
+        "allowed_redirect_hosts": [],
+        "fetch_articles": false,
+        "article_hosts": [
+          "news.example"
+        ],
+        "published_at": null,
+        "event_time": null,
+        "json_mapping": null
+      }
+    ],
+    "excluded_source_ids": [],
+    "excluded_publishers": [],
+    "user_excluded_source_ids": [],
+    "user_excluded_publishers": [],
+    "excluded_document_uris": [],
+    "user_excluded_document_uris": []
+  },
+  "businesses": [
+    {
+      "company_id": "транссевер",
+      "context_version": 1,
+      "company": {
+        "schema_version": "company-context-v2",
+        "name": "ТрансСевер",
+        "industry": "логистика",
+        "description": "Региональные грузовые перевозки",
+        "role": "операционный директор",
+        "dependencies": [
+          {
+            "dependency_id": "dependency-de3910f7ee52",
+            "label": "поставок через Северный порт",
+            "kind": "dependency",
+            "status": "confirmed",
+            "provenance": "Core-confirmed user statement, not independent verification",
+            "source_node": "company",
+            "target_node": null,
+            "evidence_refs": [
+              "description:59:87",
+              "description:47:88"
+            ],
+            "observed_at": "2026-10-25T14:15:12.778364Z",
+            "valid_from": null,
+            "valid_until": null
+          }
+        ],
+        "facts": [],
+        "activities": [
+          {
+            "activity_id": "activity-11771e77c212",
+            "label": "Компания производит промышленное оборудование",
+            "normalized_class": "manufacturing",
+            "status": "confirmed",
+            "provenance": "Core-confirmed user statement, not independent verification",
+            "evidence_refs": [
+              "description:0:45"
+            ],
+            "observed_at": "2026-10-25T14:15:12.778364Z",
+            "valid_from": null,
+            "valid_until": null
+          }
+        ],
+        "assertions": []
+      },
+      "preferences": null,
+      "known_at": null,
+      "dependency_graph": []
+    }
+  ],
+  "event_ids": [
+    "evt_f587c6a0197646dba660b6b0907bd027"
+  ],
+  "period": null,
+  "watches": [],
+  "watch_observations": [],
+  "published_assessments": [],
+  "budget": {
+    "max_model_calls": 0,
+    "max_input_tokens": 24000,
+    "max_output_tokens": 2048,
+    "max_total_tokens": 60000,
+    "max_steps": 12
+  },
+  "data_classification": "synthetic",
+  "synthetic": true,
+  "max_events": 10,
+  "max_exploratory_analyses": 1,
+  "auto_optimize": false,
+  "description_input": null,
+  "expected_config_revisions": {}
+}

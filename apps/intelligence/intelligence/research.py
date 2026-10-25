@@ -9,7 +9,7 @@ import re
 from typing import Any, Iterable, Literal, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from .company_context import project_company_context
+from .company_context import project_company_context, context_research_leads
 from .schemas import CompanyContext
 
 
@@ -294,6 +294,18 @@ def select_affected_businesses(package, businesses: Sequence[Any], *,
             reasons.append("description_term_only_weak_signal")
             signal_scores.append(0.06)
 
+        research_leads=context_research_leads(projection)
+        exploratory_matches=[]
+        for lead in research_leads:
+            matches=_matching_terms(lead["label"],event_terms)
+            if matches:
+                exploratory_matches.append(lead["item_id"])
+                matched_nodes.extend(matches)
+        if exploratory_matches:
+            reasons.append("unconfirmed_dependency_research_lead")
+            signal_scores.append(0.20)
+            uncertainty.append("Unconfirmed dependencies triggered research only; no factual relationship or impact is established.")
+
         unique_paths={tuple(path.edge_ids):path for path in paths}
         paths=list(unique_paths.values())
         matched_nodes=list(dict.fromkeys(matched_nodes))
@@ -330,6 +342,8 @@ def select_affected_businesses(package, businesses: Sequence[Any], *,
             "payment_company_dependencies_excluded":payment_context_deps,"company_facts":len(facts),
             "company_activities":len(projection.activities),"company_assertions":len(projection.assertions),
             "company_context_fingerprint":projection.fingerprint,
+            "research_lead_count":len(research_leads),"matched_research_lead_ids":exploratory_matches,
+            "research_leads_are_confirmed":False,
             "matched_event_terms":len(matched_nodes),"grounded_paths":len(paths),
             "signal_basis":list(dict.fromkeys(reasons)),
             "as_of":instant.isoformat()}
@@ -337,7 +351,7 @@ def select_affected_businesses(package, businesses: Sequence[Any], *,
         selections.append(ImpactSelection(company_id=company_id,status="signal_found" if score>0 else "no_signal_found",
             score=score,
             reasons=list(dict.fromkeys(reasons)),roots=sorted(roots),matched_nodes=matched_nodes,paths=paths,
-            coverage=coverage,uncertainty=uncertainty))
+            coverage=coverage,uncertainty=list(dict.fromkeys(uncertainty))[:30]))
     selections.sort(key=lambda item:(-item.score,item.company_id))
     return selections
 

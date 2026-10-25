@@ -17,7 +17,7 @@ from .parsers import parse_content
 from .schemas import AnalysisRequest, CandidateAssessment, CandidateClaim, InfluenceEdge, ModelAnswer
 from .analysts import AnalystConfig, PromptRegistry
 from .events import ImpactPackage
-from .company_context import project_company_context
+from .company_context import project_company_context, context_research_leads
 
 PROMPT_VERSION = "analysis-v2"
 PIPELINE_VERSION = "bounded-pipeline-v2"
@@ -198,7 +198,10 @@ class AnalysisPipeline:
         for role in order:
             step("tool_search_" + role)
             if role == "external":
-                terms = [request.event.title]
+                projection = project_company_context(request.company, as_of=request.as_of)
+                terms = [request.event.title[:100],
+                    " ".join(item.label for item in projection.dependencies)[:110],
+                    " ".join(item["label"] for item in context_research_leads(projection))[:110]]
                 if not broad:
                     terms.append(request.event.text[:MAX_QUERY_CHARS])
             else:
@@ -325,6 +328,10 @@ class AnalysisPipeline:
                                     *company_projection.activities, *company_projection.assertions)
                        if self._context_can_ground_impact(item)],
                    "HORIZON_AND_CONFIRMATION_GUIDANCE": "For each hypothesis or recommendation, state a bounded horizon and observable confirmation_conditions. Do not invent a condition; if unavailable, ask a specific question in clarifications. Keep alternatives and falsifiers separate."}
+        leads=context_research_leads(company_projection)
+        if leads:
+            payload["UNCONFIRMED_RESEARCH_LEADS"]=leads
+            payload["RESEARCH_LEAD_RULE"]="Search/question leads only, never confirmed context. freshness_unknown requires checking current use. Return unknown and a concrete question until applicability is confirmed."
         # Explicit user permission covers only public/synthetic shared material.
         # Both the execution grant and every persisted source must allow disclosure;
         # a task label never upgrades a confidential package or source.

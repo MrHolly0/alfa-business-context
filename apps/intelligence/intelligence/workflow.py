@@ -598,7 +598,7 @@ class DataWorkflow:
                             if candidate.status=='ready': candidate.status='partial'
                             candidate.coverage.limitations=list(dict.fromkeys(candidate.coverage.limitations+['business_relevance_not_established']))
                             candidate.clarifications=list(dict.fromkeys(candidate.clarifications+[
-                                'Какая подтверждённая зависимость компании связана с этим событием? В переданном контексте такая связь не найдена.']))[:30]
+                                'Какая подтверждённая зависимость связывает компанию с найденными промежуточными звеньями? Предварительный отбор прямой связи не установил; проверьте применимость по документам.']))[:30]
                         if business.company_id in result.coverage.get('profile_time_limitations',{}):
                             candidate.status='partial'
                             candidate.coverage.limitations=list(dict.fromkeys(candidate.coverage.limitations+[

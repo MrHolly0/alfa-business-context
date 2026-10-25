@@ -54,6 +54,17 @@ def _result(leased_job, candidate, message_id):
         "candidate": candidate}
 
 
+class MutableClock:
+    def __init__(self, value):
+        self.value = value
+
+    def __call__(self):
+        return self.value
+
+    def advance(self, seconds):
+        self.value += timedelta(seconds=seconds)
+
+
 def test_intent_key_is_stable_and_excludes_parent_delivery_id(tmp_path):
     co = company()["company"]
     store = CompanyAnalystStore(tmp_path / "analysts.sqlite", PromptRegistry(tmp_path / "registry.sqlite"))
@@ -73,6 +84,8 @@ def test_auto_optimization_policy_has_finite_nonzero_total_allocation():
         max_model_calls=1, max_input_tokens=100, max_output_tokens=50, max_total_tokens=150,
         max_steps=2, cost_reservation_rub=0.5, cost_reservation_usd=0)
     assert policy_value.total_reservation_cap["RUB"] == 1.5
+    assert policy_value.cooldown_seconds == 3600
+    assert policy_value.max_jobs_per_company_per_day == 2
     with pytest.raises(ValueError, match="positive explicit cost reservation"):
         AutoOptimizationPolicy(allocation_id="zero", max_jobs=1, max_model_calls=1,
             max_input_tokens=100, max_output_tokens=50, max_total_tokens=150, max_steps=2,
@@ -125,6 +138,7 @@ def test_core_client_worker_onboard_auto_optimize_and_next_analysis(tmp_path):
     with stand._connect() as db:
         optimized_result = json.loads(db.execute(
             "SELECT accepted_result FROM jobs WHERE job_id LIKE 'autoopt-%'").fetchone()[0])
+    assert optimized_result["candidate"].get("follow_up_intents", []) == []
     replay_task = onboard.model_copy(update={"request_id": "second-onboard"})
     stand.seed_job(_job(replay_task, now, "second-onboard"))
     replay_job = stand.claim()["job"]
@@ -188,7 +202,8 @@ def test_core_client_worker_onboard_auto_optimize_and_next_analysis(tmp_path):
 
 
 def test_initial_analyze_for_new_company_queues_auto_optimize(tmp_path):
-    now = datetime.now(timezone.utc)
+    now = datetime(2030, 1, 1, 12, tzinfo=timezone.utc)
+    clock = MutableClock(now)
     business = company("Новая компания")
     first_analysis = DataTask(request_id="first-analysis", tenant_id="tenant-a",
         company_id=business["company_id"], context_version=1, source_policy_version=7,
@@ -198,7 +213,7 @@ def test_initial_analyze_for_new_company_queues_auto_optimize(tmp_path):
         max_model_calls=1, max_input_tokens=1000, max_output_tokens=500,
         max_total_tokens=1500, max_steps=3, cost_reservation_rub=1, cost_reservation_usd=0)
     app = create_app(tmp_path / "core.sqlite", fixture_mode=True, operator_token="fixture",
-                     clock=lambda: now, auto_optimization_policy=allocation)
+                     clock=clock, auto_optimization_policy=allocation)
     stand: CoreStand = app.state.core_stand
     first_job = _job(first_analysis, now, "first-analysis")
     for defaulted_field in ("schema_version", "operation", "auto_optimize"):
@@ -206,7 +221,7 @@ def test_initial_analyze_for_new_company_queues_auto_optimize(tmp_path):
     stand.seed_job(first_job)
     core = CoreClient("http://core.test", "fixture", client=_ASGIClient(app, "fixture"))
     generator = ModelFixture()
-    workflow = DataWorkflow(tmp_path / "workflow", role_services={"generator": generator}, clock=lambda: now)
+    workflow = DataWorkflow(tmp_path / "workflow", role_services={"generator": generator}, clock=clock)
     worker = Worker(core, workflow, ArtifactStore(tmp_path / "worker.sqlite"), heartbeat_interval=10,
                     tenant_ids={"tenant-a"}, data_workflow=workflow)
 
@@ -226,6 +241,71 @@ def test_initial_analyze_for_new_company_queues_auto_optimize(tmp_path):
     record = CompanyAnalystStore(workflow.company_dir("tenant-a", business["company_id"]) /
         "company-analysts.sqlite3", workflow.registry).get("tenant-a", business["company_id"])
     assert record["revision"] == 2
+    assert worker.run_once() is None
+    assert generator.calls == 1
+
+    def submit_analysis(request_id, snapshot):
+        parsed = DataTask(request_id=request_id, tenant_id="tenant-a", company_id=snapshot["company_id"],
+            context_version=snapshot["context_version"], source_policy_version=7, operation="analyze",
+            trigger="context_changed", as_of=clock(), source_policy=policy(grant()), businesses=[snapshot],
+            data_classification="public", budget={"max_model_calls": 0})
+        stand.seed_job(_job(parsed, clock(), request_id))
+        result = worker.run_once()
+        assert result["status"] == "submitted", result
+        return parsed
+
+    def intent_status(version, company_id):
+        return next(item["status"] for item in reversed(stand.inspect()["auto_optimization_intents"])
+                    if item["company_id"] == company_id and item["context_version"] == version)
+
+    # A profile update during cooldown is kept at baseline and recorded as skipped.
+    update2 = company("Новая компания", version=2)
+    update2["company"]["description"] = "Изменённый профиль v2"
+    submit_analysis("profile-v2", update2)
+    assert intent_status(2, business["company_id"]) == "skipped_frequency"
+    assert worker.run_once() is None
+    assert generator.calls == 1
+
+    # Changing allocation IDs cannot bypass the Core-owned company cooldown.
+    stand.auto_optimization_policy = AutoOptimizationPolicy(allocation_id="reset-allocation",
+        max_jobs=10, max_model_calls=1, max_input_tokens=1000, max_output_tokens=500,
+        max_total_tokens=1500, max_steps=3, cost_reservation_rub=1, cost_reservation_usd=0)
+    update3 = company("Новая компания", version=3)
+    update3["company"]["description"] = "Изменённый профиль v3"
+    submit_analysis("profile-v3-during-cooldown", update3)
+    assert intent_status(3, business["company_id"]) == "skipped_frequency"
+    assert generator.calls == 1
+
+    # An unrelated company has an independent cooldown and may optimize now.
+    other_company = company("Вторая компания")
+    submit_analysis("other-company-first-analysis", other_company)
+    assert intent_status(1, other_company["company_id"]) == "queued"
+    assert worker.run_once()["status"] == "submitted"
+    assert generator.calls == 2
+
+    # After cooldown, a source refresh with the same profile does not retry either
+    # skipped intent. It has no new intent and does not create a job.
+    clock.advance(3601)
+    submit_analysis("profile-v3-source-refresh", update3)
+    assert len(stand.inspect()["auto_optimization_intents"]) == 4
+    assert worker.run_once() is None
+    assert generator.calls == 2
+
+    # A later distinct profile change can use the second daily slot; the next one
+    # is frequency-limited by the UTC-day count, independent of allocation ID.
+    update4 = company("Новая компания", version=4)
+    update4["company"]["description"] = "Изменённый профиль v4"
+    submit_analysis("profile-v4-after-cooldown", update4)
+    assert intent_status(4, business["company_id"]) == "queued"
+    assert worker.run_once()["status"] == "submitted"
+    assert generator.calls == 3
+    clock.advance(3601)
+    update5 = company("Новая компания", version=5)
+    update5["company"]["description"] = "Изменённый профиль v5"
+    submit_analysis("profile-v5-daily-limit", update5)
+    assert intent_status(5, business["company_id"]) == "skipped_frequency"
+    assert worker.run_once() is None
+    assert generator.calls == 3
 
 
 def test_no_allocation_and_disabled_opt_in_do_not_enqueue(tmp_path):

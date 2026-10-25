@@ -1,0 +1,28 @@
+{
+  "checked_at": "2026-10-25T14:02:22.005988+00:00",
+  "url": "https://www.cbr.ru/rss/RssPress",
+  "source_role": "external",
+  "collection": {
+    "policy_id": "one-off-public-feed-check",
+    "policy_revision": 1,
+    "tenant_id": "source-check",
+    "checked_at": "2026-10-25T14:02:22.005988Z",
+    "fetched": 1,
+    "unchanged": 0,
+    "skipped": [],
+    "pending_metadata": [],
+    "errors": [],
+    "sources_considered": 1
+  },
+  "document_count": 14,
+  "stored_document_count_with_text": 14,
+  "permanent_subscription_created": false,
+  "alfa_bank_analytics_loaded": false,
+  "raw_response_sha256": [
+    "23ba7daef1ac0e0a5284e5b4323a5979ce93b35cd10a3dfe7830c1604d624ac5"
+  ],
+  "published_range": {
+    "from": "2026-09-29T15:19:00.000000Z",
+    "to": "2026-10-23T10:30:00.000000Z"
+  }
+}

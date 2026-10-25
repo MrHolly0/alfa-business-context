@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .analysts import AnalystConfig
 from .llm.service import estimate_text_tokens
 from .pipeline import AnalysisPipeline, MAX_QUERY_CHARS
-from .company_context import project_company_context
+from .company_context import project_company_context, context_research_leads
 from .schemas import AnalysisRequest, CandidateAssessment
 
 
@@ -350,6 +350,26 @@ class MultiAgentPipeline:
             if "Фактическое использование превысило резерв; завершённый вывод требует проверки." not in candidate.clarifications:
                 candidate.clarifications = list(dict.fromkeys(candidate.clarifications +
                     ["Фактическое использование превысило резерв; завершённый вывод требует проверки."]))[:30]
+        research_leads=context_research_leads(project_company_context(request.company,as_of=request.as_of))
+        search_results=[item for item in trace if item.get("stage")=="tool_result" and item.get("tool")=="search"]
+        search_scope={"mode":"authorized_corpus_only","network_search_available":False,
+            "allowed_source_ids":list(request.source_ids),
+            "snapshot_document_count":len(request.document_revision_refs),
+            "selected_evidence_count":len(candidate.evidence),
+            "unconfirmed_lead_ids":[item["item_id"] for item in research_leads],
+            "unconfirmed_leads_are_evidence":False,
+            "additional_search":"critic_queries_in_same_corpus_and_budget",
+            "source_expansion":"requires_new_Core_source_policy",
+            "empty_search_roles":sorted({item.get("role") for item in search_results if item.get("result_count")==0})}
+        candidate.usage["search_coverage"]=search_scope
+        trace.append({"stage":"research_coverage",**search_scope})
+        if research_leads:
+            candidate.coverage.limitations=list(dict.fromkeys(["unconfirmed_dependencies_research_only",
+                *candidate.coverage.limitations]))[:30]
+        if candidate.status in {"partial","unknown"}:
+            candidate.clarifications=list(dict.fromkeys([
+                "Поиск ограничен разрешённым корпусом. Ненайденная связь не означает отсутствия риска; для новых источников нужен снимок политики Core.",
+                *candidate.clarifications]))[:30]
         candidate.trace = trace
         if (not research_complete or critique_data is None or package_error) and candidate.status == "ready":
             candidate.status = "partial"
@@ -377,6 +397,7 @@ class MultiAgentPipeline:
                        "retrieval_expansions": list(config.retrieval_expansions), "max_depth": config.max_depth,
                        "examples": [example.model_dump(mode="json") for example in config.examples]} if config else {}),
                    "event": AnalysisPipeline._context_payload(request)["event"],
+                   "unconfirmed_research_leads": context_research_leads(projection),
                    "allowed_roles": ["external", "bank"], "query_limit": MAX_QUERY_CHARS, "max_searches": 4}
         return [{"role": "system", "content": system},
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
@@ -491,8 +512,14 @@ class MultiAgentPipeline:
         company_terms += [a.label for a in projection.assertions]
         if config:
             company_terms += list(config.retrieval_expansions)
-        return {"external": request.event.title[:MAX_QUERY_CHARS],
-                "bank": " ".join((request.company.name, *company_terms, request.event.title))[:MAX_QUERY_CHARS]}
+        leads=context_research_leads(projection)
+        # Keep a separate bounded portion for unknown relations so a long known
+        # profile cannot silently remove all exploratory terms.
+        external=" ".join((request.event.title[:100]," ".join(company_terms)[:110],
+                            " ".join(item["label"] for item in leads)[:110]))[:MAX_QUERY_CHARS]
+        return {"external": external,
+                "bank": " ".join((request.company.name, *company_terms,
+                    *(item["label"] for item in leads), request.event.title))[:MAX_QUERY_CHARS]}
 
 
 class _WorkflowBudgetExhausted(RuntimeError):

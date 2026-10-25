@@ -53,6 +53,12 @@ def test_holdout_failure_keeps_baseline(tmp_path,fail):
     assert report['winner_ref']=='baseline@1'
     assert report['holdout']['passed'] is False
     assert report['promotion_eligible'] is False
+    if fail=='timeout':
+        judgment=report['holdout']['judgments'][0]
+        assert judgment['reason']=='judge_failed_or_interrupted'
+        assert judgment['judge_error_type']=='TimeoutError'
+        assert judgment['judge_error_reason']=='judge_timeout'
+        assert judgment['failed_orientation']=='candidate_first'
 
 
 def test_synthetic_flags_cannot_be_hidden_by_dataset_label(tmp_path):

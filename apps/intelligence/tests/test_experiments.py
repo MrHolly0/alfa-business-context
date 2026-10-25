@@ -2,7 +2,7 @@ from decimal import Decimal
 import json
 import pytest
 from intelligence.analysts import AnalystConfig, builtin_configs
-from intelligence.experiments import CandidateGenerator, ExperimentLLM, PairJudge, blind_answer, critic_round
+from intelligence.experiments import CandidateGenerator, ExperimentLLM, PairJudge, blind_answer, blind_evidence, critic_round
 from intelligence.llm.ledger import BudgetLedger
 from intelligence.llm.config import ProviderConfig, OPENROUTER_BASE
 from intelligence.llm.service import LLMService
@@ -55,6 +55,48 @@ def test_blind_answer_preserves_business_fields_and_drops_run_identity():
     answer={"summary":"s","claims":[{"claim_id":"c"}],"influence_chain":[{"edge_id":"e"}],
         "clarifications":["q"],"model":"m","trace":"t","version":"v","config":"c","cost":1}
     assert blind_answer(answer) == {k:answer[k] for k in ("summary","claims","influence_chain","clarifications")}
+
+def test_judge_has_one_compact_full_quote_projection_and_answers_keep_refs():
+    class Fake:
+        seen=None
+        def complete(self, messages, **kwargs):
+            self.seen=messages
+            return {"content": json.dumps({"winner":"tie","scores":{
+                "A":{"grounding":2,"business":2,"coverage":2,"usefulness":2},
+                "B":{"grounding":2,"business":2,"coverage":2,"usefulness":2}},
+                "reason":"insufficient evidence","advisory":True})}
+    evidence={"evidence_id":"ev-1","document_id":"doc-1","document_revision_ref":"doc-1:1",
+        "source_id":"news","source_role":"external","title":"Source title",
+        "canonical_uri":"https://news.example/story","publisher":"Publisher","author":"Author",
+        "published_at":"2026-10-25T00:00:00Z","fetched_at":"2026-10-25T01:00:00Z",
+        "received_at":"2026-10-25T01:00:00Z","event_time":None,"locator":"chars:0-20",
+        "quote":"Exact, complete source quote.","synthetic":True,"data_classification":"synthetic",
+        "raw_sha256":"raw-hash","content_hash":"content-hash","score":0.9}
+    answer={"summary":"Answer","evidence":[evidence],"claims":[{"claim_id":"c",
+        "text":"Claim","evidence_refs":["ev-1"]}],"influence_chain":[],"clarifications":[]}
+    fake=Fake()
+    PairJudge(fake).judge(case={"company":{"name":"Company"},"question":{"title":"Question"},
+        "evidence":[evidence]},a=answer,b=answer,orientation="candidate_first")
+    payload=json.loads(fake.seen[-1]["content"])
+    assert payload["case"]["evidence"] == [blind_evidence([evidence])[0]]
+    assert payload["case"]["evidence"][0]["quote"] == evidence["quote"]
+    assert payload["a"]["claims"][0]["evidence_refs"] == ["ev-1"]
+    assert "evidence" not in payload["a"] and "evidence" not in payload["b"]
+    assert "raw_sha256" not in str(payload) and "content_hash" not in str(payload) and "score" not in payload["case"]["evidence"][0]
+
+def test_blind_evidence_preserves_quote_provenance_and_drops_ingest_metadata():
+    evidence={"evidence_id":"ev","source_role":"bank","source_id":"memo","document_revision_ref":"doc:2",
+        "canonical_uri":"urn:bank:note","publisher":"Bank","author":"Analyst","published_at":"2026-10-25",
+        "fetched_at":"2026-10-25","locator":"page:1","quote":"Full quote; do not truncate.",
+        "synthetic":False,"raw_sha256":"raw","content_hash":"hash","score":1.1}
+    projected=blind_evidence([evidence])[0]
+    assert projected["quote"] == evidence["quote"]
+    assert {key:projected[key] for key in ("evidence_id","source_role","source_id",
+        "document_revision_ref","canonical_uri","publisher","author","published_at",
+        "fetched_at","locator","synthetic")} == {key:evidence[key] for key in
+        ("evidence_id","source_role","source_id","document_revision_ref","canonical_uri",
+         "publisher","author","published_at","fetched_at","locator","synthetic")}
+    assert "raw_sha256" not in projected and "content_hash" not in projected and "score" not in projected
 def test_critic_drops_unknown_evidence_refs():
     class Fake:
         def complete(self,*args,**kwargs): return {"content":json.dumps({"critiques":[{"claim_id":"c","issue":"x","evidence_refs":["bad"]}]})}

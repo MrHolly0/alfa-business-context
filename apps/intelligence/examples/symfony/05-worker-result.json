@@ -1,0 +1,114 @@
+{
+  "candidate": {
+    "candidates": [],
+    "collection": null,
+    "company_id": "транссевер",
+    "configurations": [
+      {
+        "company_id": "транссевер",
+        "config": {
+          "answer_style": "balanced",
+          "config_id": "company-2b9d9df83952bf4e9ed66bc2",
+          "evidence_limit": 16,
+          "examples": [],
+          "focus": [],
+          "horizon": "quarter",
+          "industry_scope": [],
+          "max_depth": 2,
+          "retrieval_expansions": [],
+          "retrieval_strategy": "balanced",
+          "revision": 1,
+          "role_scope": "any",
+          "template_version": "analysis-v2"
+        },
+        "config_ref": "company-2b9d9df83952bf4e9ed66bc2@1",
+        "context_hash": "fd8f106faec5cf2b1b4380670c934950a14df2872c63211f24f4bf22cb3deeab",
+        "context_version": 1,
+        "generation_status": "registry_fallback",
+        "history": [
+          {
+            "config_ref": "company-2b9d9df83952bf4e9ed66bc2@1",
+            "context_version": 1,
+            "created_at": "2026-10-25T14:15:12.829573+00:00",
+            "source_config_ref": "baseline@1",
+            "stable": true
+          }
+        ],
+        "revision": 1,
+        "runtime_override_ref": null,
+        "source_config_ref": "baseline@1",
+        "tenant_id": "tenant-a"
+      }
+    ],
+    "context_proposals": [],
+    "coverage": {
+      "analysis_as_of": "2026-10-25T14:15:12.778364+00:00",
+      "documents": 0,
+      "external_search": "configured_sources_and_corpus_only",
+      "knowledge_mode": "as_of",
+      "model_attempts": [],
+      "model_calls": 0,
+      "requested_as_of": "2026-10-25T14:15:12.778364+00:00",
+      "reserved_tokens": 0,
+      "runtime_fingerprint": "b0340e1a6a58e72b670d426cebe2243097797b2e41f85554009144bd44561b9b",
+      "source_ids": [
+        "news"
+      ]
+    },
+    "created_at": "2026-10-25T14:15:12.778364Z",
+    "events": [],
+    "follow_up_intents": [
+      {
+        "company_id": "транссевер",
+        "context_version": 1,
+        "expected_config_revision": 1,
+        "idempotency_key": "8220431c16464a46264d256b487a4aa52a158b90fbe600b4c58a99957d837ca1",
+        "kind": "optimize_company_analyst",
+        "parent_request_id": "symfony-onboard",
+        "profile_fingerprint": "fd8f106faec5cf2b1b4380670c934950a14df2872c63211f24f4bf22cb3deeab",
+        "reason": "onboard",
+        "schema_version": "ai-follow-up-intent-v1",
+        "tenant_id": "tenant-a"
+      }
+    ],
+    "invalidations": [],
+    "period_report": null,
+    "request_id": "symfony-onboard",
+    "revisions": [],
+    "schema_version": "ai-data-result-v1",
+    "selections": [],
+    "status": "completed",
+    "tenant_id": "tenant-a",
+    "trace": [
+      {
+        "analysis_as_of": "2026-10-25T14:15:12.778364+00:00",
+        "documents": 0,
+        "knowledge_mode": "as_of",
+        "policy_version": 7,
+        "stage": "permitted_snapshot"
+      }
+    ],
+    "versions": {
+      "company_contexts": {
+        "транссевер": 1
+      },
+      "context": 1,
+      "policy_id": "policy-a",
+      "source_policy": 7
+    },
+    "watch_results": []
+  },
+  "company_id": "транссевер",
+  "input_versions": {
+    "context_version": 1,
+    "event_versions": [],
+    "source_policy_version": 7
+  },
+  "job_id": "symfony-onboard",
+  "lease_generation": 1,
+  "message_id": "22d4d34671d68ebab46f6fecdd4b143eecc1e0564c4a16f2ab9c8d0f1f0af16c",
+  "result_ref": null,
+  "schema_version": "ai-result-v1",
+  "tenant_scope": "tenant-a",
+  "trace_id": "trace-symfony-onboard"
+}

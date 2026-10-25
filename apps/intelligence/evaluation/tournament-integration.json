@@ -1,0 +1,177 @@
+{
+  "schema_version": "tournament-dataset-v1",
+  "synthetic": true,
+  "description": "Synthetic local protocol check; not quality evidence.",
+  "train": [
+    {
+      "case_id": "live-synthetic-20261025T141616Z-5b1dfde8-train",
+      "request": {
+        "schema_version": "analysis-request-v1",
+        "request_id": "request-live-synthetic-20261025T141616Z-5b1dfde8-train",
+        "tenant_id": "synthetic-live-check-live-synthetic-20261025T141616Z-5b1dfde8-train",
+        "company_id": "company-live-synthetic-20261025T141616Z-5b1dfde8-train",
+        "as_of": "2026-10-25T14:16:16.346024+00:00",
+        "context_version": 1,
+        "source_policy_version": 1,
+        "source_ids": [
+          "news-fixture-live-synthetic-20261025T141616Z-5b1dfde8-train",
+          "bank-fixture-live-synthetic-20261025T141616Z-5b1dfde8-train"
+        ],
+        "company": {
+          "name": "Учебная компания live-synthetic-20261025T141616Z-5b1dfde8-train",
+          "industry": "производство оборудования",
+          "description": "Синтетический профиль для проверки протокола турнира.",
+          "role": "Финансовый директор",
+          "dependencies": [
+            {
+              "dependency_id": "dependency-live-synthetic-20261025T141616Z-5b1dfde8-train",
+              "label": "керамические изоляторы",
+              "kind": "raw_material",
+              "status": "confirmed",
+              "provenance": "Тестовый профиль; не реальные данные компании.",
+              "observed_at": "2026-10-25T14:16:16.346024+00:00"
+            }
+          ],
+          "facts": [
+            {
+              "fact_id": "fact-live-synthetic-20261025T141616Z-5b1dfde8-train",
+              "text": "Запас изоляторов ограничен; точное количество не задано.",
+              "status": "unknown",
+              "provenance": "Синтетический fixture.",
+              "observed_at": "2026-10-25T14:16:16.346024+00:00"
+            }
+          ]
+        },
+        "event": {
+          "event_id": "event-train-live-synthetic-20261025T141616Z-5b1dfde8",
+          "title": "Учебное сообщение: задержка поставок изоляторов train-live-synthetic-20261025T141616Z-5b1dfde8",
+          "text": "Синтетический источник сообщает о задержке поставок керамических изоляторов. Срок восстановления и влияние на конкретные заказы не установлены. train-live-synthetic-20261025T141616Z-5b1dfde8",
+          "source_id": "news-fixture-live-synthetic-20261025T141616Z-5b1dfde8-train",
+          "published_at": "2026-10-25T13:16:16.346024+00:00",
+          "synthetic": true
+        },
+        "budget": {
+          "max_model_calls": 1,
+          "max_input_tokens": 24000,
+          "max_output_tokens": 2048,
+          "max_total_tokens": 20000,
+          "max_steps": 12
+        },
+        "synthetic": true
+      },
+      "documents": [
+        {
+          "tenant_id": "synthetic-live-check-live-synthetic-20261025T141616Z-5b1dfde8-train",
+          "source_id": "news-fixture-live-synthetic-20261025T141616Z-5b1dfde8-train",
+          "source_role": "external",
+          "canonical_uri": "https://synthetic-live-check.example/live-synthetic-20261025T141616Z-5b1dfde8-train/story",
+          "title": "Синтетический внешний материал train-live-synthetic-20261025T141616Z-5b1dfde8",
+          "content": "Для учебного сценария отгрузки керамических изоляторов задерживаются; дата восстановления неизвестна. train-live-synthetic-20261025T141616Z-5b1dfde8",
+          "content_type": "text/plain",
+          "published_at": "2026-10-25T13:16:16.346024+00:00",
+          "fetched_at": "2026-10-25T14:16:16.346024+00:00",
+          "synthetic": true,
+          "publisher": "Синтетический вестник",
+          "language": "ru"
+        },
+        {
+          "tenant_id": "synthetic-live-check-live-synthetic-20261025T141616Z-5b1dfde8-train",
+          "source_id": "bank-fixture-live-synthetic-20261025T141616Z-5b1dfde8-train",
+          "source_role": "bank",
+          "canonical_uri": "urn:synthetic-live-check:live-synthetic-20261025T141616Z-5b1dfde8-train:bank-note",
+          "title": "Синтетическая учебная аналитическая заметка",
+          "content": "Учебный текст: проверьте сроки договоров, запасы и доступность заменителей. train-live-synthetic-20261025T141616Z-5b1dfde8",
+          "content_type": "text/plain",
+          "published_at": "2026-10-25T13:16:16.346024+00:00",
+          "fetched_at": "2026-10-25T14:16:16.346024+00:00",
+          "synthetic": true,
+          "publisher": "Синтетический источник",
+          "language": "ru"
+        }
+      ],
+      "expected": {}
+    }
+  ],
+  "holdout": [
+    {
+      "case_id": "live-synthetic-20261025T141616Z-5b1dfde8-holdout",
+      "request": {
+        "schema_version": "analysis-request-v1",
+        "request_id": "request-live-synthetic-20261025T141616Z-5b1dfde8-holdout",
+        "tenant_id": "synthetic-live-check-live-synthetic-20261025T141616Z-5b1dfde8-holdout",
+        "company_id": "company-live-synthetic-20261025T141616Z-5b1dfde8-holdout",
+        "as_of": "2026-10-25T14:16:16.346024+00:00",
+        "context_version": 1,
+        "source_policy_version": 1,
+        "source_ids": [
+          "news-fixture-live-synthetic-20261025T141616Z-5b1dfde8-holdout",
+          "bank-fixture-live-synthetic-20261025T141616Z-5b1dfde8-holdout"
+        ],
+        "company": {
+          "name": "Учебный дата-центр Орион",
+          "industry": "производство оборудования",
+          "description": "Синтетический профиль для проверки протокола турнира.",
+          "role": "Финансовый директор",
+          "dependencies": [
+            {
+              "dependency_id": "dependency-live-synthetic-20261025T141616Z-5b1dfde8-holdout",
+              "label": "электроснабжение от сетевого района Восточный",
+              "kind": "raw_material",
+              "status": "confirmed",
+              "provenance": "Тестовый профиль; не реальные данные компании.",
+              "observed_at": "2026-10-25T14:16:16.346024+00:00"
+            }
+          ],
+          "facts": []
+        },
+        "event": {
+          "event_id": "event-holdout-live-synthetic-20261025T141616Z-5b1dfde8",
+          "title": "Восточный сетевой район вводит ограничение мощности",
+          "text": "Учебный диспетчер сообщил: в Восточном сетевом районе ожидается ограничение электрической мощности на восемь часов. Перечень потребителей ещё не опубликован.",
+          "source_id": "news-fixture-live-synthetic-20261025T141616Z-5b1dfde8-holdout",
+          "published_at": "2026-10-25T13:16:16.346024+00:00",
+          "synthetic": true
+        },
+        "budget": {
+          "max_model_calls": 1,
+          "max_input_tokens": 24000,
+          "max_output_tokens": 2048,
+          "max_total_tokens": 20000,
+          "max_steps": 12
+        },
+        "synthetic": true
+      },
+      "documents": [
+        {
+          "tenant_id": "synthetic-live-check-live-synthetic-20261025T141616Z-5b1dfde8-holdout",
+          "source_id": "news-fixture-live-synthetic-20261025T141616Z-5b1dfde8-holdout",
+          "source_role": "external",
+          "canonical_uri": "https://synthetic-live-check.example/live-synthetic-20261025T141616Z-5b1dfde8-holdout/story",
+          "title": "Синтетическое диспетчерское уведомление",
+          "content": "Восточный сетевой район предупреждает о восьмичасовом ограничении мощности. Применимость к конкретному дата-центру и наличие резервного питания неизвестны.",
+          "content_type": "text/plain",
+          "published_at": "2026-10-25T13:16:16.346024+00:00",
+          "fetched_at": "2026-10-25T14:16:16.346024+00:00",
+          "synthetic": true,
+          "publisher": "Синтетический вестник",
+          "language": "ru"
+        },
+        {
+          "tenant_id": "synthetic-live-check-live-synthetic-20261025T141616Z-5b1dfde8-holdout",
+          "source_id": "bank-fixture-live-synthetic-20261025T141616Z-5b1dfde8-holdout",
+          "source_role": "bank",
+          "canonical_uri": "urn:synthetic-live-check:live-synthetic-20261025T141616Z-5b1dfde8-holdout:bank-note",
+          "title": "Синтетическая учебная аналитическая заметка",
+          "content": "Учебная аналитическая заметка: для оценки ограничений мощности нужны график нагрузки, договор и состояние резервного питания.",
+          "content_type": "text/plain",
+          "published_at": "2026-10-25T13:16:16.346024+00:00",
+          "fetched_at": "2026-10-25T14:16:16.346024+00:00",
+          "synthetic": true,
+          "publisher": "Синтетический источник",
+          "language": "ru"
+        }
+      ],
+      "expected": {}
+    }
+  ]
+}

@@ -11,6 +11,7 @@ uv sync --frozen
 uv run --frozen python -m intelligence --help
 uv run --frozen python -m intelligence demo-data --state-dir /tmp/alfa-demo-data
 uv run --frozen python -m intelligence demo-personalization --output /tmp/personalization-comparison.json
+uv run --frozen python -m intelligence demo-research --output /tmp/indirect-research.json
 uv run --frozen python -m intelligence prepare-description --input examples/description-context.json \
   --output /tmp/description-proposal.json
 uv run --frozen python -m intelligence run-task --mode baseline \
@@ -98,3 +99,5 @@ uv run --frozen python scripts/export_contracts.py --check
 
 
 Проверки без сети и модели: `docker compose run --build --rm intelligence demo-business` и `docker compose run --build --rm intelligence demo-personalization`. На хосте из `apps/intelligence`: `.venv/bin/python -m intelligence demo-personalization --output /tmp/personalization-comparison.json`. Контекстные регрессии: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/test_company_context.py tests/test_description_context.py tests/test_workflow_extension.py tests/test_business_scenario.py tests/test_personalization_comparison.py tests/test_auto_personalization.py`. Полный набор и экспорт контрактов проверяются перед завершением изменений.
+
+[Содержательные проверки косвенных цепочек и реального турнира](research-and-tournament-checks.md). [Последовательные JSON-примеры и оставшиеся подключения Symfony](symfony-integration.md).

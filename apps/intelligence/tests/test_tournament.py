@@ -106,6 +106,11 @@ def test_model_tournament_evaluates_only_finalist_on_holdout_and_can_promote(tmp
     assert len(judge.calls)==8 and all("evidence" in call[0] for call in judge.calls)
     assert "review_label_map" not in report["human_review"]
     assert set(store.review_pack("model-run")[0]) >= {"company","question","evidence","A","B"}
+    review_item=store.review_pack("model-run")[0]
+    assert review_item["evidence"] and all("quote" in item and "evidence_id" in item for item in review_item["evidence"])
+    assert all("raw_sha256" not in item and "content_hash" not in item and "score" not in item
+               for item in review_item["evidence"])
+    assert "evidence" not in review_item["A"] and "evidence" not in review_item["B"]
     with store._db() as db:
         labels=json.loads(db.execute("SELECT manifest FROM runs WHERE run_id='model-run'").fetchone()[0])["review_label_map"]
         holdout_cells=db.execute("SELECT payload FROM cells WHERE run_id='model-run'").fetchall()

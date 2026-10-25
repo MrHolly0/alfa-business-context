@@ -1,0 +1,123 @@
+{
+  "budget": {
+    "cost_reservation_rub": 1.0,
+    "cost_reservation_usd": 0.0,
+    "max_model_calls": 1,
+    "max_tokens": 60000
+  },
+  "company_id": "транссевер",
+  "deadline": "2026-10-25T14:30:12.778364Z",
+  "input_versions": {
+    "context_version": 1,
+    "event_versions": [],
+    "source_policy_version": 7
+  },
+  "job_id": "autoopt-8220431c16464a46264d256b487a4aa5",
+  "lease_generation": 1,
+  "lease_until": "2026-10-25T14:16:12.778364Z",
+  "message_id": "autoopt-message-8220431c16464a46264d256b487a4aa5",
+  "schema_version": "ai-job-v1",
+  "scope": {
+    "document_revision_refs": [],
+    "source_ids": []
+  },
+  "task": {
+    "as_of": "2026-10-25T14:15:12.778364Z",
+    "auto_optimize": true,
+    "budget": {
+      "max_input_tokens": 24000,
+      "max_model_calls": 1,
+      "max_output_tokens": 2048,
+      "max_steps": 12,
+      "max_total_tokens": 60000
+    },
+    "businesses": [
+      {
+        "company": {
+          "activities": [
+            {
+              "activity_id": "activity-11771e77c212",
+              "evidence_refs": [
+                "description:0:45"
+              ],
+              "label": "Компания производит промышленное оборудование",
+              "normalized_class": "manufacturing",
+              "observed_at": "2026-10-25T14:15:12.778364Z",
+              "provenance": "Core-confirmed user statement, not independent verification",
+              "status": "confirmed",
+              "valid_from": null,
+              "valid_until": null
+            }
+          ],
+          "assertions": [],
+          "dependencies": [
+            {
+              "dependency_id": "dependency-de3910f7ee52",
+              "evidence_refs": [
+                "description:59:87",
+                "description:47:88"
+              ],
+              "kind": "dependency",
+              "label": "поставок через Северный порт",
+              "observed_at": "2026-10-25T14:15:12.778364Z",
+              "provenance": "Core-confirmed user statement, not independent verification",
+              "source_node": "company",
+              "status": "confirmed",
+              "target_node": null,
+              "valid_from": null,
+              "valid_until": null
+            }
+          ],
+          "description": "Региональные грузовые перевозки",
+          "facts": [],
+          "industry": "логистика",
+          "name": "ТрансСевер",
+          "role": "операционный директор",
+          "schema_version": "company-context-v2"
+        },
+        "company_id": "транссевер",
+        "context_version": 1,
+        "dependency_graph": [],
+        "known_at": null,
+        "preferences": null
+      }
+    ],
+    "company_id": "транссевер",
+    "context_version": 1,
+    "data_classification": "synthetic",
+    "description_input": null,
+    "event_ids": [],
+    "expected_config_revisions": {
+      "транссевер": 1
+    },
+    "knowledge_mode": "as_of",
+    "max_events": 10,
+    "max_exploratory_analyses": 1,
+    "operation": "optimize",
+    "period": null,
+    "published_assessments": [],
+    "request_id": "autoopt-8220431c16464a46264d256b487a4aa5",
+    "schema_version": "ai-data-task-v1",
+    "source_policy": {
+      "excluded_document_uris": [],
+      "excluded_publishers": [],
+      "excluded_source_ids": [],
+      "issued_at": "2026-10-25T14:15:12.778364Z",
+      "policy_id": "auto-optimization:symfony-example-allocation",
+      "revision": 7,
+      "sources": [],
+      "tenant_id": "tenant-a",
+      "user_excluded_document_uris": [],
+      "user_excluded_publishers": [],
+      "user_excluded_source_ids": []
+    },
+    "source_policy_version": 7,
+    "synthetic": true,
+    "tenant_id": "tenant-a",
+    "trigger": "context_changed",
+    "watch_observations": [],
+    "watches": []
+  },
+  "tenant_scope": "tenant-a",
+  "trace_id": "autoopt-trace-8220431c16464a46264d256b"
+}

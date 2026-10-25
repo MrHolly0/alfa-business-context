@@ -56,11 +56,13 @@ docker compose run --build --rm web-test
 docker compose run --build --rm intelligence-test
 ```
 
-25 октября 2026 на хосте и в Docker прошли **433 теста Python и 11 subtests**. Последняя проверка интерфейса 24 октября — **37 тестов**. Отдельно проверены реальный RSS ЦБ и вызовы Gemma, Qwen и GLM через OpenRouter. Регрессии и исправления — в [отчёте ревью](docs/ai-review-and-fixes.md); живые прогоны и расходы — в [отчёте моделей](docs/ai-live-checks.md).
+25 октября 2026 на хосте и в Docker прошли **439 тестов Python и 11 subtests**. Последняя проверка интерфейса 24 октября — **37 тестов**. Отдельно проверены реальный RSS ЦБ и вызовы Gemma, Qwen и GLM через OpenRouter. Регрессии и исправления — в [отчёте ревью](docs/ai-review-and-fixes.md); живые прогоны и расходы — в [отчёте моделей](docs/ai-live-checks.md).
 
-Новый смешанный сценарий: `docker compose run --build --rm intelligence demo-business`; он использует локальные RSS. Сравнение персональных сигналов для двух компаний одной отрасли и смешанного бизнеса: `docker compose run --build --rm intelligence demo-personalization`; JSON содержит одинаковые события, поисковые запросы и результаты. Сигнал — эвристический приоритет, не вероятность. Подробности и ограничения: [персонализация](docs/personalization.md), [отчёт сравнения](docs/checks/personalization-comparison-2026-10-25.json). Итоговые [проверки и расходы](docs/ai-personalization-checks.md) включают реальные Qwen, Gemma и GLM.
+Новый смешанный сценарий: `docker compose run --build --rm intelligence demo-business`; он использует локальные RSS. Сравнение персональных сигналов для двух компаний одной отрасли и смешанного бизнеса: `docker compose run --build --rm intelligence demo-personalization`; JSON содержит одинаковые события, поисковые запросы и результаты. Сигнал — эвристический приоритет, не вероятность. Подробности и ограничения: [персонализация](docs/personalization.md), [отчёт сравнения](docs/checks/personalization-comparison-2026-10-25.json). Итоговые [проверки и расходы](docs/research-and-tournament-checks.md) включают реальные Qwen, Gemma и GLM.
 
 Смысловое качество и выигрыш от турнира пока не подтверждены независимой разметкой. Реальные банковские CSV/PDF не включены в репозиторий. Генерация через шлюз Альфы ожидает подтверждения тарифов; настроенные адаптеры не означают проверенную генерацию через этот шлюз. Источники, ограничения и статус каждого требования описаны в [матрице готовности](docs/ai-scope-and-readiness.md).
+
+Косвенные цепочки, опровержение и исследование неизвестной зависимости: `docker compose run --build --rm intelligence demo-research`. [Результаты настоящей модели и турнира](docs/research-and-tournament-checks.md), [точное подключение Symfony](docs/symfony-integration.md).
 
 ## Разработка
 

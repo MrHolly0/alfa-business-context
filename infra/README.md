@@ -78,3 +78,5 @@ uv export --frozen --only-group dev --no-emit-project -o requirements-dev.lock
 
 
 Профиль с несколькими направлениями и локальными источниками проверяется командой `docker compose run --build --rm intelligence demo-business`. Сравнение одинаковых событий по зависимостям: `docker compose run --build --rm intelligence demo-personalization` (JSON выводится в терминал). На хосте из `apps/intelligence` используйте `uv run --frozen python -m intelligence demo-personalization --output /tmp/personalization-comparison.json`. По умолчанию эти команды не вызывают модель. Для модели нужен явный `--mode model`, проверенный provider config и прежний общий ledger в named volume; новый state path не даёт нового разрешения на расходы. Описание и границы персонализации: [docs/personalization.md](../docs/personalization.md).
+
+Дополнительный пример без внешней сети/модели: `docker compose run --build --rm intelligence demo-research`. Он проверяет получение промежуточных документов и ограничения покрытия; реальные выводы модели и турнир описаны [отдельно](../docs/research-and-tournament-checks.md).

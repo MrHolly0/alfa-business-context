@@ -201,3 +201,5 @@ python -m intelligence arena review-pack --run-id review-1 --output /tmp/review-
 Frontend передаёт изменения и действия в Core. Показывает состояние фоновой задачи отдельно от `ready/partial/unknown`, источники и цитаты отдельно от гипотез и банковской позиции; уточнения — как поля, способные изменить вывод. В текущем статическом UI этот путь ещё не подключён; `sectorFor()` относится к демонстрационным экранам и не ограничивает Python-контракт.
 
 Проверяемый новый пример: `docker compose run --build --rm intelligence demo-business`. Он использует локальные RSS и две синтетические компании; никакая имитация не называется подключённым Symfony или настоящим банковским корпусом. Форматы и ошибки описаны в [контракте](../contracts/intelligence/README.md).
+
+Пошаговые подключения и последовательные JSON-примеры для Symfony: [инструкция разработчику](symfony-integration.md). Частота auto-optimize задаётся Core policy (по умолчанию 3600 секунд и 2 задачи/company/UTC-день), независимо от allocation ID; пропуск — `skipped_frequency`. [Проверка цикла и исследования](research-and-tournament-checks.md).

@@ -53,6 +53,20 @@
       "minimum": 0,
       "title": "Cost Reservation Usd",
       "type": "number"
+    },
+    "cooldown_seconds": {
+      "default": 3600,
+      "maximum": 604800,
+      "minimum": 0,
+      "title": "Cooldown Seconds",
+      "type": "integer"
+    },
+    "max_jobs_per_company_per_day": {
+      "default": 2,
+      "maximum": 100,
+      "minimum": 1,
+      "title": "Max Jobs Per Company Per Day",
+      "type": "integer"
     }
   },
   "required": [

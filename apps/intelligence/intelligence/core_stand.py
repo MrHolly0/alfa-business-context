@@ -65,6 +65,9 @@ class ScheduleRequest(_Body):
 class CoreStand:
     """SQLite-backed fixture state and job state machine."""
 
+    DEFAULT_AUTO_OPTIMIZATION_COOLDOWN_SECONDS = 3600
+    DEFAULT_AUTO_OPTIMIZATION_JOBS_PER_COMPANY_PER_UTC_DAY = 2
+
     def __init__(self, state_path: str | Path, *, clock: Callable[[], datetime] = _now,
                  lease_seconds: int = 60,
                  auto_optimization_policy: AutoOptimizationPolicy | dict[str, Any] | None = None):
@@ -392,6 +395,17 @@ class CoreStand:
                 continue
             policy = self.auto_optimization_policy
             status, allocation_id, followup_job_id = "skipped_budget", None, None
+            cooldown_seconds = (policy.cooldown_seconds if policy else
+                                self.DEFAULT_AUTO_OPTIMIZATION_COOLDOWN_SECONDS)
+            daily_limit = (policy.max_jobs_per_company_per_day if policy else
+                           self.DEFAULT_AUTO_OPTIMIZATION_JOBS_PER_COMPANY_PER_UTC_DAY)
+            if self._auto_optimization_frequency_limited(db, intent.tenant_id, intent.company_id,
+                                                         now, cooldown_seconds, daily_limit):
+                status = "skipped_frequency"
+                db.execute("INSERT INTO auto_optimization_intents VALUES(?,?,?,?,?,?,?,?,?)",
+                           (intent.idempotency_key, intent.tenant_id, intent.company_id, intent.context_version,
+                            intent.profile_fingerprint, None, None, status, now))
+                continue
             if policy is not None:
                 used = db.execute("SELECT COUNT(*) FROM auto_optimization_intents WHERE allocation_id=? AND status='queued'",
                                   (policy.allocation_id,)).fetchone()[0]
@@ -405,6 +419,26 @@ class CoreStand:
             db.execute("INSERT INTO auto_optimization_intents VALUES(?,?,?,?,?,?,?,?,?)",
                        (intent.idempotency_key, intent.tenant_id, intent.company_id, intent.context_version,
                         intent.profile_fingerprint, allocation_id, followup_job_id, status, now))
+
+    @staticmethod
+    def _auto_optimization_frequency_limited(db, tenant_id: str, company_id: str, now: str,
+                                             cooldown_seconds: int, daily_limit: int) -> bool:
+        """Apply tenant/company-wide Core throttles, independent of allocation ID."""
+        current = datetime.fromisoformat(now.replace("Z", "+00:00")).astimezone(timezone.utc)
+        last = db.execute("SELECT created_at FROM auto_optimization_intents "
+                          "WHERE tenant_scope=? AND company_id=? AND status='queued' "
+                          "ORDER BY created_at DESC LIMIT 1", (tenant_id, company_id)).fetchone()
+        if last and cooldown_seconds:
+            last_at = datetime.fromisoformat(last["created_at"].replace("Z", "+00:00"))
+            if current < last_at + timedelta(seconds=cooldown_seconds):
+                return True
+        day_start = current.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = day_start + timedelta(days=1)
+        daily_count = db.execute("SELECT COUNT(*) FROM auto_optimization_intents "
+                                 "WHERE tenant_scope=? AND company_id=? AND status='queued' "
+                                 "AND created_at>=? AND created_at<?",
+                                 (tenant_id, company_id, _iso(day_start), _iso(day_end))).fetchone()[0]
+        return daily_count >= daily_limit
 
     def _validate_configurations(self, db, candidate: dict[str, Any], tenant_scope: str,
                                  parent_job: dict[str, Any]) -> tuple[list[dict[str, Any]], tuple[str, str] | None]:

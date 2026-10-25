@@ -1,0 +1,671 @@
+{
+  "schema_version": "ai-data-result-v1",
+  "request_id": "symfony-collect",
+  "tenant_id": "tenant-a",
+  "company_id": "транссевер",
+  "status": "partial",
+  "versions": {
+    "context": 1,
+    "source_policy": 7,
+    "company_contexts": {
+      "транссевер": 1
+    },
+    "policy_id": "policy-a"
+  },
+  "collection": {
+    "policy_id": "policy-a",
+    "policy_revision": 7,
+    "tenant_id": "tenant-a",
+    "checked_at": "2026-10-25T14:15:12.778364Z",
+    "fetched": 1,
+    "unchanged": 0,
+    "skipped": [],
+    "pending_metadata": [],
+    "errors": [],
+    "documents": [
+      {
+        "tenant_id": "tenant-a",
+        "source_id": "news",
+        "source_role": "external",
+        "data_classification": "synthetic",
+        "canonical_uri": "https://news.example/story-1",
+        "title": "Остановка поставок через Северный порт",
+        "content": "Издание сообщает: Северный порт временно закрыт, поставки оборудования задерживаются.",
+        "content_type": "application/rss+xml",
+        "published_at": "2026-10-24T09:00:00.000000Z",
+        "fetched_at": "2026-10-25T14:15:12.778364Z",
+        "synthetic": true,
+        "publisher": "Синтетический вестник",
+        "author": "",
+        "event_time": null,
+        "language": "ru",
+        "document_revision_ref": "doc_49ed660df699219d1eb4b4ab0f0391ac:1",
+        "content_hash": "d4932caca12584f977763bf33464358fdb524ab2befc77489050a64712253b0a",
+        "raw_sha256": "767ef2047a3276878c6789f3ae521816fd5daebdfbf961870a0d4a8bc3b79199",
+        "raw_ref": "/var/folders/01/_hwfpnn14hqfb634g8db2f_c0000gn/T/symfony-analysis-4c8q3pw1/workflow/raw/tenants/80a707af7dc77ee1228f9127180f3964835e5beb4c4ab0d812f0fe7593579b3a/76/767ef2047a3276878c6789f3ae521816fd5daebdfbf961870a0d4a8bc3b79199",
+        "duplicate_of": null
+      }
+    ],
+    "sources_considered": 1
+  },
+  "events": [
+    {
+      "package_id": "pkg_ff73a6281b6f0f486be3fe60ff9b3198",
+      "data_classification": "synthetic",
+      "tenant_id": "tenant-a",
+      "event_id": "evt_f587c6a0197646dba660b6b0907bd027",
+      "revision": 1,
+      "claims": [
+        {
+          "claim_id": "clm_0d2b550d2e26eeeccd53671a",
+          "kind": "reported_fact",
+          "statement": "Источник сообщает: Издание сообщает: Северный порт временно закрыт, поставки оборудования задерживаются.",
+          "quote": "Издание сообщает: Северный порт временно закрыт, поставки оборудования задерживаются.",
+          "source_id": "news",
+          "publication_id": "pub_49ed660df699219d1eb4b4ab0f0391ac",
+          "origin_group_id": "news.example",
+          "author": "",
+          "publisher": "Синтетический вестник",
+          "valid_from": null,
+          "valid_to": null,
+          "supporting_claim_ids": [],
+          "contradicting_claim_ids": [],
+          "classification_basis": "deterministic_source_attribution_not_truth_validation"
+        }
+      ],
+      "sources": [
+        {
+          "publication_id": "pub_49ed660df699219d1eb4b4ab0f0391ac",
+          "source_id": "news",
+          "source_role": "external",
+          "data_classification": "synthetic",
+          "canonical_uri": "https://news.example/story-1",
+          "title": "Остановка поставок через Северный порт",
+          "published_at": "2026-10-24T09:00:00.000000Z",
+          "fetched_at": "2026-10-25T14:15:12.778364Z",
+          "event_time": null,
+          "publisher": "Синтетический вестник",
+          "author": "",
+          "origin_group_id": "news.example",
+          "content_hash": "d4932caca12584f977763bf33464358fdb524ab2befc77489050a64712253b0a",
+          "document_revision_ref": "doc_49ed660df699219d1eb4b4ab0f0391ac:1",
+          "original_available": true
+        }
+      ],
+      "entities": [
+        "Издание",
+        "Северный"
+      ],
+      "territories": [],
+      "resources": [],
+      "mechanisms": [],
+      "possible_mechanisms": [],
+      "conditions": [],
+      "alternatives": [],
+      "unknowns": [],
+      "coverage": {
+        "permitted_publications": 1,
+        "origin_group_count": 1,
+        "independent_origin_groups": 1,
+        "independence_status": "unknown",
+        "independence_basis": "exact_content_hash_deduplicated_origin_labels; true reporting independence is unverified",
+        "policy_source_count": 1,
+        "policy_id": "policy-a",
+        "policy_version": "7",
+        "originals_available": true,
+        "extraction_mode": "deterministic_reported_claims",
+        "limitations": []
+      },
+      "model_version": "deterministic-reported-claims-v1",
+      "prompt_version": "event-impact-v2",
+      "policy_version": "7",
+      "created_at": "2026-10-25T14:15:31.546415Z"
+    }
+  ],
+  "selections": [
+    {
+      "company_id": "транссевер",
+      "status": "signal_found",
+      "score_type": "heuristic_priority",
+      "score": 0.8,
+      "reasons": [
+        "company_dependency_text_matches_event_term"
+      ],
+      "roots": [
+        "транссевер"
+      ],
+      "matched_nodes": [
+        "Северный",
+        "Северный порт"
+      ],
+      "paths": [
+        {
+          "company_id": "транссевер",
+          "event_id": "evt_f587c6a0197646dba660b6b0907bd027",
+          "event_revision": 1,
+          "target": "Северный",
+          "path": [
+            "транссевер",
+            "Северный"
+          ],
+          "edge_ids": [
+            "dependency-de3910f7ee52"
+          ],
+          "evidence_refs": [
+            "description:59:87",
+            "description:47:88"
+          ],
+          "statuses": [
+            "confirmed"
+          ],
+          "hop_count": 1,
+          "interpretation": "Textual company dependency matches an explicit event term; applicability needs review.",
+          "causal_claim": false
+        }
+      ],
+      "coverage": {
+        "package_id": "pkg_ff73a6281b6f0f486be3fe60ff9b3198",
+        "package_source_count": 1,
+        "package_independent_origins": 1,
+        "package_limitations": [],
+        "event_term_count": 8,
+        "dependency_graph_edges": 0,
+        "active_declared_graph_edges": 0,
+        "active_relationship_edges": 0,
+        "invalid_graph_edges": 0,
+        "inactive_graph_edges": 0,
+        "payment_graph_edges_excluded": 0,
+        "company_dependencies": 1,
+        "active_company_dependencies": 1,
+        "confirmed_company_dependencies": 1,
+        "assumed_company_dependencies": 0,
+        "inactive_company_dependencies": 0,
+        "payment_company_dependencies_excluded": 0,
+        "company_facts": 0,
+        "company_activities": 1,
+        "company_assertions": 0,
+        "company_context_fingerprint": "bfe402fbb45cabc096860a4618cc2d637fb405b6870199ae33f955ce76279663",
+        "research_lead_count": 0,
+        "matched_research_lead_ids": [],
+        "research_leads_are_confirmed": false,
+        "matched_event_terms": 2,
+        "grounded_paths": 1,
+        "signal_basis": [
+          "company_dependency_text_matches_event_term"
+        ],
+        "as_of": "2026-10-25T14:15:12.778364+00:00"
+      },
+      "uncertainty": [
+        "freshness_unknown:activities:activity-11771e77c212",
+        "freshness_unknown:dependencies:dependency-de3910f7ee52",
+        "Follow-up: Действует ли направление деятельности «Компания производит промышленное оборудование»?",
+        "Follow-up: Подтверждена ли сейчас зависимость «поставок через Северный порт»?"
+      ]
+    }
+  ],
+  "invalidations": [],
+  "candidates": [
+    {
+      "schema_version": "candidate-assessment-v1",
+      "request_id": "35ec370eec7100c9cb70d00e31680d322caa9bd0c9260e8760c6121f73420df3",
+      "tenant_id": "tenant-a",
+      "company_id": "транссевер",
+      "status": "partial",
+      "execution_mode": "baseline",
+      "summary": "Событие сопоставлено с указанной в профиле зависимостью: поставок через Северный порт. Масштаб влияния не установлен. Причинная оценка baseline не выполнялась.",
+      "claims": [
+        {
+          "claim_id": "event-evidence",
+          "kind": "external_fact",
+          "text": "Внешний материал описывает событие: Издание сообщает: Северный порт временно закрыт, поставки оборудования задерживаются.",
+          "evidence_refs": [
+            "ev_bd7f91f37262a521d5602c971ee183adc9b9061c"
+          ],
+          "context_refs": [],
+          "assumptions": [],
+          "alternatives": [],
+          "falsifiers": [],
+          "origin": null,
+          "horizon": null,
+          "confirmation_conditions": []
+        },
+        {
+          "claim_id": "bank-unknown",
+          "kind": "unknown",
+          "text": "Среди использованных материалов не подтверждена позиция банка по этому событию.",
+          "evidence_refs": [],
+          "context_refs": [],
+          "assumptions": [],
+          "alternatives": [],
+          "falsifiers": [],
+          "origin": "bank",
+          "horizon": null,
+          "confirmation_conditions": []
+        },
+        {
+          "claim_id": "company-applicability",
+          "kind": "unknown",
+          "text": "Применимость требует проверки по зависимости профиля: поставок через Северный порт",
+          "evidence_refs": [],
+          "context_refs": [
+            "dependency-de3910f7ee52"
+          ],
+          "assumptions": [],
+          "alternatives": [],
+          "falsifiers": [],
+          "origin": null,
+          "horizon": null,
+          "confirmation_conditions": []
+        }
+      ],
+      "evidence": [
+        {
+          "data_classification": "synthetic",
+          "author": "",
+          "event_time": null,
+          "received_at": "2026-10-25T14:15:12.778364Z",
+          "raw_sha256": "767ef2047a3276878c6789f3ae521816fd5daebdfbf961870a0d4a8bc3b79199",
+          "evidence_id": "ev_bd7f91f37262a521d5602c971ee183adc9b9061c",
+          "document_id": "doc_49ed660df699219d1eb4b4ab0f0391ac",
+          "document_revision_ref": "doc_49ed660df699219d1eb4b4ab0f0391ac:1",
+          "source_id": "news",
+          "source_role": "external",
+          "title": "Остановка поставок через Северный порт",
+          "canonical_uri": "https://news.example/story-1",
+          "published_at": "2026-10-24T09:00:00Z",
+          "fetched_at": "2026-10-25T14:15:12.778364Z",
+          "locator": "chars:0-85",
+          "quote": "Издание сообщает: Северный порт временно закрыт, поставки оборудования задерживаются.",
+          "content_hash": "d4932caca12584f977763bf33464358fdb524ab2befc77489050a64712253b0a",
+          "synthetic": true,
+          "score": 0.23222222222222222
+        }
+      ],
+      "influence_chain": [],
+      "clarifications": [
+        "Поиск ограничен разрешённым корпусом. Ненайденная связь не означает отсутствия риска; для новых источников нужен снимок политики Core.",
+        "Какие заказы, договорные сроки и резервы могут изменить значимость этой зависимости: поставок через Северный порт?",
+        "Действует ли направление деятельности «Компания производит промышленное оборудование»?",
+        "Подтверждена ли сейчас зависимость «поставок через Северный порт»?"
+      ],
+      "coverage": {
+        "external": 1,
+        "bank": 0,
+        "confirmed_dependencies": 1,
+        "company_facts": 0,
+        "limitations": [
+          "freshness_unknown:activities:activity-11771e77c212",
+          "freshness_unknown:dependencies:dependency-de3910f7ee52",
+          "external_web_search_unavailable",
+          "independent_origin_count_unavailable",
+          "semantic_critic_not_run"
+        ],
+        "checked_at": "2026-10-25T14:15:31.552458Z",
+        "independent_origins": 1,
+        "origin_groups": 1,
+        "independence_status": "unknown"
+      },
+      "versions": {
+        "prompt": "analysis-v2",
+        "analyst_config": "company-2b9d9df83952bf4e9ed66bc2@1",
+        "pipeline": "bounded-pipeline-v2",
+        "model": null,
+        "context": 1,
+        "source_policy": 7,
+        "as_of": "2026-10-25T14:15:12.778364Z",
+        "event_id": "evt_f587c6a0197646dba660b6b0907bd027",
+        "event_revision": 1,
+        "event_document_revision_ref": "doc_49ed660df699219d1eb4b4ab0f0391ac:1",
+        "synthetic": true
+      },
+      "usage": {
+        "model_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "accounting_basis": "reserved_estimate",
+        "attempts": [],
+        "errors": [],
+        "shared_package_ref": "pkg_ff73a6281b6f0f486be3fe60ff9b3198",
+        "workflow": "research-analysis-critic-v1",
+        "reserved_tokens": 0,
+        "budget_overrun": false,
+        "research_missing_context": [],
+        "critic_review": {
+          "mode": "structural_only",
+          "decision": "not_evaluated",
+          "issues": [],
+          "clarifications": []
+        },
+        "search_coverage": {
+          "mode": "authorized_corpus_only",
+          "network_search_available": false,
+          "allowed_source_ids": [
+            "news"
+          ],
+          "snapshot_document_count": 1,
+          "selected_evidence_count": 1,
+          "unconfirmed_lead_ids": [],
+          "unconfirmed_leads_are_evidence": false,
+          "additional_search": "critic_queries_in_same_corpus_and_budget",
+          "source_expansion": "requires_new_Core_source_policy",
+          "empty_search_roles": [
+            "bank"
+          ]
+        }
+      },
+      "trace": [
+        {
+          "stage": "workflow_started",
+          "workflow": "research-analysis-critic-v1"
+        },
+        {
+          "stage": "shared_package_loaded",
+          "package_id": "pkg_ff73a6281b6f0f486be3fe60ff9b3198",
+          "revision": 1
+        },
+        {
+          "stage": "research_plan",
+          "planner": "deterministic",
+          "search_roles": [
+            "bank",
+            "external"
+          ],
+          "query_lengths": {
+            "external": 114,
+            "bank": 124
+          }
+        },
+        {
+          "stage": "plan",
+          "step": 1
+        },
+        {
+          "stage": "event_ingested",
+          "revision": "doc_49ed660df699219d1eb4b4ab0f0391ac:1"
+        },
+        {
+          "stage": "plan_created",
+          "tools": [
+            "search_external",
+            "search_bank"
+          ],
+          "max_steps": 12,
+          "shared_package_ref": "pkg_ff73a6281b6f0f486be3fe60ff9b3198"
+        },
+        {
+          "stage": "tool_search_external",
+          "step": 2
+        },
+        {
+          "stage": "tool_result",
+          "tool": "search",
+          "role": "external",
+          "result_count": 2,
+          "evidence_ids": [
+            "ev_bd7f91f37262a521d5602c971ee183adc9b9061c",
+            "ev_bd7f91f37262a521d5602c971ee183adc9b9061c"
+          ]
+        },
+        {
+          "stage": "tool_search_bank",
+          "step": 3
+        },
+        {
+          "stage": "tool_result",
+          "tool": "search",
+          "role": "bank",
+          "result_count": 0,
+          "evidence_ids": []
+        },
+        {
+          "stage": "check",
+          "step": 4
+        },
+        {
+          "stage": "check_result",
+          "external_evidence": true,
+          "bank_evidence": false,
+          "confirmed_company_context": true
+        },
+        {
+          "stage": "adapt",
+          "step": 5
+        },
+        {
+          "stage": "adapt_plan",
+          "reason": "missing_bank_material",
+          "strategy": "broaden_bank_context_query"
+        },
+        {
+          "stage": "tool_search_external",
+          "step": 6
+        },
+        {
+          "stage": "tool_result",
+          "tool": "search",
+          "role": "external",
+          "result_count": 1,
+          "evidence_ids": [
+            "ev_bd7f91f37262a521d5602c971ee183adc9b9061c"
+          ]
+        },
+        {
+          "stage": "tool_search_bank",
+          "step": 7
+        },
+        {
+          "stage": "tool_result",
+          "tool": "search",
+          "role": "bank",
+          "result_count": 0,
+          "evidence_ids": []
+        },
+        {
+          "stage": "adapt_result",
+          "primary_count": 1,
+          "additional_count": 1,
+          "evidence_count": 1,
+          "external_evidence": 1,
+          "bank_evidence": 0
+        },
+        {
+          "stage": "baseline"
+        },
+        {
+          "stage": "baseline_personalization",
+          "priority": 0.8,
+          "priority_type": "heuristic_signal",
+          "context_refs": [
+            "dependency-de3910f7ee52"
+          ],
+          "matched_terms": [
+            "Северный",
+            "Северный порт"
+          ],
+          "reasons": [
+            "company_dependency_text_matches_event_term"
+          ]
+        },
+        {
+          "stage": "analyst_handoff",
+          "status": "partial",
+          "evidence_count": 1,
+          "candidate_claim_count": 3
+        },
+        {
+          "stage": "critic_unavailable",
+          "reason": "role_or_budget_unavailable",
+          "structural_checks_completed": true
+        },
+        {
+          "stage": "research_coverage",
+          "mode": "authorized_corpus_only",
+          "network_search_available": false,
+          "allowed_source_ids": [
+            "news"
+          ],
+          "snapshot_document_count": 1,
+          "selected_evidence_count": 1,
+          "unconfirmed_lead_ids": [],
+          "unconfirmed_leads_are_evidence": false,
+          "additional_search": "critic_queries_in_same_corpus_and_budget",
+          "source_expansion": "requires_new_Core_source_policy",
+          "empty_search_roles": [
+            "bank"
+          ]
+        },
+        {
+          "stage": "dependency_paths",
+          "paths": []
+        }
+      ],
+      "created_at": "2026-10-25T14:15:31.552348Z",
+      "watch_conditions": [],
+      "changes": {
+        "status": "changed",
+        "publication_revision_required": true,
+        "reason": "first_assessment",
+        "changed_inputs": [
+          "event_id",
+          "event_semantics",
+          "context_projection",
+          "context_version",
+          "company_snapshot",
+          "analysis_context",
+          "dependency_graph",
+          "active_context_ids",
+          "active_fact_ids",
+          "policy",
+          "relevant_bank_refs",
+          "config_ref",
+          "config",
+          "execution_budget",
+          "model_selected",
+          "model",
+          "runtime",
+          "data_classification",
+          "knowledge_mode",
+          "workflow"
+        ],
+        "input_signature": "1b5e02820b5d4ded6ff3c196e9fe791b213a3fcb09c06f0b26c7a400c53099b8"
+      },
+      "shared_package_ref": "pkg_ff73a6281b6f0f486be3fe60ff9b3198"
+    }
+  ],
+  "revisions": [
+    {
+      "company_id": "транссевер",
+      "event_id": "evt_f587c6a0197646dba660b6b0907bd027",
+      "status": "changed",
+      "publication_revision_required": true,
+      "reason": "first_assessment",
+      "changed_inputs": [
+        "event_id",
+        "event_semantics",
+        "context_projection",
+        "context_version",
+        "company_snapshot",
+        "analysis_context",
+        "dependency_graph",
+        "active_context_ids",
+        "active_fact_ids",
+        "policy",
+        "relevant_bank_refs",
+        "config_ref",
+        "config",
+        "execution_budget",
+        "model_selected",
+        "model",
+        "runtime",
+        "data_classification",
+        "knowledge_mode",
+        "workflow"
+      ],
+      "input_signature": "1b5e02820b5d4ded6ff3c196e9fe791b213a3fcb09c06f0b26c7a400c53099b8"
+    }
+  ],
+  "configurations": [
+    {
+      "tenant_id": "tenant-a",
+      "company_id": "транссевер",
+      "revision": 1,
+      "context_version": 1,
+      "context_hash": "fd8f106faec5cf2b1b4380670c934950a14df2872c63211f24f4bf22cb3deeab",
+      "config_ref": "company-2b9d9df83952bf4e9ed66bc2@1",
+      "config": {
+        "config_id": "company-2b9d9df83952bf4e9ed66bc2",
+        "revision": 1,
+        "template_version": "analysis-v2",
+        "focus": [],
+        "retrieval_strategy": "balanced",
+        "answer_style": "balanced",
+        "horizon": "quarter",
+        "role_scope": "any",
+        "industry_scope": [],
+        "evidence_limit": 16,
+        "max_depth": 2,
+        "retrieval_expansions": [],
+        "examples": []
+      },
+      "generation_status": "registry_fallback",
+      "history": [
+        {
+          "config_ref": "company-2b9d9df83952bf4e9ed66bc2@1",
+          "context_version": 1,
+          "stable": true,
+          "source_config_ref": "baseline@1",
+          "created_at": "2026-10-25T14:15:31.542534+00:00"
+        }
+      ],
+      "runtime_override_ref": null,
+      "source_config_ref": "baseline@1"
+    }
+  ],
+  "context_proposals": [],
+  "follow_up_intents": [],
+  "period_report": null,
+  "watch_results": [],
+  "coverage": {
+    "events_available": 1,
+    "events_selected": 1,
+    "event_selection": "lexical_priority_with_bounded_exploration",
+    "selection_recall_not_established": true,
+    "runtime_fingerprint": "b0340e1a6a58e72b670d426cebe2243097797b2e41f85554009144bd44561b9b",
+    "source_ids": [
+      "news"
+    ],
+    "documents": 1,
+    "external_search": "configured_sources_and_corpus_only",
+    "knowledge_mode": "as_of",
+    "requested_as_of": "2026-10-25T14:15:12.778364+00:00",
+    "analysis_as_of": "2026-10-25T14:15:12.778364+00:00",
+    "model_calls": 0,
+    "reserved_tokens": 0,
+    "model_attempts": []
+  },
+  "trace": [
+    {
+      "stage": "before_collection",
+      "source_count": 1
+    },
+    {
+      "stage": "collection_complete",
+      "report_saved": true
+    },
+    {
+      "stage": "permitted_snapshot",
+      "documents": 1,
+      "policy_version": 7,
+      "knowledge_mode": "as_of",
+      "analysis_as_of": "2026-10-25T14:15:12.778364+00:00"
+    },
+    {
+      "stage": "personal_complete",
+      "company_id": "транссевер",
+      "event_id": "evt_f587c6a0197646dba660b6b0907bd027",
+      "status": "partial"
+    }
+  ],
+  "created_at": "2026-10-25T14:15:12.778364Z"
+}

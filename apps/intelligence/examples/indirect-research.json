@@ -1,0 +1,173 @@
+{
+  "schema_version": "indirect-research-input-v1",
+  "classification": "synthetic",
+  "as_of": "2026-10-25T12:00:00Z",
+  "cases": [
+    {
+      "case_id": "glass-route",
+      "company_id": "briar-packaging",
+      "company": {
+        "name": "Бриар — упаковка",
+        "industry": "",
+        "role": "директор закупок",
+        "dependencies": [
+          {
+            "dependency_id": "declared-supplier",
+            "label": "СтеклоЛайн поставляет флаконы G-12",
+            "kind": "supplier",
+            "status": "confirmed",
+            "provenance": "synthetic Core-confirmed questionnaire",
+            "observed_at": "2026-10-25T12:00:00Z"
+          }
+        ],
+        "facts": [
+          {
+            "fact_id": "declared-condition",
+            "text": "Используются флаконы G-12; резерв поставщика не подтверждён.",
+            "status": "confirmed",
+            "provenance": "synthetic Core-confirmed questionnaire",
+            "observed_at": "2026-10-25T12:00:00Z"
+          }
+        ]
+      },
+      "trigger_document_key": "lock-closure",
+      "documents": [
+        {
+          "key": "lock-closure",
+          "title": "Шлюз Тальва закрыт для навигации",
+          "text": "Управление водного узла сообщило: шлюз Тальва закрыт из-за повреждения затвора. Возобновление навигации ожидается не ранее чем через пять суток."
+        },
+        {
+          "key": "supplier-bulletin",
+          "title": "СтеклоЛайн: сырьё для серии G-12",
+          "text": "Учебный бюллетень СтеклоЛайн: кварцевый песок для выпуска флаконов серии G-12 доставляется баржами через шлюз Тальва. Запас песка на площадке рассчитан на двое суток. При более длительной остановке рейсов возможен перенос отгрузок G-12; размер задержки не установлен.",
+          "published_at": "2026-09-25T10:00:00Z"
+        }
+      ]
+    },
+    {
+      "case_id": "payment-certificate",
+      "company_id": "garden-retail",
+      "company": {
+        "name": "Садовый прилавок",
+        "industry": "",
+        "role": "директор закупок",
+        "dependencies": [
+          {
+            "dependency_id": "declared-supplier",
+            "label": "Платёжный модуль PayGarden принимает оплату заказов",
+            "kind": "supplier",
+            "status": "confirmed",
+            "provenance": "synthetic Core-confirmed questionnaire",
+            "observed_at": "2026-10-25T12:00:00Z"
+          }
+        ],
+        "facts": [
+          {
+            "fact_id": "declared-condition",
+            "text": "На кассах установлена версия PayGarden 2.8.",
+            "status": "confirmed",
+            "provenance": "synthetic Core-confirmed questionnaire",
+            "observed_at": "2026-10-25T12:00:00Z"
+          }
+        ]
+      },
+      "trigger_document_key": "certificate-revocation",
+      "documents": [
+        {
+          "key": "certificate-revocation",
+          "title": "ElmRoot отзывает промежуточный сертификат",
+          "text": "Сертификационный центр ElmRoot сообщил об отзыве промежуточного сертификата с 27 октября. Сервисы со старой цепочкой доверия могут получать ошибки TLS до обновления."
+        },
+        {
+          "key": "payment-advisory",
+          "title": "Техническое уведомление PayGarden 2.8",
+          "text": "Учебное уведомление PayGarden: версия 2.8 использует промежуточный сертификат ElmRoot при соединении с процессингом. До 27 октября требуется обновление цепочки доверия. Применимость зависит от установленной версии и фактического обновления; простой касс не установлен."
+        }
+      ]
+    },
+    {
+      "case_id": "route-refuted",
+      "company_id": "briar-current",
+      "company": {
+        "name": "Бриар — новая партия",
+        "industry": "",
+        "role": "директор закупок",
+        "dependencies": [
+          {
+            "dependency_id": "declared-supplier",
+            "label": "СтеклоЛайн поставляет флаконы G-12",
+            "kind": "supplier",
+            "status": "confirmed",
+            "provenance": "synthetic Core-confirmed questionnaire",
+            "observed_at": "2026-10-25T12:00:00Z"
+          }
+        ],
+        "facts": [
+          {
+            "fact_id": "declared-condition",
+            "text": "Нужна партия G-12, отгружаемая после 20 октября.",
+            "status": "confirmed",
+            "provenance": "synthetic Core-confirmed questionnaire",
+            "observed_at": "2026-10-25T12:00:00Z"
+          }
+        ]
+      },
+      "trigger_document_key": "lock-closure",
+      "documents": [
+        {
+          "key": "lock-closure",
+          "title": "Шлюз Тальва закрыт для навигации",
+          "text": "Управление водного узла сообщило: шлюз Тальва закрыт из-за повреждения затвора. Возобновление навигации ожидается не ранее чем через пять суток."
+        },
+        {
+          "key": "supplier-bulletin",
+          "title": "СтеклоЛайн: сырьё для серии G-12",
+          "text": "Учебный бюллетень СтеклоЛайн: кварцевый песок для выпуска флаконов серии G-12 доставляется баржами через шлюз Тальва. Запас песка на площадке рассчитан на двое суток. При более длительной остановке рейсов возможен перенос отгрузок G-12; размер задержки не установлен.",
+          "published_at": "2026-09-25T10:00:00Z"
+        },
+        {
+          "key": "current-route-correction",
+          "title": "СтеклоЛайн: уточнение действующего маршрута G-12",
+          "text": "Актуальное учебное уточнение СтеклоЛайн: с 1 октября весь кварцевый песок для G-12 доставляется по железной дороге. Старый бюллетень о баржах через шлюз Тальва к текущим партиям G-12 не применяется. СтеклоЛайн подтверждает отсутствие влияния закрытия шлюза Тальва на эти отгрузки. Другие возможные причины задержек не оценивались.",
+          "published_at": "2026-10-24T10:00:00Z"
+        }
+      ]
+    },
+    {
+      "case_id": "assumed-service",
+      "company_id": "unknown-logistics",
+      "company": {
+        "name": "Перевозки без уточнённой платформы",
+        "industry": "",
+        "activities": [
+          {
+            "activity_id": "transport",
+            "label": "Перевозит грузы",
+            "status": "confirmed",
+            "provenance": "synthetic questionnaire",
+            "observed_at": "2026-10-25T12:00:00Z"
+          }
+        ],
+        "assertions": [
+          {
+            "assertion_id": "maybe-platform",
+            "kind": "dependency",
+            "label": "Возможное использование TransitLeaf для планирования маршрутов",
+            "status": "assumption",
+            "provenance": "synthetic unconfirmed user hint",
+            "observed_at": "2026-10-25T12:00:00Z"
+          }
+        ]
+      },
+      "trigger_document_key": "transit-change",
+      "documents": [
+        {
+          "key": "transit-change",
+          "title": "TransitLeaf меняет формат обмена маршрутами",
+          "text": "Учебное сообщение TransitLeaf: с 28 октября старый формат обмена маршрутами отключается. Пользователям прежней версии нужно обновление; перечень компаний-пользователей не опубликован."
+        }
+      ]
+    }
+  ]
+}

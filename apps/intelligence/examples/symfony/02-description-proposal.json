@@ -1,0 +1,92 @@
+{
+  "schema_version": "company-description-proposal-v1",
+  "tenant_id": "tenant-a",
+  "company_id": "транссевер",
+  "context": {
+    "schema_version": "company-context-v2",
+    "name": "ТрансСевер",
+    "industry": "",
+    "description": "Компания производит промышленное оборудование. Зависит от: поставок через Северный порт.",
+    "role": "",
+    "dependencies": [
+      {
+        "dependency_id": "dependency-de3910f7ee52",
+        "label": "поставок через Северный порт",
+        "kind": "dependency",
+        "status": "confirmed",
+        "provenance": "Core-confirmed user statement, not independent verification",
+        "source_node": "company",
+        "target_node": null,
+        "evidence_refs": [
+          "description:59:87",
+          "description:47:88"
+        ],
+        "observed_at": "2026-10-25T14:15:12.778364Z",
+        "valid_from": null,
+        "valid_until": null
+      }
+    ],
+    "facts": [],
+    "activities": [
+      {
+        "activity_id": "activity-11771e77c212",
+        "label": "Компания производит промышленное оборудование",
+        "normalized_class": "manufacturing",
+        "status": "confirmed",
+        "provenance": "Core-confirmed user statement, not independent verification",
+        "evidence_refs": [
+          "description:0:45"
+        ],
+        "observed_at": "2026-10-25T14:15:12.778364Z",
+        "valid_from": null,
+        "valid_until": null
+      }
+    ],
+    "assertions": []
+  },
+  "hypotheses": [],
+  "questions": [],
+  "significance": [
+    {
+      "item_id": "dependency-de3910f7ee52",
+      "rule": "confirmed_dependency_match",
+      "priority": "high",
+      "reason": "select_affected_businesses: если _matching_terms находит совпадение слов этой подтверждённой зависимости с явным термином события, добавляет текстовый путь с сигналом 0.80; применимость требует проверки.",
+      "confidence": 0.8
+    },
+    {
+      "item_id": "activity-11771e77c212",
+      "rule": "activity_lead",
+      "priority": "normal",
+      "reason": "select_affected_businesses сопоставляет слова направления с явными терминами события и даёт сигнал 0.55; направление должно быть подтверждено, чтобы попасть в активную проекцию.",
+      "confidence": 0.55
+    }
+  ],
+  "search_directions": [
+    {
+      "direction": "Сопоставить сообщения о зависимостях с явными терминами событий: «поставок через Северный порт».",
+      "rule": "confirmed_dependency_match",
+      "priority": "high",
+      "basis_item_ids": [
+        "dependency-de3910f7ee52"
+      ],
+      "confidence": 0.8
+    },
+    {
+      "direction": "Проверить сообщения по направлению «Компания производит промышленное оборудование»; сигнал появляется при совпадении слов.",
+      "rule": "activity_lead",
+      "priority": "normal",
+      "basis_item_ids": [
+        "activity-11771e77c212"
+      ],
+      "confidence": 0.55
+    }
+  ],
+  "extraction_mode": "deterministic",
+  "limitations": [
+    "proposal_only_core_owns_profile",
+    "confidence_is_not_truth",
+    "no_external_search_performed",
+    "unparsed_free_prose_is_preserved_without_claims"
+  ]
+}
