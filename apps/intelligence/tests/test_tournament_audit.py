@@ -30,7 +30,7 @@ def runner(tmp_path,registry):
 def approve(arena,run_id):
     report=arena.store.get(run_id)
     with arena.store._db() as db:
-        labels=json.loads(db.execute('SELECT manifest FROM runs WHERE run_id=?',(run_id,)).fetchone()[0])['review_label_map']
+        labels=json.loads(db.execute('SELECT manifest FROM runs WHERE run_id=%s',(run_id,)).fetchone()[0])['review_label_map']
     ratings={item['blind_id']:next(letter for letter,ref in labels[item['blind_id']].items() if ref==report['winner_ref']) for item in arena.store.review_pack(run_id)}
     return arena.store.review(run_id,reviewer='alice',ratings=ratings)
 

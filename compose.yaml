@@ -1,6 +1,26 @@
 name: alfa-business-context
 
 services:
+  postgres:
+    image: postgres:17.11-bookworm
+    profiles: [tools, analysis, worker, test, database]
+    environment:
+      POSTGRES_DB: business_context_ai
+      POSTGRES_USER: bootstrap_admin
+      POSTGRES_PASSWORD: ${INTELLIGENCE_DB_BOOTSTRAP_PASSWORD:-local-bootstrap-only}
+      INTELLIGENCE_DB_PASSWORD: ${INTELLIGENCE_DB_PASSWORD:-local-ai-only}
+      INTELLIGENCE_MIGRATION_DB_PASSWORD: ${INTELLIGENCE_MIGRATION_DB_PASSWORD:-local-migration-only}
+    ports:
+      - "127.0.0.1:${INTELLIGENCE_DB_PORT:-55483}:5432"
+    volumes:
+      - intelligence-postgres:/var/lib/postgresql/data
+      - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/10-intelligence.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bootstrap_admin -d business_context_ai"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   web:
     build:
       context: .
@@ -49,6 +69,13 @@ services:
     environment: &intelligence-environment
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       HACKATHON_API_KEY: ${HACKATHON_API_KEY:-}
+      INTELLIGENCE_DATABASE_URL: ${INTELLIGENCE_DATABASE_URL:-postgresql://intelligence_app:${INTELLIGENCE_DB_PASSWORD:-local-ai-only}@postgres:5432/business_context_ai}
+      INTELLIGENCE_STATE_DIR: /app/.state
+      INTELLIGENCE_STORAGE_NAMESPACE: ${INTELLIGENCE_STORAGE_NAMESPACE:-main}
+      INTELLIGENCE_DB_POOL_MAX: ${INTELLIGENCE_DB_POOL_MAX:-4}
+    depends_on:
+      intelligence-migrate:
+        condition: service_completed_successfully
     volumes:
       - intelligence-state:/app/.state
       - type: bind
@@ -92,6 +119,41 @@ services:
       INTELLIGENCE_TENANTS: ${INTELLIGENCE_TENANTS:-}
     command: ["worker", "--mode", "${INTELLIGENCE_MODE:-baseline}", "--config", "/config/providers.json", "--profile", "${INTELLIGENCE_PROFILE:-openrouter}"]
 
+  intelligence-migrate:
+    profiles: [tools, analysis, worker, test, database]
+    build:
+      context: .
+      dockerfile: apps/intelligence/Dockerfile
+      target: runtime
+    environment:
+      INTELLIGENCE_MIGRATION_DATABASE_URL: ${INTELLIGENCE_MIGRATION_DATABASE_URL:-postgresql://intelligence_migrator:${INTELLIGENCE_MIGRATION_DB_PASSWORD:-local-migration-only}@postgres:5432/business_context_ai}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["python", "-m", "intelligence.database_cli"]
+    command: ["migrate"]
+    read_only: true
+    tmpfs: [/tmp]
+
+  intelligence-import:
+    extends: intelligence-migrate
+    profiles: [tools]
+    environment:
+      INTELLIGENCE_STATE_DIR: /app/.state
+      INTELLIGENCE_STORAGE_NAMESPACE: ${INTELLIGENCE_STORAGE_NAMESPACE:-main}
+    volumes:
+      - intelligence-state:/legacy:ro
+    depends_on:
+      intelligence-migrate:
+        condition: service_completed_successfully
+    command: ["--help"]
+
+  intelligence-test-migrate:
+    extends: intelligence-migrate
+    profiles: [test]
+    environment:
+      INTELLIGENCE_MIGRATION_DATABASE_URL: postgresql://intelligence_migrator:${INTELLIGENCE_MIGRATION_DB_PASSWORD:-local-migration-only}@postgres:5432/business_context_ai_test
+
   intelligence-test:
     profiles: [test]
     build:
@@ -106,8 +168,17 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-    network_mode: none
+    environment:
+      INTELLIGENCE_DATABASE_URL: postgresql://intelligence_app:${INTELLIGENCE_DB_PASSWORD:-local-ai-only}@postgres:5432/business_context_ai_test
+      INTELLIGENCE_MIGRATION_DATABASE_URL: postgresql://intelligence_migrator:${INTELLIGENCE_MIGRATION_DB_PASSWORD:-local-migration-only}@postgres:5432/business_context_ai_test
+      INTELLIGENCE_STORAGE_NAMESPACE: tests
+      INTELLIGENCE_DB_POOL_MAX: "4"
+    depends_on:
+      intelligence-test-migrate:
+        condition: service_completed_successfully
 
 volumes:
   intelligence-state:
     name: alfa-business-context-intelligence-state
+  intelligence-postgres:
+    name: alfa-business-context-postgres

@@ -14,7 +14,7 @@ from pathlib import Path
 from intelligence.llm.routing import ModelRouter
 
 routes = json.loads(Path("examples/model-routing.template.json").read_text())["routes"]
-router = ModelRouter(base_config, ledger_path=".state/llm-budget.sqlite3", routes=routes)
+router = ModelRouter(base_config, ledger_path=".state/llm-budget.sqlite3", routes=routes)  # логический ID; журнал хранится в PostgreSQL
 role_services = router.services()
 complex_analyst = router.route_for("analyst", complexity="complex")
 ```

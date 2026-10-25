@@ -77,7 +77,7 @@ def make_pipeline(state_dir: str | Path, *, mode='baseline', config=None, profil
 
 
 def _options(parser):
-    parser.add_argument('--state-dir', default=str(DEFAULT_STATE), help='Private SQLite storage directory')
+    parser.add_argument('--state-dir', default=str(DEFAULT_STATE), help='Raw-file directory and stable PostgreSQL logical store root')
     parser.add_argument('--mode', choices=['baseline', 'model'], default='baseline')
     parser.add_argument('--config', help='Provider configuration, without credentials')
     parser.add_argument('--profile', choices=['openrouter', 'hackathon'])
@@ -94,6 +94,9 @@ def main(argv=None):
     if arguments and arguments[0] == 'llm':
         from .llm.cli import main as llm_main
         return llm_main(arguments[1:])
+    if arguments and arguments[0] == 'db':
+        from .database_cli import main as database_main
+        return database_main(arguments[1:])
     if arguments and arguments[0] == 'core-stand':
         from .core_stand import main as stand_main
         return stand_main(arguments[1:])

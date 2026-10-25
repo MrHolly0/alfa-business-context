@@ -259,7 +259,7 @@ def create_app(*, store, pipeline, artifact_store: ArtifactStore | None = None,
         tenant({"tenant_id":tenant_id})
         workflow=get_workflow()
         with workflow.state.db() as db:
-            rows=db.execute("SELECT stage,payload FROM workflow_stages WHERE tenant=? AND request=? ORDER BY rowid",(tenant_id,request_id)).fetchall()
+            rows=db.execute("SELECT stage,payload FROM workflow_stages WHERE tenant=%s AND request=%s ORDER BY stage_order",(tenant_id,request_id)).fetchall()
         import json
         return {"request_id":request_id,"stages":[{"stage":row[0],"details":json.loads(row[1])} for row in rows]}
 

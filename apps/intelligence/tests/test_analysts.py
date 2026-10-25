@@ -154,10 +154,10 @@ def test_register_legacy_default_fields_preserves_original_revision_bytes(tmp_pa
     raw=json.dumps(legacy,sort_keys=True,separators=(',',':'),ensure_ascii=False)
     digest=hashlib.sha256(raw.encode()).hexdigest()
     with registry._db() as db:
-        db.execute('UPDATE configs SET config_json=?,content_hash=? WHERE ref=?',(raw,digest,config.ref))
+        db.execute('UPDATE configs SET config_json=%s,content_hash=%s WHERE ref=%s',(raw,digest,config.ref))
     registered=registry.register(config)
     assert registered['content_hash']==digest
     with registry._db() as db:
-        assert db.execute('SELECT config_json FROM configs WHERE ref=?',(config.ref,)).fetchone()[0]==raw
+        assert db.execute('SELECT config_json FROM configs WHERE ref=%s',(config.ref,)).fetchone()[0]==raw
     with pytest.raises(ValueError,match='immutable'):
         registry.register(AnalystConfig(config_id='baseline',focus=['costs']))

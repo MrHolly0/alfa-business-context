@@ -11,8 +11,10 @@
 | `apps/intelligence/intelligence/multi_agent.py` | Исследователь, аналитик, критик | Общий бюджет, ограниченный repair и поиск после критики |
 | `apps/intelligence/intelligence/research.py` | Отбор компаний и зависимости | Подтверждённые/предполагаемые пути до трёх переходов |
 | `apps/intelligence/intelligence/client_data.py` | Подготовка CSV контекста | Предложения Core, без LLM и записи бизнес-профиля |
-| `apps/intelligence/intelligence/core_stand.py` | Контрактный стенд Core | Только fixture mode; не промышленный Backend |
-| `apps/intelligence/intelligence/corpus.py` | Документы, версии, фрагменты и поиск | SQLite, фильтры по источникам/дате/tenant |
+| `apps/intelligence/intelligence/core_stand.py` | Контрактный стенд Core | Только fixture mode; локальный SQLite, не промышленный Backend |
+| `apps/intelligence/intelligence/corpus.py` | Документы, версии, фрагменты и поиск | PostgreSQL, фильтры по источникам/дате/tenant |
+| `apps/intelligence/intelligence/storage.py` | PostgreSQL roles, namespaces, pool и транзакции | Рабочая persistence boundary Python; RLS через `store_key` |
+| `apps/intelligence/intelligence/database_cli.py`, `sqlite_import.py` | Миграции и разовый импорт legacy SQLite | Только migrator role; источник импортёра открыт read-only |
 | `apps/intelligence/intelligence/pipeline.py` | План, поиск, анализ, проверка результата | Baseline и явный вызов модели |
 | `apps/intelligence/intelligence/llm` | Адаптеры и учёт расходов | Хакатонный шлюз, бесплатный и отдельный платный профиль OpenRouter |
 | `apps/intelligence/intelligence/analysts.py` | Версии настроек и выбор по роли/отрасли | Публикация после ручной проверки, история и откат |

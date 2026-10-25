@@ -100,7 +100,7 @@ def _run(state_dir: Path) -> DataResult:
 def run_demo(state_dir: str | Path | None = None) -> DataResult:
     """Run the documented local-feed → corpus → event → multi-company flow.
 
-    If `state_dir` is omitted, temporary SQLite/raw storage is removed before
+    If `state_dir` is omitted, temporary raw storage is removed before
     returning. For durable original bytes, pass an explicit private state path.
     """
     if state_dir is not None:

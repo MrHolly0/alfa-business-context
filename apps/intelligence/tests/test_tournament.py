@@ -62,7 +62,7 @@ def test_review_requires_exact_blind_ids_and_frozen_report(tmp_path):
             "promotion_eligible":False}
         from intelligence.tournament import _digest, _json
         frozen = {k:v for k,v in report.items() if k not in {"human_review","report_hash","promotion_eligible"}}
-        db.execute("INSERT INTO runs VALUES(?,?,?)", ("run", _json({"frozen_report_hash":_digest(frozen),"review_label_map":{"blind-1":{"A":"baseline@1","B":"other@1"}}}), _json(report)))
+        db.execute("INSERT INTO runs(run_id,manifest,report) VALUES(%s,%s,%s)", ("run", _json({"frozen_report_hash":_digest(frozen),"review_label_map":{"blind-1":{"A":"baseline@1","B":"other@1"}}}), _json(report)))
     with pytest.raises(ValueError, match="invalid_blind_review_ratings"):
         store.review("run", reviewer="reviewer", ratings={"wrong-id":"A"})
 

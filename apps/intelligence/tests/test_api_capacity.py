@@ -30,7 +30,11 @@ def test_busy_capacity_can_be_retried_and_executes_once(tmp_path):
     artifacts = ArtifactStore(tmp_path / "artifacts.sqlite3")
     client = TestClient(create_app(store=data.store, pipeline=AnalysisPipeline(data.store),
         data_workflow=data, artifact_store=artifacts, service_token="capacity-test", tenant_ids={"tenant-a"}))
-    locks = [data._acquire_slot_lock() for _ in range(data.max_concurrency)]
+    locks=['capacity-check-'+str(i) for i in range(data.max_concurrency)]
+    with data.state.db() as db:
+        db.lock()
+        for i,owner in enumerate(locks):
+            db.execute("INSERT INTO workflow_slots VALUES(%s,%s,clock_timestamp()+INTERVAL '60 seconds')",(i,owner))
     assert all(locks)
     body = task(tmp_path, request_id="same-request").model_dump(mode="json")
     try:
@@ -38,8 +42,8 @@ def test_busy_capacity_can_be_retried_and_executes_once(tmp_path):
         assert busy.status_code == 409 and busy.json()["detail"] == "capacity_exhausted"
         assert artifacts.list_reservations() == []
     finally:
-        for lock in locks:
-            data._release_file_lock(lock)
+        with data.state.db() as db:
+            for lock in locks:db.execute('DELETE FROM workflow_slots WHERE owner=%s',(lock,))
 
     result = client.post("/internal/v1/analyze", headers=AUTH, json=body)
     assert result.status_code == 200, result.text

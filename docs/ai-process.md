@@ -40,11 +40,11 @@ Core также может приложить список `published_assessment
 ## Где хранятся данные
 
 - PHP Core остаётся источником истины для пользователей, прав, профиля компании, расписания и опубликованных ситуаций.
-- Python хранит локальную SQLite-копию корпуса, события, конфигурации, этапы workflow, бюджет и outbox в `--state-dir` (по умолчанию `apps/intelligence/.state`).
+- Python Intelligence хранит корпус, события, конфигурации, этапы workflow, бюджет и outbox в отдельной PostgreSQL-базе `business_context_ai`; для таблиц применяются component schemas и `store_key`/RLS. `--state-dir` задаёт логические пути/namespaces и private filesystem, а не SQLite базу рабочего сервиса.
 - Сырые полученные ответы коллектора лежат отдельно в private `raw/tenants/<tenant-hash>/...`; в report/receipt остаются их SHA256 и ссылка.
-- Docker Compose использует named volume `alfa-business-context-intelligence-state`; данные с хоста и контейнера не смешиваются автоматически.
+- Docker Compose хранит сырые оригиналы в volume `alfa-business-context-intelligence-state`, а PostgreSQL — в отдельном `alfa-business-context-postgres`. Хостовый процесс и контейнер используют одну БД только если им заданы одинаковые DSN и storage namespace.
 
-На текущем срезе это локальное durable-хранилище AI/Data, а не общий банковский PostgreSQL. Реальные банковские PDF/CSV надо предоставить и разрешить отдельно; их ещё не проверяли.
+Это отдельное хранилище AI/Data, а не БД Symfony/Core и не доказательство доступа к банковскому PostgreSQL. Core остаётся владельцем канонического профиля и очереди; PHP интеграция пока не подключена. Реальные банковские PDF/CSV надо предоставить и разрешить отдельно; их ещё не проверяли. Старую SQLite можно импортировать только контролируемой read-only командой, описанной в [руководстве PostgreSQL](postgresql.md).
 
 Обезличенный CSV может быть чисто преобразован через `/internal/v1/company-context/prepare` в `CompanyContextProposal`; Core отдельно проверяет и сохраняет факты. Описание компании обрабатывается `prepare_description`: детерминированно в CLI `prepare-description` или HTTP `POST /internal/v1/company-context/from-description`, а при явно выбранном DataTask `operation=prepare_description` — также разрешённым LLM-маршрутом. Во всех вариантах возвращается предложение, канонический профиль Core не обновляется. Обычный DataTask сохраняет proposal в workflow result cache. Внешний вызов запрещён для `confidential`; Core принимает предложение и сохраняет собственную версию профиля. Величина `REVENUE_COMPANY` не даёт определить единицу автоматически. Если единица не подтверждена, право пройти пороговую маршрутизацию остаётся неизвестным. Поля клиента не передаются внешней модели при преобразовании CSV.
 

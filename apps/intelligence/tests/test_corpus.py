@@ -7,6 +7,32 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from intelligence.corpus import CorpusStore
+from intelligence.sqlite_import import import_database
+
+
+def _legacy_corpus(path: Path) -> None:
+    import sqlite3
+    with sqlite3.connect(path) as db:
+        db.executescript("""
+            CREATE TABLE documents (document_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL,
+                source_id TEXT NOT NULL, source_role TEXT NOT NULL, canonical_uri TEXT NOT NULL,
+                title TEXT NOT NULL, publisher TEXT NOT NULL, language TEXT NOT NULL,
+                synthetic INTEGER NOT NULL, created_at TEXT NOT NULL,
+                UNIQUE(tenant_id,source_id,canonical_uri));
+            CREATE TABLE revisions (document_revision_ref TEXT PRIMARY KEY,
+                document_id TEXT NOT NULL REFERENCES documents(document_id),
+                revision INTEGER NOT NULL, content_hash TEXT NOT NULL, title TEXT NOT NULL,
+                published_at TEXT NOT NULL, fetched_at TEXT NOT NULL, content_type TEXT NOT NULL,
+                extracted_text TEXT NOT NULL, warnings TEXT NOT NULL, UNIQUE(document_id,revision));
+            INSERT INTO documents VALUES ('doc_old','t1','news','external',
+                'https://example.test/old','Old','Old publisher','ru',0,'2026-01-01T00:00:00Z');
+            INSERT INTO revisions VALUES ('doc_old:1','doc_old',1,'hash','Old',
+                '2026-01-01T00:00:00Z','2026-01-02T00:00:00Z','text/plain','Old body','[]');
+        """)
+
+
+def _import_legacy_corpus(source: Path, logical_path: Path) -> None:
+    import_database(source, "corpus", logical_path, confirm_quiesced=True)
 
 
 class CorpusStoreTests(unittest.TestCase):
@@ -100,7 +126,7 @@ class CorpusStoreTests(unittest.TestCase):
         def metadata_as_of(as_of):
             with self.store._connect() as db:
                 return db.execute("""SELECT r.publisher,r.language FROM revisions r
-                    WHERE r.document_id=? AND r.fetched_at<=? AND r.published_at<=?
+                    WHERE r.document_id=%s AND r.fetched_at<=%s AND r.published_at<=%s
                     ORDER BY r.revision DESC LIMIT 1""", (first["document_id"], as_of, as_of)).fetchone()
         old_metadata = metadata_as_of("2026-01-15T00:00:00.000000Z")
         new_metadata = metadata_as_of("2026-03-01T00:00:00.000000Z")
@@ -118,38 +144,29 @@ class CorpusStoreTests(unittest.TestCase):
         self.assertEqual("Исправленный заголовок", at_prior_known_at["title"])
 
     def test_legacy_revision_schema_is_migrated_additively(self):
-        path = Path(self.tmp.name) / "legacy.sqlite"
-        import sqlite3
-        with sqlite3.connect(path) as db:
-            db.executescript("""
-                CREATE TABLE documents (document_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, source_id TEXT NOT NULL, source_role TEXT NOT NULL, canonical_uri TEXT NOT NULL, title TEXT NOT NULL, publisher TEXT NOT NULL, language TEXT NOT NULL, synthetic INTEGER NOT NULL, created_at TEXT NOT NULL, UNIQUE(tenant_id,source_id,canonical_uri));
-                CREATE TABLE revisions (document_revision_ref TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(document_id), revision INTEGER NOT NULL, content_hash TEXT NOT NULL, title TEXT NOT NULL, published_at TEXT NOT NULL, fetched_at TEXT NOT NULL, content_type TEXT NOT NULL, extracted_text TEXT NOT NULL, warnings TEXT NOT NULL, UNIQUE(document_id,revision));
-                INSERT INTO documents VALUES ('doc_old','t1','news','external','https://example.test/old','Old','Old publisher','ru',0,'2026-01-01T00:00:00Z');
-                INSERT INTO revisions VALUES ('doc_old:1','doc_old',1,'hash','Old','2026-01-01T00:00:00Z','2026-01-02T00:00:00Z','text/plain','Old body','[]');
-            """)
-        migrated = CorpusStore(path)
+        source = Path(self.tmp.name) / "legacy.sqlite"
+        logical_path = Path(self.tmp.name) / "legacy-corpus-store"
+        _legacy_corpus(source)
+        _import_legacy_corpus(source, logical_path)
+        migrated = CorpusStore(logical_path)
         with migrated._connect() as db:
             row = db.execute("SELECT publisher,language FROM revisions WHERE document_revision_ref='doc_old:1'").fetchone()
         self.assertEqual(("Old publisher", "ru"), (row["publisher"], row["language"]))
 
-    def test_concurrent_initializers_serialize_legacy_schema_migration(self):
-        path = Path(self.tmp.name) / "concurrent-legacy.sqlite"
-        import sqlite3
-        with sqlite3.connect(path) as db:
-            db.executescript("""
-                CREATE TABLE documents (document_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, source_id TEXT NOT NULL, source_role TEXT NOT NULL, canonical_uri TEXT NOT NULL, title TEXT NOT NULL, publisher TEXT NOT NULL, language TEXT NOT NULL, synthetic INTEGER NOT NULL, created_at TEXT NOT NULL, UNIQUE(tenant_id,source_id,canonical_uri));
-                CREATE TABLE revisions (document_revision_ref TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(document_id), revision INTEGER NOT NULL, content_hash TEXT NOT NULL, title TEXT NOT NULL, published_at TEXT NOT NULL, fetched_at TEXT NOT NULL, content_type TEXT NOT NULL, extracted_text TEXT NOT NULL, warnings TEXT NOT NULL, UNIQUE(document_id,revision));
-                INSERT INTO documents VALUES ('doc_old','t1','news','external','https://example.test/old','Old','Old publisher','ru',0,'2026-01-01T00:00:00Z');
-                INSERT INTO revisions VALUES ('doc_old:1','doc_old',1,'hash','Old','2026-01-01T00:00:00Z','2026-01-02T00:00:00Z','text/plain','Old body','[]');
-            """)
+    def test_concurrent_stores_read_legacy_schema_after_import(self):
+        source = Path(self.tmp.name) / "concurrent-legacy.sqlite"
+        logical_path = Path(self.tmp.name) / "concurrent-corpus-store"
+        _legacy_corpus(source)
+        _import_legacy_corpus(source, logical_path)
         barrier = threading.Barrier(2)
         def initialize(_):
             barrier.wait()
-            return CorpusStore(path)
+            return CorpusStore(logical_path)
         with ThreadPoolExecutor(max_workers=2) as pool:
             stores = list(pool.map(initialize, range(2)))
         with stores[0]._connect() as db:
-            columns = {row[1] for row in db.execute("PRAGMA table_info(revisions)")}
+            columns = {row["column_name"] for row in db.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_schema='ai_corpus' AND table_name='revisions'")}
             row = db.execute("SELECT publisher,language FROM revisions WHERE document_revision_ref='doc_old:1'").fetchone()
         self.assertTrue({"publisher", "language"}.issubset(columns))
         self.assertEqual(("Old publisher", "ru"), (row["publisher"], row["language"]))

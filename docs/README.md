@@ -13,7 +13,7 @@
 
 ## Разработка и интеграция
 
-- [Установка и команды](development.md), [Docker](../infra/README.md).
+- [Установка и команды](development.md), [Docker](../infra/README.md), [PostgreSQL: роли, миграции и импорт](postgresql.md), [проверка перехода](postgresql-checks.md).
 - [Точные подключения Symfony и примеры](symfony-integration.md), [общая интеграция](ai-integration.md), [контракты Python](../contracts/intelligence/README.md).
 - [Python-модуль](../apps/intelligence/README.md), [состояние интерфейса](web-status.md).
 - [Настройки аналитика](../apps/intelligence/docs/analysts.md), [турнир](../apps/intelligence/docs/tournament.md).

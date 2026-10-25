@@ -1,11 +1,8 @@
-"""Process-safe local SQLite budget ledger for model calls.
+"""PostgreSQL-backed exact budget ledger for model calls.
 
 Periods are [03:00, next day 03:00) Europe/Moscow. Settled calls are assigned
- to the period in which they were reserved. Unresolved reservations remain
- charged against the current period after rollover until settled; this prevents
- an in-flight request from becoming invisible at 03:00. The ledger only
- accounts for calls made through this file and database, not external users of
- the same provider key.
+to the period in which they were reserved. Unresolved reservations remain
+charged against the current period after rollover until settled.
 """
 
 from __future__ import annotations
@@ -14,10 +11,11 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 import json
 from pathlib import Path
-import sqlite3
 from typing import Any, Mapping
 from uuid import uuid4
 from zoneinfo import ZoneInfo
+
+from ..storage import Database
 
 MOSCOW = ZoneInfo("Europe/Moscow")
 
@@ -57,61 +55,46 @@ def _aware(now: datetime | None) -> datetime:
     return value.astimezone(MOSCOW)
 
 
-def _period(now: datetime | None) -> tuple[str, str]:
+def _period(now: datetime | None) -> tuple[datetime, datetime]:
     local = _aware(now)
     start = local.replace(hour=3, minute=0, second=0, microsecond=0)
     if local < start:
         start -= timedelta(days=1)
-    end = start + timedelta(days=1)
-    return start.isoformat(), end.isoformat()
+    return start, start + timedelta(days=1)
+
+
+def _call_cap(value: int | None) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("max_calls must be a non-negative integer")
+    return value
 
 
 class BudgetLedger:
-    def __init__(self, path: str | Path):
+    """Exact PostgreSQL budget ledger.
+
+    ``path`` remains a logical identity for callers that used the SQLite API.
+    Budget accounts deliberately share one deployment namespace across state
+    directories so a provider cap cannot be bypassed by changing the path.
+    """
+
+    def __init__(self, path: str | Path, *, namespace: str | None = None):
         self.path = str(path)
         if self.path == ":memory:":
-            raise ValueError("in-memory databases are unsupported; use a file-backed SQLite path")
-        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        db = self._connect()
-        try:
-            db.executescript("""
-                CREATE TABLE IF NOT EXISTS accounts (
-                    scope TEXT PRIMARY KEY,
-                    currency TEXT NOT NULL,
-                    limit_amount TEXT NOT NULL,
-                    lifetime_limit TEXT
-                );
-                CREATE TABLE IF NOT EXISTS reservations (
-                    id TEXT PRIMARY KEY,
-                    scope TEXT NOT NULL,
-                    currency TEXT NOT NULL,
-                    period_start TEXT NOT NULL,
-                    reserved_amount TEXT NOT NULL,
-                    actual_amount TEXT,
-                    cost_source TEXT,
-                    request_id TEXT,
-                    status TEXT NOT NULL CHECK(status IN ('reserved','uncertain','settled')),
-                    usage_json TEXT,
-                    created_at TEXT NOT NULL,
-                    settled_at TEXT
-                );
-                CREATE INDEX IF NOT EXISTS reservations_scope_period
-                    ON reservations(scope, period_start, status);
-            """)
-            db.execute("BEGIN IMMEDIATE")
-            columns = {row["name"] for row in db.execute("PRAGMA table_info(accounts)")}
-            if "lifetime_limit" not in columns:
-                db.execute("ALTER TABLE accounts ADD COLUMN lifetime_limit TEXT")
-            db.commit()
-        finally:
-            db.close()
-
-    def _connect(self) -> sqlite3.Connection:
-        db = sqlite3.connect(self.path, timeout=30, isolation_level=None)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA busy_timeout=30000")
-        db.execute("PRAGMA journal_mode=WAL")
-        return db
+            raise ValueError("in-memory databases are unsupported; use PostgreSQL")
+        self.database = Database("budget", path, namespace=namespace)
+        # A legacy ledger can contain provider spend that is not yet represented
+        # in PostgreSQL. Check only whether the old file exists; never open it
+        # here. The one-time importer owns reading its read-only snapshot.
+        if Path(path).is_file():
+            with self.database.connection() as db:
+                imported = db.execute(
+                    "SELECT 1 FROM ai_meta.imports WHERE component=%s AND store_key=%s LIMIT 1",
+                    ("budget", self.database.namespace),
+                ).fetchone()
+            if not imported:
+                raise RuntimeError("legacy_budget_import_required")
 
     @staticmethod
     def _scope(scope: str) -> str:
@@ -125,59 +108,81 @@ class BudgetLedger:
             raise ValueError("currency must be a non-empty string")
         return currency.strip().upper()
 
-    def _ensure_account(self, db: sqlite3.Connection, scope: str, currency: str, limit: Decimal,
+    def _ensure_account(self, db, scope: str, currency: str, limit: Decimal,
                         lifetime_limit: Decimal | None) -> None:
-        row = db.execute("SELECT currency, limit_amount, lifetime_limit FROM accounts WHERE scope=?", (scope,)).fetchone()
+        row = db.execute(
+            "SELECT currency,limit_amount,lifetime_limit FROM ai_budget.accounts WHERE scope=%s FOR UPDATE",
+            (scope,),
+        ).fetchone()
         if row is None:
-            db.execute("INSERT INTO accounts(scope,currency,limit_amount,lifetime_limit) VALUES(?,?,?,?)",
-                       (scope, currency, str(limit), None if lifetime_limit is None else str(lifetime_limit)))
-        elif row["currency"] != currency:
+            db.execute(
+                """INSERT INTO ai_budget.accounts(scope,currency,limit_amount,lifetime_limit)
+                   VALUES(%s,%s,%s,%s) ON CONFLICT(store_key,scope) DO NOTHING""",
+                (scope, currency, limit, lifetime_limit),
+            )
+            row = db.execute(
+                "SELECT currency,limit_amount,lifetime_limit FROM ai_budget.accounts WHERE scope=%s FOR UPDATE",
+                (scope,),
+            ).fetchone()
+        if row["currency"] != currency:
             raise CurrencyMismatch(f"scope {scope!r} is already tracked in {row['currency']}")
-        elif Decimal(row["limit_amount"]) != limit:
+        if row["limit_amount"] != limit:
             raise ValueError(f"scope {scope!r} already has a different configured limit")
-        elif (None if row["lifetime_limit"] is None else Decimal(row["lifetime_limit"])) != lifetime_limit:
+        actual_lifetime = row["lifetime_limit"]
+        if actual_lifetime != lifetime_limit:
             raise ValueError(f"scope {scope!r} already has a different configured lifetime limit")
 
     def reserve(self, scope: str, currency: str, limit: Decimal | int | str,
                 amount: Decimal | int | str, request_id: str | None = None,
-                now: datetime | None = None, *, lifetime_limit: Decimal | int | str | None = None) -> str:
+                now: datetime | None = None, *, lifetime_limit: Decimal | int | str | None = None,
+                max_calls: int | None = None) -> str:
         scope, currency = self._scope(scope), self._currency(currency)
         limit, amount = _money(limit, "limit"), _money(amount, "amount")
         lifetime_limit = None if lifetime_limit is None else _money(lifetime_limit, "lifetime_limit")
-        if limit < 0 or amount < 0:
-            raise ValueError("limit and reservation amount must be non-negative")
+        max_calls = _call_cap(max_calls)
         if request_id is not None and (not isinstance(request_id, str) or not request_id.strip()):
             raise ValueError("request_id must be non-empty when provided")
         period_start, _ = _period(now)
-        current = _aware(now).isoformat()
+        current = _aware(now).astimezone(timezone.utc)
         reservation_id = str(uuid4())
-        db = self._connect()
-        try:
-            db.execute("BEGIN IMMEDIATE")
+        with self.database.connection() as db:
+            db.lock(key="budget:" + scope)
             self._ensure_account(db, scope, currency, limit, lifetime_limit)
-            rows = db.execute("""SELECT period_start,status,reserved_amount,actual_amount FROM reservations
-                               WHERE scope=? AND (period_start=? OR status IN ('reserved','uncertain'))""",
-                              (scope, period_start)).fetchall()
-            committed = sum((Decimal(r["actual_amount"]) for r in rows if r["status"] == "settled" and r["period_start"] == period_start), Decimal(0))
-            pending = sum((Decimal(r["reserved_amount"]) for r in rows if r["status"] != "settled"), Decimal(0))
+            rows = db.execute(
+                """SELECT period_start,status,reserved_amount,actual_amount
+                   FROM ai_budget.reservations
+                   WHERE scope=%s AND (period_start=%s OR status IN ('reserved','uncertain'))""",
+                (scope, period_start),
+            ).fetchall()
+            # The query includes settled records only from this period; pending
+            # records from prior periods remain visible until their settlement.
+            committed = sum((r["actual_amount"] for r in rows if r["status"] == "settled"), Decimal(0))
+            pending = sum((r["reserved_amount"] for r in rows if r["status"] != "settled"), Decimal(0))
             if committed + pending + amount > limit:
                 raise BudgetExceeded(f"reservation would exceed {currency} budget for scope {scope!r}")
+            if max_calls is not None:
+                used_calls = db.execute(
+                    "SELECT count(*) FROM ai_budget.reservations WHERE scope=%s AND period_start=%s",
+                    (scope, period_start),
+                ).fetchone()[0]
+                if used_calls >= max_calls:
+                    raise BudgetExceeded(f"reservation would exceed call limit for scope {scope!r}")
             if lifetime_limit is not None:
-                lifetime_rows = db.execute("SELECT status,reserved_amount,actual_amount FROM reservations WHERE scope=?", (scope,)).fetchall()
-                lifetime_used = sum((Decimal(r["actual_amount"]) if r["status"] == "settled"
-                                     else Decimal(r["reserved_amount"]) for r in lifetime_rows), Decimal(0))
+                lifetime_rows = db.execute(
+                    "SELECT status,reserved_amount,actual_amount FROM ai_budget.reservations WHERE scope=%s",
+                    (scope,),
+                ).fetchall()
+                lifetime_used = sum((r["actual_amount"] if r["status"] == "settled" else r["reserved_amount"]
+                                     for r in lifetime_rows), Decimal(0))
                 if lifetime_used + amount > lifetime_limit:
                     raise BudgetExceeded(f"reservation would exceed {currency} lifetime budget for scope {scope!r}")
-            db.execute("""INSERT INTO reservations(id,scope,currency,period_start,reserved_amount,request_id,status,created_at)
-                          VALUES(?,?,?,?,?,?,?,?)""",
-                       (reservation_id, scope, currency, period_start, str(amount), request_id, "reserved", current))
-            db.commit()
-            return reservation_id
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+            db.execute(
+                """INSERT INTO ai_budget.reservations
+                   (id,scope,currency,period_start,reserved_amount,request_id,status,created_at)
+                   VALUES(%s,%s,%s,%s,%s,%s,'reserved',%s)""",
+                (reservation_id, scope, currency, period_start, amount, request_id, current),
+            )
+        return reservation_id
 
     def settle(self, reservation_id: str, amount: Decimal | int | str, cost_source: str,
                usage: Mapping[str, Any] | None = None, now: datetime | None = None) -> None:
@@ -190,87 +195,86 @@ class BudgetLedger:
             usage_json = None if usage is None else json.dumps(usage, sort_keys=True, separators=(",", ":"), allow_nan=False)
         except (TypeError, ValueError) as exc:
             raise ValueError("usage must be finite JSON-serializable metadata") from exc
-        settled_at = _aware(now).isoformat()
-        db = self._connect()
-        try:
-            db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT * FROM reservations WHERE id=?", (reservation_id,)).fetchone()
+        settled_at = _aware(now).astimezone(timezone.utc)
+        with self.database.connection() as db:
+            identity = db.execute(
+                "SELECT scope FROM ai_budget.reservations WHERE id=%s", (reservation_id,)
+            ).fetchone()
+            if identity is None:
+                raise ReservationError("unknown reservation")
+            # Reserve and settlement must serialize on the same account lock.
+            # If a provider reports more than the estimate while another call
+            # is reserving, the next reserve must see the settled actual amount.
+            db.lock(key="budget:" + identity["scope"])
+            row = db.execute("SELECT * FROM ai_budget.reservations WHERE id=%s FOR UPDATE", (reservation_id,)).fetchone()
             if row is None:
                 raise ReservationError("unknown reservation")
             if row["status"] == "settled":
-                if Decimal(row["actual_amount"]) == amount and row["cost_source"] == cost_source.strip() and row["usage_json"] == usage_json:
-                    db.commit()
+                if (row["actual_amount"] == amount and row["cost_source"] == cost_source.strip()
+                        and row["usage_json"] == usage_json):
                     return
                 raise ReservationError("settlement conflicts with the existing settlement")
-            db.execute("""UPDATE reservations SET status='settled',actual_amount=?,cost_source=?,usage_json=?,settled_at=?
-                          WHERE id=?""", (str(amount), cost_source.strip(), usage_json, settled_at, reservation_id))
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+            db.execute(
+                """UPDATE ai_budget.reservations SET status='settled',actual_amount=%s,cost_source=%s,
+                   usage_json=%s,settled_at=%s WHERE id=%s""",
+                (amount, cost_source.strip(), usage_json, settled_at, reservation_id),
+            )
 
     def mark_uncertain(self, reservation_id: str, now: datetime | None = None) -> None:
         if not isinstance(reservation_id, str) or not reservation_id:
             raise ValueError("reservation_id must be non-empty")
-        db = self._connect()
-        try:
-            db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT status FROM reservations WHERE id=?", (reservation_id,)).fetchone()
+        with self.database.connection() as db:
+            db.lock(key="reservation:" + reservation_id)
+            row = db.execute("SELECT status FROM ai_budget.reservations WHERE id=%s FOR UPDATE", (reservation_id,)).fetchone()
             if row is None:
                 raise ReservationError("unknown reservation")
             if row["status"] == "settled":
                 raise ReservationError("settled reservation cannot become uncertain")
-            db.execute("UPDATE reservations SET status='uncertain' WHERE id=?", (reservation_id,))
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+            db.execute("UPDATE ai_budget.reservations SET status='uncertain' WHERE id=%s", (reservation_id,))
 
     def summary(self, scope: str, currency: str, now: datetime | None = None) -> dict[str, Any]:
         scope, currency = self._scope(scope), self._currency(currency)
         period_start, period_end = _period(now)
-        db = self._connect()
-        try:
-            db.execute("BEGIN")
-            account = db.execute("SELECT currency,limit_amount,lifetime_limit FROM accounts WHERE scope=?", (scope,)).fetchone()
+        with self.database.connection() as db:
+            account = db.execute(
+                "SELECT currency,limit_amount,lifetime_limit FROM ai_budget.accounts WHERE scope=%s", (scope,)
+            ).fetchone()
             if account is None:
-                return {"scope": scope, "currency": currency, "period_start": period_start,
-                        "period_end": period_end, "limit": Decimal(0), "spent": Decimal(0),
-                        "reported_spent": Decimal(0), "estimated_spent": Decimal(0),
-                        "reserved": Decimal(0), "remaining": Decimal(0), "reservation_count": 0,
-                        "uncertain_count": 0, "settled_count": 0, "blocked": False,
-                        "lifetime_limit": None, "lifetime_spent": Decimal(0),
-                        "lifetime_reserved": Decimal(0), "lifetime_remaining": None}
+                return {"scope": scope, "currency": currency, "period_start": period_start.isoformat(),
+                        "period_end": period_end.isoformat(), "limit": Decimal(0), "spent": Decimal(0),
+                        "reported_spent": Decimal(0), "estimated_spent": Decimal(0), "reserved": Decimal(0),
+                        "remaining": Decimal(0), "reservation_count": 0, "uncertain_count": 0,
+                        "settled_count": 0, "blocked": False, "lifetime_limit": None,
+                        "lifetime_spent": Decimal(0), "lifetime_reserved": Decimal(0), "lifetime_remaining": None}
             if account["currency"] != currency:
                 raise CurrencyMismatch(f"scope {scope!r} is tracked in {account['currency']}")
-            rows = db.execute("""SELECT * FROM reservations WHERE scope=? AND (period_start=? OR status IN ('reserved','uncertain'))""",
-                              (scope, period_start)).fetchall()
-            settled = [r for r in rows if r["status"] == "settled" and r["period_start"] == period_start]
-            spent = sum((Decimal(r["actual_amount"]) for r in settled), Decimal(0))
-            reported_spent = sum((Decimal(r["actual_amount"]) for r in settled if r["cost_source"] == "provider_reported"), Decimal(0))
-            estimated_spent = sum((Decimal(r["actual_amount"]) for r in settled if r["cost_source"] == "rate_estimate"), Decimal(0))
-            reserved = sum((Decimal(r["reserved_amount"]) for r in rows if r["status"] != "settled"), Decimal(0))
-            limit = Decimal(account["limit_amount"])
-            all_rows = db.execute("SELECT status,reserved_amount,actual_amount FROM reservations WHERE scope=?", (scope,)).fetchall()
-            lifetime_spent = sum((Decimal(r["actual_amount"]) for r in all_rows if r["status"] == "settled"), Decimal(0))
-            lifetime_reserved = sum((Decimal(r["reserved_amount"]) for r in all_rows if r["status"] != "settled"), Decimal(0))
-            lifetime_limit = None if account["lifetime_limit"] is None else Decimal(account["lifetime_limit"])
-            return {"scope": scope, "currency": currency, "period_start": period_start,
-                    "period_end": period_end, "limit": limit, "spent": spent,
+            rows = db.execute(
+                """SELECT * FROM ai_budget.reservations
+                   WHERE scope=%s AND (period_start=%s OR status IN ('reserved','uncertain'))""",
+                (scope, period_start),
+            ).fetchall()
+            settled = [r for r in rows if r["status"] == "settled"]
+            spent = sum((r["actual_amount"] for r in settled), Decimal(0))
+            reported_spent = sum((r["actual_amount"] for r in settled if r["cost_source"] == "provider_reported"), Decimal(0))
+            estimated_spent = sum((r["actual_amount"] for r in settled if r["cost_source"] == "rate_estimate"), Decimal(0))
+            reserved = sum((r["reserved_amount"] for r in rows if r["status"] != "settled"), Decimal(0))
+            limit_amount = account["limit_amount"]
+            all_rows = db.execute(
+                "SELECT status,reserved_amount,actual_amount FROM ai_budget.reservations WHERE scope=%s", (scope,)
+            ).fetchall()
+            lifetime_spent = sum((r["actual_amount"] for r in all_rows if r["status"] == "settled"), Decimal(0))
+            lifetime_reserved = sum((r["reserved_amount"] for r in all_rows if r["status"] != "settled"), Decimal(0))
+            lifetime_limit = account["lifetime_limit"]
+            return {"scope": scope, "currency": currency, "period_start": period_start.isoformat(),
+                    "period_end": period_end.isoformat(), "limit": limit_amount, "spent": spent,
                     "reported_spent": reported_spent, "estimated_spent": estimated_spent,
-                    "reserved": reserved, "remaining": max(Decimal(0), limit-spent-reserved),
-                    "reservation_count": len(rows),
-                    "uncertain_count": sum(r["status"] == "uncertain" for r in rows),
-                    "settled_count": len(settled), "blocked": spent+reserved > limit,
+                    "reserved": reserved, "remaining": max(Decimal(0), limit_amount-spent-reserved),
+                    "reservation_count": len(rows), "uncertain_count": sum(r["status"] == "uncertain" for r in rows),
+                    "settled_count": len(settled), "blocked": spent+reserved > limit_amount,
                     "lifetime_limit": lifetime_limit, "lifetime_spent": lifetime_spent,
                     "lifetime_reserved": lifetime_reserved,
-                    "lifetime_remaining": None if lifetime_limit is None else max(Decimal(0), lifetime_limit-lifetime_spent-lifetime_reserved)}
-        finally:
-            db.close()
+                    "lifetime_remaining": None if lifetime_limit is None else
+                        max(Decimal(0), lifetime_limit-lifetime_spent-lifetime_reserved)}
 
     def configure_limits(self, scope: str, currency: str, *, daily_limit: Decimal | int | str,
                          lifetime_limit: Decimal | int | str | None,
@@ -282,22 +286,14 @@ class BudgetLedger:
         life = None if lifetime_limit is None else _money(lifetime_limit, "lifetime_limit")
         expected_daily = _money(expected_daily_limit, "expected_daily_limit")
         expected_life = None if expected_lifetime_limit is None else _money(expected_lifetime_limit, "expected_lifetime_limit")
-        db = self._connect()
-        try:
-            db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT currency,limit_amount,lifetime_limit FROM accounts WHERE scope=?", (scope,)).fetchone()
+        with self.database.connection() as db:
+            db.lock(key="budget:" + scope)
+            row = db.execute("SELECT currency,limit_amount,lifetime_limit FROM ai_budget.accounts WHERE scope=%s FOR UPDATE", (scope,)).fetchone()
             if row is None:
                 raise ValueError(f"scope {scope!r} has no existing ledger account")
             if row["currency"] != currency:
                 raise CurrencyMismatch(f"scope {scope!r} is tracked in {row['currency']}")
-            actual_life = None if row["lifetime_limit"] is None else Decimal(row["lifetime_limit"])
-            if Decimal(row["limit_amount"]) != expected_daily or actual_life != expected_life:
+            if row["limit_amount"] != expected_daily or row["lifetime_limit"] != expected_life:
                 raise ValueError("configured limits changed; inspect the ledger and retry with current expected values")
-            db.execute("UPDATE accounts SET limit_amount=?,lifetime_limit=? WHERE scope=?",
-                       (str(daily), None if life is None else str(life), scope))
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+            db.execute("UPDATE ai_budget.accounts SET limit_amount=%s,lifetime_limit=%s WHERE scope=%s",
+                       (daily, life, scope))

@@ -4,17 +4,16 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import sqlite3
 import unicodedata
 from datetime import datetime, timezone
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Annotated, Literal, Any
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .schemas import CompanyContext, StrictModel
+from .storage import Database
 
 
 class _FrozenList(list):
@@ -113,31 +112,22 @@ def _role_bucket(role: str) -> str:
 class PromptRegistry:
     def __init__(self, path):
         self.path = str(path)
-        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        with self._db() as db:
-            db.executescript("""CREATE TABLE IF NOT EXISTS configs(ref TEXT PRIMARY KEY, config_json TEXT NOT NULL, content_hash TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS activations(scope TEXT NOT NULL, revision INTEGER NOT NULL, ref TEXT, reviewer TEXT NOT NULL, report_digest TEXT, action TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(scope,revision));""")
+        self.database = Database("analysts", self.path)
         if not self.list():
             for config in builtin_configs(): self.register(config)
 
     @contextmanager
     def _db(self):
-        db = sqlite3.connect(self.path, timeout=10, isolation_level="IMMEDIATE")
-        db.row_factory = sqlite3.Row
-        try:
+        with self.database.connection() as db:
             yield db
-            db.commit()
-        except Exception:
-            db.rollback(); raise
-        finally: db.close()
 
     def register(self, config):
         c = config if isinstance(config, AnalystConfig) else AnalystConfig.model_validate(config)
         body = _dump(c); raw = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         digest = hashlib.sha256(raw.encode()).hexdigest()
         with self._db() as db:
-            db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT config_json,content_hash FROM configs WHERE ref=?", (c.ref,)).fetchone()
+            db.lock(key="configs")
+            row = db.execute("SELECT config_json,content_hash FROM configs WHERE ref=%s", (c.ref,)).fetchone()
             if row and row["content_hash"] != digest:
                 # Older rows omit fields later added with defaults. Reading them
                 # already applies those defaults; preserve their original bytes/hash.
@@ -145,11 +135,11 @@ class PromptRegistry:
                 if stored.model_dump(mode="json")!=c.model_dump(mode="json"):
                     raise ValueError("config revision is immutable")
                 digest=row["content_hash"]
-            db.execute("INSERT OR IGNORE INTO configs VALUES(?,?,?)", (c.ref, raw, digest))
+            db.execute("INSERT INTO configs(ref,config_json,content_hash) VALUES(%s,%s,%s) ON CONFLICT(store_key,ref) DO NOTHING", (c.ref, raw, digest))
         return {"ref": c.ref, "content_hash": digest}
 
     def get(self, ref):
-        with self._db() as db: row = db.execute("SELECT config_json FROM configs WHERE ref=?", (ref,)).fetchone()
+        with self._db() as db: row = db.execute("SELECT config_json FROM configs WHERE ref=%s", (ref,)).fetchone()
         if not row: raise KeyError(ref)
         return AnalystConfig.model_validate_json(row["config_json"])
 
@@ -170,7 +160,7 @@ class PromptRegistry:
         if bucket != "any": scopes.extend([self.scope("any", industry), self.scope("any", "*")])
         with self._db() as db:
             for scope in scopes:
-                row = db.execute("SELECT ref FROM activations WHERE scope=? ORDER BY revision DESC LIMIT 1", (scope,)).fetchone()
+                row = db.execute("SELECT ref FROM activations WHERE scope=%s ORDER BY revision DESC LIMIT 1", (scope,)).fetchone()
                 if row and row["ref"]: return self.get(row["ref"])
         return self.get("baseline@1")
 
@@ -185,7 +175,7 @@ class PromptRegistry:
     def _snapshot(db, scope):
         _,role,industry=scope.split(":")
         scopes=list(dict.fromkeys([scope,f"impact:{role}:*",f"impact:any:{industry}","impact:any:*"]))
-        rows={key:db.execute("SELECT revision,ref FROM activations WHERE scope=? ORDER BY revision DESC LIMIT 1",(key,)).fetchone() for key in scopes}
+        rows={key:db.execute("SELECT revision,ref FROM activations WHERE scope=%s ORDER BY revision DESC LIMIT 1",(key,)).fetchone() for key in scopes}
         current=rows[scope]
         snapshot={"scope":scope,"activation_revision":current["revision"] if current else 0,
                   "ref":"baseline@1","effective_scope":None,"effective_revision":0}
@@ -212,13 +202,14 @@ class PromptRegistry:
         if config and config.role_scope not in ("any", role): raise ValueError("config role scope does not match activation")
         if config and config.industry_scope and (industry == "*" or _industry_key(industry) not in config.industry_scope): raise ValueError("config industry scope does not match activation")
         with self._db() as db:
-            db.execute("BEGIN IMMEDIATE")
+            for locked_scope in sorted(self._activation_scopes(scope)):
+                db.lock(key="activation:" + locked_scope)
             if expected_baseline is not None and self._snapshot(db,scope)!=expected_baseline:
                 raise ValueError("active baseline changed; new comparison required")
-            row = db.execute("SELECT COALESCE(MAX(revision),0) n FROM activations WHERE scope=?", (scope,)).fetchone(); current=row["n"]
+            row = db.execute("SELECT COALESCE(MAX(revision),0) n FROM activations WHERE scope=%s", (scope,)).fetchone(); current=row["n"]
             if current != expected_revision: raise ValueError("activation revision conflict")
             revision=current+1
-            db.execute("INSERT INTO activations(scope,revision,ref,reviewer,report_digest,action) VALUES(?,?,?,?,?,?)",(scope,revision,ref,reviewer,report_digest,action))
+            self._append_activation(db, scope, revision, ref, reviewer, report_digest, action)
         return {"scope":scope,"revision":revision,"ref":ref,"reviewer":reviewer,"report_digest":report_digest,"action":action}
 
     def promote(self, *, scope, ref, report: dict, reviewer, expected_revision=0):
@@ -234,11 +225,30 @@ class PromptRegistry:
 
     def rollback(self, *, scope, reviewer, expected_revision):
         scope=self._canonical_scope(scope)
+        if not isinstance(reviewer,str) or not reviewer.strip() or len(reviewer)>128:
+            raise ValueError("reviewer must be non-empty and at most 128 characters")
+        if isinstance(expected_revision,bool) or not isinstance(expected_revision,int) or expected_revision<0:
+            raise ValueError("expected_revision must be a non-negative integer")
         with self._db() as db:
-            current=db.execute("SELECT MAX(revision) n FROM activations WHERE scope=?",(scope,)).fetchone()["n"] or 0
-            previous=db.execute("SELECT ref FROM activations WHERE scope=? AND revision<? AND ref IS NOT NULL ORDER BY revision DESC LIMIT 1",(scope,current)).fetchone()
-        if current != expected_revision: raise ValueError("activation revision conflict")
-        return self._activate(scope, previous["ref"] if previous else "baseline@1", reviewer,"rollback",None,expected_revision)
+            for locked_scope in sorted(self._activation_scopes(scope)):
+                db.lock(key="activation:" + locked_scope)
+            current=db.execute("SELECT COALESCE(MAX(revision),0) n FROM activations WHERE scope=%s",(scope,)).fetchone()["n"]
+            if current != expected_revision: raise ValueError("activation revision conflict")
+            previous=db.execute("SELECT ref FROM activations WHERE scope=%s AND revision<%s AND ref IS NOT NULL ORDER BY revision DESC LIMIT 1",(scope,current)).fetchone()
+            ref=previous["ref"] if previous else "baseline@1"
+            revision=current+1
+            self._append_activation(db,scope,revision,ref,reviewer,None,"rollback")
+        return {"scope":scope,"revision":revision,"ref":ref,"reviewer":reviewer,"report_digest":None,"action":"rollback"}
+
+    @staticmethod
+    def _activation_scopes(scope):
+        _, role, industry = scope.split(":")
+        return list(dict.fromkeys([scope, f"impact:{role}:*", f"impact:any:{industry}", "impact:any:*"]))
+
+    @staticmethod
+    def _append_activation(db, scope, revision, ref, reviewer, report_digest, action):
+        db.execute("INSERT INTO activations(scope,revision,ref,reviewer,report_digest,action) VALUES(%s,%s,%s,%s,%s,%s)",
+                   (scope,revision,ref,reviewer,report_digest,action))
 
 
 class CompanyAnalystStore:
@@ -246,32 +256,12 @@ class CompanyAnalystStore:
     def __init__(self, path, registry: PromptRegistry):
         self.path=str(path)
         self.registry=registry
-        Path(self.path).parent.mkdir(parents=True,exist_ok=True)
-        with self._db() as db:
-            db.executescript("""CREATE TABLE IF NOT EXISTS company_analyst_versions(
-                tenant_id TEXT NOT NULL,company_id TEXT NOT NULL,revision INTEGER NOT NULL,
-                config_ref TEXT NOT NULL,context_version INTEGER NOT NULL,config_json TEXT NOT NULL,
-                content_hash TEXT NOT NULL,stable INTEGER NOT NULL,source_config_ref TEXT,
-                created_at TEXT NOT NULL,context_hash TEXT NOT NULL DEFAULT '',PRIMARY KEY(tenant_id,company_id,revision),
-                UNIQUE(tenant_id,company_id,config_ref));
-                CREATE TABLE IF NOT EXISTS company_analyst_current(
-                tenant_id TEXT NOT NULL,company_id TEXT NOT NULL,revision INTEGER NOT NULL,
-                PRIMARY KEY(tenant_id,company_id));""")
-            columns={r[1] for r in db.execute("PRAGMA table_info(company_analyst_versions)")}
-            if "context_hash" not in columns:
-                db.execute("ALTER TABLE company_analyst_versions ADD COLUMN context_hash TEXT NOT NULL DEFAULT ''")
+        self.database = Database("company_analysts", self.path)
 
     @contextmanager
     def _db(self):
-        db=sqlite3.connect(self.path,timeout=30,isolation_level=None)
-        db.row_factory=sqlite3.Row
-        db.execute("PRAGMA busy_timeout=30000")
-        try:
+        with self.database.connection() as db:
             yield db
-            db.commit()
-        except Exception:
-            db.rollback(); raise
-        finally: db.close()
 
     @staticmethod
     def _identity(value,name):
@@ -387,10 +377,10 @@ class CompanyAnalystStore:
         raw=json.dumps(config.model_dump(mode="json"),sort_keys=True,separators=(",",":"),ensure_ascii=False)
         digest=hashlib.sha256(raw.encode()).hexdigest()
         with self._db() as db:
-            db.execute("BEGIN IMMEDIATE")
-            current=db.execute("SELECT revision FROM company_analyst_current WHERE tenant_id=? AND company_id=?",(tenant_id,company_id)).fetchone()
+            db.lock(key=f"company:{tenant_id}:{company_id}")
+            current=db.execute("SELECT revision FROM company_analyst_current WHERE tenant_id=%s AND company_id=%s",(tenant_id,company_id)).fetchone()
             if current:
-                row=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=? AND company_id=? AND revision=?",(tenant_id,company_id,current["revision"])).fetchone()
+                row=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=%s AND company_id=%s AND revision=%s",(tenant_id,company_id,current["revision"])).fetchone()
                 if context_version < row["context_version"]:
                     record=self._record(row,"stale_context",db,tenant_id,company_id);record["status"]="stale_context";return record
                 if row["context_version"]==context_version:
@@ -419,11 +409,11 @@ class CompanyAnalystStore:
             ref=config.ref
             raw=json.dumps(config.model_dump(mode="json"),sort_keys=True,separators=(",",":"),ensure_ascii=False)
             digest=self._content_digest(config)
-            db.execute("INSERT INTO company_analyst_versions(tenant_id,company_id,revision,config_ref,context_version,config_json,content_hash,stable,source_config_ref,created_at,context_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            db.execute("INSERT INTO company_analyst_versions(tenant_id,company_id,revision,config_ref,context_version,config_json,content_hash,stable,source_config_ref,created_at,context_hash) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (tenant_id,company_id,revision,ref,context_version,raw,digest,stable,base.ref,now,context_hash))
-            db.execute("INSERT INTO company_analyst_current VALUES(?,?,?) ON CONFLICT(tenant_id,company_id) DO UPDATE SET revision=excluded.revision",
+            db.execute("INSERT INTO company_analyst_current(tenant_id,company_id,revision) VALUES(%s,%s,%s) ON CONFLICT(store_key,tenant_id,company_id) DO UPDATE SET revision=excluded.revision",
                        (tenant_id,company_id,revision))
-            row=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=? AND company_id=? AND revision=?",(tenant_id,company_id,revision)).fetchone()
+            row=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=%s AND company_id=%s AND revision=%s",(tenant_id,company_id,revision)).fetchone()
             return self._record(row,generation_status,db,tenant_id,company_id)
 
     def onboard(self, tenant_id: str, company_id: str, context_version: int,
@@ -459,10 +449,10 @@ class CompanyAnalystStore:
         # Candidate generation is the only model operation. Guard the commit against
         # context changes or concurrent config publication after that call completes.
         with self._db() as db:
-            db.execute("BEGIN IMMEDIATE")
+            db.lock(key=f"company:{tenant_id}:{company_id}")
             row=db.execute("""SELECT v.* FROM company_analyst_current c JOIN company_analyst_versions v
-                ON (v.tenant_id,v.company_id,v.revision)=(c.tenant_id,c.company_id,c.revision)
-                WHERE c.tenant_id=? AND c.company_id=?""",(tenant_id,company_id)).fetchone()
+                ON (v.store_key,v.tenant_id,v.company_id,v.revision)=(c.store_key,c.tenant_id,c.company_id,c.revision)
+                WHERE c.tenant_id=%s AND c.company_id=%s""",(tenant_id,company_id)).fetchone()
             if row is None: raise KeyError("company analyst configuration not found")
             if row["context_version"]!=context_version or row["context_hash"]!=context_hash:
                 record=self._record(row,"stale_context",db,tenant_id,company_id);record["status"]="stale_context";return record
@@ -474,11 +464,12 @@ class CompanyAnalystStore:
             candidate=AnalystConfig.model_validate({**candidate.model_dump(mode="json"),"revision":revision})
             raw=json.dumps(candidate.model_dump(mode="json"),sort_keys=True,separators=(",",":"),ensure_ascii=False)
             now=datetime.now(timezone.utc).isoformat()
-            db.execute("INSERT INTO company_analyst_versions(tenant_id,company_id,revision,config_ref,context_version,config_json,content_hash,stable,source_config_ref,created_at,context_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            db.execute("INSERT INTO company_analyst_versions(tenant_id,company_id,revision,config_ref,context_version,config_json,content_hash,stable,source_config_ref,created_at,context_hash) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (tenant_id,company_id,revision,candidate.ref,context_version,raw,self._content_digest(candidate),0,row["source_config_ref"],now,row["context_hash"]))
-            db.execute("UPDATE company_analyst_current SET revision=? WHERE tenant_id=? AND company_id=? AND revision=?",
-                (revision,tenant_id,company_id,expected_revision))
-            saved=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=? AND company_id=? AND revision=?",(tenant_id,company_id,revision)).fetchone()
+            changed=db.execute("UPDATE company_analyst_current SET revision=%s WHERE tenant_id=%s AND company_id=%s AND revision=%s",
+                (revision,tenant_id,company_id,expected_revision)).rowcount
+            if changed != 1: raise ValueError("analyst revision changed during optimization")
+            saved=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=%s AND company_id=%s AND revision=%s",(tenant_id,company_id,revision)).fetchone()
             return self._record(saved,status,db,tenant_id,company_id)
 
     @staticmethod
@@ -498,7 +489,7 @@ class CompanyAnalystStore:
     def _record(row,generation_status,db,tenant_id,company_id):
         history=[{"config_ref":r["config_ref"],"context_version":r["context_version"],"stable":bool(r["stable"]),
                   "source_config_ref":r["source_config_ref"],"created_at":r["created_at"]}
-                 for r in db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=? AND company_id=? ORDER BY revision",(tenant_id,company_id))]
+                 for r in db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=%s AND company_id=%s ORDER BY revision",(tenant_id,company_id))]
         return {"tenant_id":tenant_id,"company_id":company_id,"revision":row["revision"],"context_version":row["context_version"],
                 "context_hash":row["context_hash"],
                 "config_ref":row["config_ref"],"config":AnalystConfig.model_validate_json(row["config_json"]),
@@ -509,48 +500,48 @@ class CompanyAnalystStore:
         with self._db() as db:
             if config_ref is None:
                 row=db.execute("""SELECT v.* FROM company_analyst_current c JOIN company_analyst_versions v
-                    ON (v.tenant_id,v.company_id,v.revision)=(c.tenant_id,c.company_id,c.revision)
-                    WHERE c.tenant_id=? AND c.company_id=?""",(tenant_id,company_id)).fetchone()
+                    ON (v.store_key,v.tenant_id,v.company_id,v.revision)=(c.store_key,c.tenant_id,c.company_id,c.revision)
+                    WHERE c.tenant_id=%s AND c.company_id=%s""",(tenant_id,company_id)).fetchone()
             else:
-                row=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=? AND company_id=? AND config_ref=?",
+                row=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=%s AND company_id=%s AND config_ref=%s",
                                (tenant_id,company_id,config_ref)).fetchone()
             if row is None: raise KeyError("company analyst configuration not found")
             return self._record(row,"stored",db,tenant_id,company_id)
 
     def mark_stable(self, tenant_id: str, company_id: str, config_ref: str, *, expected_revision: int|None=None) -> dict[str,Any]:
         with self._db() as db:
-            db.execute("BEGIN IMMEDIATE")
-            row=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=? AND company_id=? AND config_ref=?",
+            db.lock(key=f"company:{tenant_id}:{company_id}")
+            row=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=%s AND company_id=%s AND config_ref=%s",
                            (tenant_id,company_id,config_ref)).fetchone()
             if row is None: raise KeyError("company analyst configuration not found")
-            current=db.execute("SELECT revision FROM company_analyst_current WHERE tenant_id=? AND company_id=?",
+            current=db.execute("SELECT revision FROM company_analyst_current WHERE tenant_id=%s AND company_id=%s",
                                (tenant_id,company_id)).fetchone()
             if current is None or current["revision"]!=row["revision"]:
                 raise ValueError("only current company configuration can be marked stable")
             if expected_revision is not None and current["revision"]!=expected_revision:
                 raise ValueError("company analyst revision conflict")
-            db.execute("UPDATE company_analyst_versions SET stable=0 WHERE tenant_id=? AND company_id=?",(tenant_id,company_id))
-            db.execute("UPDATE company_analyst_versions SET stable=1 WHERE tenant_id=? AND company_id=? AND config_ref=?",
+            db.execute("UPDATE company_analyst_versions SET stable=0 WHERE tenant_id=%s AND company_id=%s",(tenant_id,company_id))
+            db.execute("UPDATE company_analyst_versions SET stable=1 WHERE tenant_id=%s AND company_id=%s AND config_ref=%s",
                        (tenant_id,company_id,config_ref))
-            saved=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=? AND company_id=? AND config_ref=?",
+            saved=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=%s AND company_id=%s AND config_ref=%s",
                              (tenant_id,company_id,config_ref)).fetchone()
             return self._record(saved,"stored",db,tenant_id,company_id)
 
     def rollback(self, tenant_id: str, company_id: str, *, expected_revision: int) -> dict[str,Any]:
         tenant_id=self._identity(tenant_id,"tenant_id"); company_id=self._identity(company_id,"company_id")
         with self._db() as db:
-            db.execute("BEGIN IMMEDIATE")
+            db.lock(key=f"company:{tenant_id}:{company_id}")
             current=db.execute("""SELECT v.* FROM company_analyst_current c JOIN company_analyst_versions v
-                ON (v.tenant_id,v.company_id,v.revision)=(c.tenant_id,c.company_id,c.revision)
-                WHERE c.tenant_id=? AND c.company_id=?""",(tenant_id,company_id)).fetchone()
+                ON (v.store_key,v.tenant_id,v.company_id,v.revision)=(c.store_key,c.tenant_id,c.company_id,c.revision)
+                WHERE c.tenant_id=%s AND c.company_id=%s""",(tenant_id,company_id)).fetchone()
             if current is None: raise KeyError("company analyst configuration not found")
             if isinstance(expected_revision,bool) or current["revision"]!=expected_revision:
-                row=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=? AND company_id=? AND revision=?",
+                row=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=%s AND company_id=%s AND revision=%s",
                                (tenant_id,company_id,current["revision"])).fetchone()
                 record=self._record(row,"revision_conflict",db,tenant_id,company_id)
                 record["status"]="revision_conflict"
                 return record
-            previous=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=? AND company_id=? AND stable=1 AND revision<? ORDER BY revision DESC LIMIT 1",
+            previous=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=%s AND company_id=%s AND stable=1 AND revision<%s ORDER BY revision DESC LIMIT 1",
                                 (tenant_id,company_id,current["revision"])).fetchone()
             if previous is None:
                 record=self._record(current,"no_previous_stable",db,tenant_id,company_id)
@@ -562,8 +553,8 @@ class CompanyAnalystStore:
             raw=json.dumps(config.model_dump(mode="json"),sort_keys=True,separators=(",",":"),ensure_ascii=False)
             digest=self._content_digest(config)
             now=datetime.now(timezone.utc).isoformat()
-            db.execute("INSERT INTO company_analyst_versions(tenant_id,company_id,revision,config_ref,context_version,config_json,content_hash,stable,source_config_ref,created_at,context_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            db.execute("INSERT INTO company_analyst_versions(tenant_id,company_id,revision,config_ref,context_version,config_json,content_hash,stable,source_config_ref,created_at,context_hash) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (tenant_id,company_id,revision,config.ref,current["context_version"],raw,digest,1,current["source_config_ref"],now,current["context_hash"]))
-            db.execute("UPDATE company_analyst_current SET revision=? WHERE tenant_id=? AND company_id=?",(revision,tenant_id,company_id))
-            row=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=? AND company_id=? AND revision=?",(tenant_id,company_id,revision)).fetchone()
+            db.execute("UPDATE company_analyst_current SET revision=%s WHERE tenant_id=%s AND company_id=%s",(revision,tenant_id,company_id))
+            row=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=%s AND company_id=%s AND revision=%s",(tenant_id,company_id,revision)).fetchone()
             return self._record(row,"rollback",db,tenant_id,company_id)
