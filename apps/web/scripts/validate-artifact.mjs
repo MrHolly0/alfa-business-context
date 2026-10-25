@@ -7,11 +7,12 @@ const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const dist = resolve(root, "dist");
 const html = await readFile(resolve(dist, "index.html"), "utf8");
 
-for (const asset of ["app.js", "core-ui.css", "product.css", "workspace.css"]) {
+for (const asset of ["app.js", "core-ui.css", "product.css", "workspace.css", "compact.css"]) {
   await access(resolve(dist, asset));
 }
 assert.match(html, /src="\/app\.js"/, "index.html loads the compiled app");
 assert.match(html, /href="\/core-ui\.css"/, "index.html loads compiled UI styles");
+assert.match(html, /href="\/compact\.css"/, "index.html loads compact layout styles");
 assert.doesNotMatch(html, /\/src\/|\.jsx/, "index.html does not expose source modules");
 
 const app = await readFile(resolve(dist, "app.js"), "utf8");
