@@ -103,6 +103,10 @@ if (root?.schema !== 6 || !root.companies?.[root.active]) {
     }
   } catch {}
 }
+let demoSignedIn = false;
+try {
+  demoSignedIn = sessionStorage.getItem("business-context-demo-session") === "1";
+} catch {}
 let state,
   routeKey = "",
   view = { page: "overview" },
@@ -207,9 +211,13 @@ function route() {
       scroll: window.scrollY,
     });
   if (view.page === "news" && view.id) markEventSeen(view.id, view.scope === "volume");
-  const key = decodeURI(location.hash.slice(1) || "overview"),
+  const key = decodeURI(location.hash.slice(1) || "home"),
     parts = key.split("/"),
     previous = view.page;
+  if (demoSignedIn && key === "login") {
+    location.hash = "home";
+    return;
+  }
   if (parts[0] === "news" && previous === "events") newsReturn = routeKey;
   if (
     parts[0] === "detail" &&
@@ -374,18 +382,30 @@ function jobBanner() {
     : "";
 }
 function nav(label, icon, path) {
-  return `<a class="navitem ${view.page === path || (path === "overview" && !["home", "account"].includes(view.page)) ? "active" : ""}" href="#${path}" ${view.page === path ? 'aria-current="page"' : ""}>${I(icon)}<span>${label}</span></a>`;
+  const active = view.page === path ||
+    (path === "overview" && ["digest", "history", "deep"].includes(view.page)) ||
+    (path === "situations" && ["detail", "actions", "feedback"].includes(view.page)) ||
+    (path === "events" && view.page === "news") ||
+    (path === "company" && view.page === "context") ||
+    (path === "research" && ["research-new", "report"].includes(view.page));
+  return `<a class="navitem ${active ? "active" : ""}" href="#${path}" ${view.page === path ? 'aria-current="page"' : ""}>${I(icon)}<span>${label}</span></a>`;
 }
 function render() {
   UI.close();
   sync();
+  if (!demoSignedIn) {
+    document.title = "Вход · Альфа-Бизнес";
+    renderMarkup($("#app"), loginPage());
+    renderAssistant();
+    return;
+  }
   document.title =
     (view.page === "detail"
       ? E.assess(state, view.id)?.title || "Бизнес-контекст"
       : view.page === "home" ? "Главная" : view.page === "account" ? "Мой профиль" : "Бизнес-контекст") + " · Альфа-Бизнес";
   renderMarkup(
     $("#app"),
-    `${mobile ? '<button class="mobile-shade" data-action="mobile" aria-label="Закрыть навигацию"></button>' : ""}<aside class="sidebar ${mobile ? "open" : ""}"><a class="brand" href="#home" aria-label="Альфа-Бизнес — главная"><span class="alpha">А</span><span>Альфа-Бизнес</span></a><nav class="banknav" aria-label="Меню банка">${nav("Главная", "home", "home")}${["Платежи", "Счета", "Контрагенты"].map((l, i) => `<button class="navitem" data-action="bank:${l}">${I(["pay", "card", "people"][i])}<span>${l}</span></button>`).join("")}<div class="navlabel">Мои сервисы</div>${nav("Бизнес-контекст", "context", "overview")}</nav></aside><main class="main"><div class="workspace"><header class="topbar"><div class="module-name">${iconButton("menu", "mobile", "Открыть меню").replace('class="iconbtn"', 'class="iconbtn mobilemenu"')}<a href="#${["home", "account"].includes(view.page) ? "home" : "overview"}">${["home", "account"].includes(view.page) ? "Альфа-Бизнес" : "Бизнес-контекст"}</a><span class="demo">Демо</span></div><div class="toptools"><button class="company-button" data-action="company-menu" aria-label="Выбрать компанию: ${esc(state.company.name)}" aria-haspopup="menu" aria-expanded="false">${I("building")}<span>${esc(state.company.name)}</span>${I("down")}</button><button class="iconbtn" data-action="notifications" aria-label="Обновления" aria-haspopup="dialog" aria-expanded="false">${I("bell")}${state.notifications.some((n) => !n.read) ? '<span class="dot"></span>' : ""}</button><button class="assistant-button ${assistant ? "active" : ""}" data-action="assistant" aria-haspopup="dialog" aria-controls="assistant-dialog" aria-expanded="${assistant}" aria-label="Помощник">${root.pet ? '<img src="/assets/01_calm_right.webp" alt="">' : I("chat")}<span>Помощник</span></button><a class="account-button ${view.page === "account" ? "active" : ""}" href="#account" aria-label="Мой профиль: ${esc(profileName())}" title="${esc(profileName())}" ${view.page === "account" ? 'aria-current="page"' : ""}><span class="user-avatar" aria-hidden="true">${esc(profileInitials())}</span></a></div></header>${
+    `${mobile ? '<button class="mobile-shade" data-action="mobile" aria-label="Закрыть навигацию"></button>' : ""}<aside class="sidebar ${mobile ? "open" : ""}"><a class="brand" href="#home" aria-label="Альфа-Бизнес — главная"><span class="alpha">А</span><span>Альфа-Бизнес</span></a><nav class="banknav" aria-label="Меню банка"><div class="navlabel">Все сервисы</div>${nav("Главная", "home", "home")}${nav("Бизнес-контекст", "context", "overview")}${nav("Ситуации", "grid", "situations")}${nav("Новости", "file", "events")}${nav("Анализ периода", "trend", "research")}${nav("Компания", "building", "company")}</nav><div class="sidebar-bottom"><a class="navitem" href="#account">${I("people")}<span>Мой профиль</span></a><button class="navitem" data-action="demo-logout">${I("right")}<span>Выйти</span></button></div></aside><main class="main"><div class="workspace"><header class="topbar"><div class="module-name">${iconButton("menu", "mobile", "Открыть меню").replace('class="iconbtn"', 'class="iconbtn mobilemenu"')}<a href="#${["home", "account"].includes(view.page) ? "home" : "overview"}">${["home", "account"].includes(view.page) ? "Альфа-Бизнес" : "Бизнес-контекст"}</a><span class="demo">Демо</span></div><div class="toptools"><button class="company-button" data-action="company-menu" aria-label="Выбрать компанию: ${esc(state.company.name)}" aria-haspopup="menu" aria-expanded="false">${I("building")}<span>${esc(state.company.name)}</span>${I("down")}</button><button class="iconbtn" data-action="notifications" aria-label="Обновления" aria-haspopup="dialog" aria-expanded="false">${I("bell")}${state.notifications.some((n) => !n.read) ? '<span class="dot"></span>' : ""}</button><button class="assistant-button ${assistant ? "active" : ""}" data-action="assistant" aria-haspopup="dialog" aria-controls="assistant-dialog" aria-expanded="${assistant}" aria-label="Помощник">${root.pet ? '<img src="/assets/01_calm_right.webp" alt="">' : I("chat")}<span>Помощник</span></button><a class="account-button ${view.page === "account" ? "active" : ""}" href="#account" aria-label="Мой профиль: ${esc(profileName())}" title="${esc(profileName())}" ${view.page === "account" ? 'aria-current="page"' : ""}><span class="user-avatar" aria-hidden="true">${esc(profileInitials())}</span></a></div></header>${
       !["home", "account"].includes(view.page)
         ? `<div class="toolbar"><nav class="tabs module-tabs" aria-label="Бизнес-контекст">${[
             ["overview", "Обзор", ["overview", "digest", "history", "deep"]],
@@ -458,11 +478,16 @@ function profileName() {
 function profileInitials() {
   return [root.profile.firstName, root.profile.lastName].filter(Boolean).map((s) => Array.from(s.trim())[0] || "").join("").toLocaleUpperCase("ru");
 }
+function loginPage() {
+  return `<main class="login-layout" id="main-content"><section class="login-showcase" aria-label="О сервисе"><a class="brand" href="#login" aria-label="Альфа-Бизнес"><span class="alpha">А</span><span>Альфа-Бизнес</span></a><div><span class="login-eyebrow">Бизнес-контекст</span><h1>Всё важное для вашего бизнеса — в одном месте</h1><p>Ситуации, новости и следующие шаги с учётом выбранной компании.</p><div class="login-preview"><span>Ваш рабочий обзор</span><strong>От события к решению</strong><small>Одинаково удобно для производства, торговли, услуг и других направлений.</small></div></div><span class="login-footnote">Демонстрационная версия</span></section><section class="login-panel"><div class="login-mobile-brand"><span class="alpha">А</span><strong>Альфа-Бизнес</strong></div><form id="demo-login-form" class="login-card"><span class="login-eyebrow">Вход в сервис</span><h2>С возвращением</h2><p>Откройте рабочее пространство компании.</p><label for="demo-login-email">Электронная почта</label><input id="demo-login-email" name="email" type="email" autocomplete="username" placeholder="name@company.ru" required><label for="demo-login-password">Пароль</label><input id="demo-login-password" name="password" type="password" autocomplete="current-password" placeholder="Введите пароль" required><button class="login-submit" type="submit">Войти ${I("right")}</button><p class="login-disclaimer">Это макет входа: логин и пароль не проверяются и не отправляются на сервер. Не используйте настоящий пароль.</p></form></section></main>`;
+}
 function home() {
-  const model = C.caseCatalog(E.list(state), state, {view:"attention",size:3});
-  return `<div class="bank-home"><div class="home-greeting"><p class="home-date">${new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long",timeZone:"Europe/Moscow"})}</p>${intro("Добрый день, " + root.profile.firstName, state.company.name + " · всё важное для вашего бизнеса")}</div>
-  <section class="service-banner" aria-labelledby="service-banner-title"><div class="service-banner-copy"><span class="new-service-label">Новый сервис</span><h2 id="service-banner-title">Бизнес меняется.<br>Будьте в контексте.</h2><p>Новости и аналитика в контексте вашей компании. Риски, возможности и следующие шаги.</p><div class="actions">${B('<span class="full-label">Открыть Бизнес-контекст</span><span class="short-label">Открыть сервис</span>', "nav:overview", "primary", "right", 'data-icon-position="right" aria-label="Открыть Бизнес-контекст"')}</div><span class="banner-company">${I("building")}${esc(state.company.name)}</span></div><div class="service-banner-preview"><div class="banner-orbit" aria-hidden="true"></div>${situationArt("opportunity", "banner-art")}<div class="banner-preview-note"><span>В фокусе вашей компании</span><strong>${model.counts.attention} ${plural(model.counts.attention,"вопрос","вопроса","вопросов")}</strong><span>ожидают проверки</span></div></div></section>
-  <section class="home-focus"><div class="section-heading"><h2>На что обратить внимание</h2><a class="inline-link" href="#situations/all">Все ситуации ${I("right")}</a></div>${model.items.length ? `<div class="home-focus-grid">${model.items.map((a)=>`<article class="home-focus-card situation-card">${situationArt(a.id)}<div class="home-focus-copy"><span>${esc(a.metric)}</span><h3><a class="situation-link" href="#detail/${a.id}">${esc(briefTitle(a))}</a></h3></div><span class="card-chevron" aria-hidden="true">${I("right")}</span></article>`).join("")}</div>` : `<div class="card"><p>Все вопросы распределены. Продолжить работу можно в «Бизнес-контексте».</p></div>`}</section></div>`;
+  const model = C.caseCatalog(E.list(state), state, { view: "attention", size: 3 });
+  const count = model.counts.attention;
+  return `<div class="bank-home"><div class="home-greeting"><div><p class="home-date">${new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long", timeZone: "Europe/Moscow" })}</p><h1>Добрый день, ${esc(root.profile.firstName)}</h1><p>Рабочий обзор для ${esc(state.company.name)}</p></div><span class="home-demo-mark">Демонстрационные данные</span></div>
+  <nav class="home-quick-actions" aria-label="Быстрые действия"><a href="#overview">${I("grid")}<span>Открыть обзор</span></a><a href="#situations/all">${I("check")}<span>Проверить ситуации</span></a><a href="#events">${I("file")}<span>Новости</span></a><a href="#research">${I("trend")}<span>Анализ периода</span></a></nav>
+  <section class="home-dashboard" aria-label="Сводка компании"><div class="home-dashboard-main"><span class="home-dashboard-kicker">Бизнес-контекст</span><h2>Всё важное для вашей компании</h2><p>Оценки событий, вопросы для проверки и возможные следующие шаги — в одном рабочем пространстве.</p><a class="home-dashboard-link" href="#overview">Перейти к обзору ${I("right")}</a><div class="home-dashboard-company">${I("building")}<span>${esc(state.company.name)}</span></div></div><div class="home-dashboard-status"><span>В фокусе</span><strong>${count}</strong><p>${plural(count, "вопрос ожидает", "вопроса ожидают", "вопросов ожидают")} проверки</p><a href="#situations/all">К ситуациям ${I("right")}</a></div><div class="home-dashboard-next"><span>Следующий шаг</span><h3>Проверьте контекст компании</h3><p>Уточнённые сведения помогают оценивать события точнее.</p><a href="#company">Открыть профиль ${I("right")}</a></div></section>
+  <section class="home-focus"><div class="section-heading"><h2>На что обратить внимание</h2><a class="inline-link" href="#situations/all">Все ситуации ${I("right")}</a></div>${model.items.length ? `<div class="home-focus-grid">${model.items.map((a) => `<article class="home-focus-card situation-card">${situationArt(a.id)}<div class="home-focus-copy"><span>${esc(a.metric)}</span><h3><a class="situation-link" href="#detail/${a.id}">${esc(briefTitle(a))}</a></h3></div><span class="card-chevron" aria-hidden="true">${I("right")}</span></article>`).join("")}</div>` : `<div class="card"><p>Все вопросы распределены. Продолжить работу можно в «Бизнес-контексте».</p></div>`}</section></div>`;
 }
 function accountPage() {
   return back("home", "На главную банка") + `<div class="form-page account-page">${intro("Мой профиль", "Личные данные пользователя. Организация выбирается отдельно в шапке.")}<form id="account-form" class="card">${formError()}<div class="account-identity"><span class="user-avatar large" aria-hidden="true">${esc(profileInitials())}</span><div><h2>${esc(profileName())}</h2><p>Демонстрационный профиль</p></div></div><div class="form-grid">${textField("firstName","Имя",draft.firstName,"","text",'required maxlength="80" autocomplete="given-name"')}${textField("lastName","Фамилия",draft.lastName,"","text",'maxlength="80" autocomplete="family-name"')}</div><div class="actions"><button type="submit" class="btn primary">Сохранить</button>${B("Отмена","form-cancel","secondary")}</div><p class="account-limit">Имя используется в этом прототипе. Банковский вход и управление правами не подключены.</p></form><section class="account-organization"><h2>Текущая организация</h2><div class="account-org-row">${I("building")}<div><strong>${esc(state.company.name)}</strong><p>${esc(state.company.facts.activity)}</p></div></div><p>Смена организации меняет рабочие данные и оценки. Ваш профиль остаётся прежним.</p></section></div>`;
@@ -1475,6 +1500,15 @@ function notificationPopover(anchor) {
 let dirty = false;
 function perform(action, anchor) {
   const [type, id, value] = action.split(":");
+  if (type === "demo-logout") {
+    demoSignedIn = false;
+    assistant = false;
+    UI.close();
+    try { sessionStorage.removeItem("business-context-demo-session"); } catch {}
+    location.hash = "login";
+    render();
+    return;
+  }
   if (
     dirty &&
     ["nav", "switch-company", "context", "scenario", "feedback"].includes(
@@ -2397,6 +2431,7 @@ document.addEventListener("input", (e) => {
   if (
     e.target.closest("form") &&
     !e.target.closest("#chat-form") &&
+    !e.target.closest("#demo-login-form") &&
     !e.target.closest("[data-task]")
   ) {
     draft[e.target.name] = e.target.value;
@@ -2434,7 +2469,7 @@ document.addEventListener("change", (e) => {
     };
     persist();
   }
-  if (el.closest("form") && !el.closest("[data-task]")) {
+  if (el.closest("form") && !el.closest("[data-task]") && !el.closest("#demo-login-form")) {
     draft[el.name] = el.value;
     dirty = true;
   }
@@ -2517,7 +2552,13 @@ document.addEventListener("submit", async (e) => {
     data = Object.fromEntries(new FormData(f));
   error = "";
   try {
-    if (f.id === "account-form") {
+    if (f.id === "demo-login-form") {
+      demoSignedIn = true;
+      try { sessionStorage.setItem("business-context-demo-session", "1"); } catch {}
+      f.reset();
+      dirty = false;
+      navigate("home");
+    } else if (f.id === "account-form") {
       const firstName = String(data.firstName || "").trim(), lastName = String(data.lastName || "").trim();
       if (!firstName || firstName.length > 80 || lastName.length > 80) throw Error("Укажите имя не длиннее 80 знаков.");
       root.profile = { firstName, lastName };
@@ -2682,7 +2723,7 @@ api("/api/status")
   .catch(() => {});
 if (location.hash.startsWith("#panel/context/"))
   location.hash = location.hash.replace("#panel/context/", "#context/");
-if (!location.hash) history.replaceState(null, "", "#overview");
+if (!location.hash) history.replaceState(null, "", demoSignedIn ? "#home" : "#login");
 route();
 persist();
 
