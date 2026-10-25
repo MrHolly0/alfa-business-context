@@ -128,7 +128,10 @@ def test_model_cannot_reference_unknown_or_bank_as_external_evidence(tmp_path):
         "alternatives": [], "falsifiers": []}], "influence_chain": [], "clarifications": []})] * 2)
     result = AnalysisPipeline(store(tmp_path), llm=llm).run(req())
     assert len(llm.calls) == 2
-    assert not any(c.kind == "external_fact" for c in result.claims)
+    assert not any(c.claim_id == "x" for c in result.claims)
+    external_ids={e.evidence_id for e in result.evidence if e.source_role=="external"}
+    assert all(set(c.evidence_refs)<=external_ids for c in result.claims if c.kind=="external_fact")
+    assert result.execution_mode=="baseline"
     assert result.status == "partial"
 
 
@@ -174,6 +177,230 @@ def test_influence_edge_requires_primary_external_evidence_and_confirmed_context
             pass
         else:
             raise AssertionError(f"edge unexpectedly accepted evidence_refs={evidence_refs}")
+
+
+def test_resource_assertion_can_ground_hypothesis_but_activity_or_unknown_cannot():
+    from intelligence.pipeline import AnalysisPipeline
+    request = req(company={"name": "СеверТранс", "industry": "", "role": "операционный директор",
+        "activities": [{"activity_id": "act-import", "label": "импорт компонентов",
+                        "normalized_class": "import", "provenance": "profile:activity"}],
+        "assertions": [
+            {"assertion_id": "resource-ceramic", "kind": "resource",
+             "label": "керамические изоляторы используются в части датчиков",
+             "status": "confirmed", "provenance": "profile:resource"},
+            {"assertion_id": "supplier-unknown", "kind": "supplier",
+             "label": "поставщик неизвестен", "status": "unknown", "provenance": "profile:gap"},
+            {"assertion_id": "future-resource", "kind": "resource",
+             "label": "будущий ресурс", "status": "confirmed", "provenance": "profile:future",
+             "valid_from": "2026-11-01T00:00:00Z"}],
+        "dependencies": [], "facts": []})
+    evidence = [{"evidence_id": "primary", "source_role": "external", "source_id": "news",
+                 "quote": request.event.text}]
+    answer = {"summary": "Связь может быть значима при подтверждении задержки.", "claims": [{
+        "claim_id": "impact", "kind": "model_hypothesis", "text": "Задержка ресурса может затронуть выпуск.",
+        "evidence_refs": ["primary"], "context_refs": ["resource-ceramic"],
+        "assumptions": ["Поставка действительно задержана."], "alternatives": ["Есть запасы."],
+        "falsifiers": ["Запасы полностью покрывают потребность."]}], "influence_chain": [], "clarifications": []}
+    AnalysisPipeline._check_model_payload(json.loads(json.dumps(answer)), request, evidence)
+    for invalid_ref in ("act-import", "supplier-unknown", "future-resource"):
+        invalid = json.loads(json.dumps(answer))
+        invalid["claims"][0]["context_refs"] = [invalid_ref]
+        try:
+            AnalysisPipeline._check_model_payload(invalid, request, evidence)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"non-evidence context was accepted as impact basis: {invalid_ref}")
+    from intelligence.analysts import AnalystConfig
+    too_deep = json.loads(json.dumps(answer))
+    too_deep["influence_chain"] = [{"edge_id": f"edge-{index}",
+        "description": "The resource may affect this business.", "evidence_refs": ["primary"],
+        "context_refs": ["resource-ceramic"], "provenance": "model", "status": "hypothesis",
+        "alternatives": ["Stocks may cover need."], "falsifiers": ["The route is unaffected."]}
+        for index in range(3)]
+    try:
+        AnalysisPipeline._check_model_payload(too_deep, request, evidence,
+            config=AnalystConfig(config_id="depth-two", max_depth=2))
+    except ValueError as exc:
+        assert str(exc) == "max_influence_chain_depth_exceeded"
+    else:
+        raise AssertionError("analyst max_depth was not enforced")
+
+
+def test_model_prompt_receives_current_ids_for_each_context_group(tmp_path):
+    class InspectingLLM:
+        def __init__(self): self.payload = None
+        def complete(self, messages, **kwargs):
+            self.payload = json.loads(messages[-1]["content"].rsplit("\n", 1)[-1])
+            primary = next(item for item in self.payload["RETRIEVED_EVIDENCE"] if item["source_role"] == "external")
+            answer = {"summary": "Событие описано внешним источником.", "claims": [{
+                "claim_id": "event-fact", "kind": "external_fact", "text": primary["quote"],
+                "evidence_refs": [primary["evidence_id"]], "context_refs": []}],
+                "influence_chain": [], "clarifications": []}
+            return {"content": json.dumps(answer, ensure_ascii=False), "model": "fixture", "response_id": "inspect"}
+
+    request=req(company={"name": "СеверТранс", "industry": "", "role": "операционный директор",
+        "activities": [{"activity_id": "activity-current", "label": "Импорт деталей", "normalized_class": "import", "provenance": "p:1"}],
+        "assertions": [{"assertion_id": "assertion-current", "kind": "resource", "label": "Подшипники нужны для выпуска",
+            "status": "confirmed", "provenance": "p:2"},
+            {"assertion_id": "assertion-unknown", "kind": "supplier", "label": "Поставщик неизвестен", "status": "unknown", "provenance": "p:3"}],
+        "dependencies": [{"dependency_id": "dependency-current", "label": "Поставки стали", "kind": "supplier",
+            "status": "confirmed", "provenance": "p:4"}],
+        "facts": [{"fact_id": "fact-current", "text": "Есть склад", "provenance": "p:5"}]})
+    llm=InspectingLLM()
+    AnalysisPipeline(store(tmp_path),llm).run(request)
+    assert set(llm.payload["CONFIRMED_CONTEXT_IDS"]) == {
+        "activity-current", "assertion-current", "dependency-current", "fact-current"}
+    projected=llm.payload["REQUEST_CONTEXT"]["company"]
+    assert [item["assertion_id"] for item in projected["assertions"]] == ["assertion-current"]
+    assert "assertion-unknown" not in llm.payload["CONFIRMED_CONTEXT_IDS"]
+
+
+def test_confirmed_resource_assertion_is_first_pass_impact_basis(tmp_path):
+    class ResourceLLM:
+        def __init__(self): self.calls=0; self.payload=None
+        def complete(self, messages, **kwargs):
+            self.calls+=1
+            self.payload=json.loads(messages[-1]["content"].rsplit("\n",1)[-1])
+            primary=next(item for item in self.payload["RETRIEVED_EVIDENCE"] if item["source_role"]=="external")
+            answer={"summary":"Задержка может затронуть выпуск при исчерпании запасов.","claims":[
+                {"claim_id":"event", "kind":"external_fact", "text":primary["quote"],
+                 "evidence_refs":[primary["evidence_id"]],"context_refs":[]},
+                {"claim_id":"impact", "kind":"model_hypothesis", "text":"Задержка ресурса может повлиять на выпуск.",
+                 "evidence_refs":[primary["evidence_id"]],"context_refs":["resource-current"],
+                 "assumptions":["Поставка затрагивает потребность производства."],
+                 "alternatives":["Запас покрывает потребность."],"falsifiers":["Потребность закрыта запасом."],
+                 "horizon":"quarter","confirmation_conditions":["Проверить остаток запаса и сроки поставки."]}],
+                "influence_chain":[],"clarifications":[]}
+            return {"content":json.dumps(answer,ensure_ascii=False),"model":"fixture","response_id":"resource",
+                "usage":Usage(prompt_tokens=20,completion_tokens=30)}
+
+    request=req(company={"name":"Датчик и код", "industry":"производство датчиков", "role":"операционный директор",
+        "activities":[{"activity_id":"activity-import", "label":"Импорт керамических изоляторов",
+            "normalized_class":"import", "provenance":"profile:activity"}],
+        "assertions":[{"assertion_id":"resource-current","kind":"resource",
+            "label":"Керамические изоляторы используются в части датчиков; доля неизвестна",
+            "status":"confirmed","provenance":"profile:resource"}],
+        "facts":[{"fact_id":"fact-gap","text":"Нет подтверждённых данных о доле импорта и запасах",
+            "provenance":"profile:gap"}],"dependencies":[]})
+    llm=ResourceLLM()
+    result=AnalysisPipeline(store(tmp_path),llm).run(request)
+    assert llm.calls==1
+    assert "resource-current" in llm.payload["IMPACT_CONTEXT_IDS"]
+    assert "activity-import" in llm.payload["CONFIRMED_CONTEXT_IDS"]
+    assert "activity-import" not in llm.payload["IMPACT_CONTEXT_IDS"]
+    assert "fact-gap" not in llm.payload["IMPACT_CONTEXT_IDS"]
+    claim=next(item for item in result.claims if item.claim_id=="impact")
+    assert claim.kind=="model_hypothesis" and claim.context_refs==["resource-current"]
+
+
+def test_unsupported_impact_link_is_repaired_without_attributing_it_to_bank(tmp_path):
+    corpus=store(tmp_path)
+    request=req(company={"name":"Датчик и код", "industry":"производство датчиков", "role":"операционный директор",
+        "activities":[{"activity_id":"activity-import", "label":"Импорт керамических изоляторов",
+            "normalized_class":"import", "provenance":"profile:activity"}],
+        "facts":[{"fact_id":"fact-gap","text":"Нет подтверждённых данных о доле импорта и запасах",
+            "provenance":"profile:gap"}],"dependencies":[],"assertions":[]})
+    primary=corpus.search(tenant_id=request.tenant_id,source_ids=["news"],as_of=request.as_of.isoformat(),
+        query="порт закрыт",role="external")[0]
+    bank=corpus.search(tenant_id=request.tenant_id,source_ids=["bank"],as_of=request.as_of.isoformat(),
+        query="аналитика логистика",role="bank")[0]
+    rejected={"summary":"Банк подтверждает риск остановки.","claims":[
+        {"claim_id":"impact","kind":"model_hypothesis","text":"Импортная зависимость может остановить выпуск.",
+         "evidence_refs":[primary["evidence_id"]],"context_refs":["activity-import","fact-gap"],
+         "assumptions":["Ресурс критичен."],"alternatives":["Есть запасы."],"falsifiers":["Запас покрывает выпуск."]},
+        {"claim_id":"bank","kind":"bank_view","text":bank["quote"],"evidence_refs":[bank["evidence_id"]],
+         "context_refs":[],"origin":"bank"}],"influence_chain":[],"clarifications":[]}
+    repaired={"summary":"Внешний материал сообщает о закрытии порта; влияние на компанию не установлено.",
+        "claims":[{"claim_id":"event","kind":"external_fact","text":primary["quote"],
+            "evidence_refs":[primary["evidence_id"]],"context_refs":[]}],
+        "influence_chain":[],"clarifications":["Уточните поставщика, маршрут и покрытие запасами."]}
+    llm=FakeLLM([json.dumps(rejected,ensure_ascii=False),json.dumps(repaired,ensure_ascii=False)])
+    result=AnalysisPipeline(corpus,llm).run(request)
+    assert len(llm.calls)==2
+    diagnostics=next(item["diagnostics"] for item in result.trace if item["stage"]=="model_output_rejected")
+    assert diagnostics[0]=={"type":"hypothesis_uses_non_dependency_context","loc":["claims",0,"context_refs"]}
+    assert not any(claim.kind=="model_hypothesis" for claim in result.claims)
+    assert not any(claim.kind=="bank_view" for claim in result.claims)
+    assert all("Банк подтверждает" not in claim.text for claim in result.claims)
+
+
+def test_validated_package_allows_all_its_external_publications_as_primary(tmp_path):
+    from intelligence.analysts import AnalystConfig
+    corpus=store(tmp_path)
+    corpus.ingest({"tenant_id":"tenant-a","source_id":"news-b","source_role":"external",
+        "canonical_uri":"https://example.invalid/news/terminal-status","title":"Терминал открыт",
+        "content":"Оператор сообщает, что терминал работает штатно.","content_type":"text/plain",
+        "published_at":"2026-10-24T09:30:00Z","fetched_at":"2026-10-24T09:40:00Z","synthetic":True})
+    corpus.ingest({"tenant_id":"tenant-a","source_id":"news-extra","source_role":"external",
+        "canonical_uri":"https://example.invalid/news/unrelated","title":"Другая новость",
+        "content":"Отдельное несвязанное сообщение.","content_type":"text/plain",
+        "published_at":"2026-10-24T09:20:00Z","fetched_at":"2026-10-24T09:25:00Z","synthetic":True})
+    evidence=[]
+    for source_id,role,query in (("news","external","порт закрыт"),("news-b","external","терминал открыт"),
+                                 ("news-extra","external","несвязанное сообщение"),("bank","bank","аналитика логистика")):
+        evidence.extend(corpus.search(tenant_id="tenant-a",source_ids=[source_id],as_of="2026-10-24T12:00:00Z",
+            query=query,role=role))
+    source_rows=[]
+    for item in evidence:
+        if item["source_role"] not in {"external","bank"} or item["source_id"]=="news-extra":
+            continue
+        source_rows.append({"publication_id":"publication-"+item["source_id"],"source_id":item["source_id"],
+            "source_role":item["source_role"],"data_classification":"synthetic","canonical_uri":item["canonical_uri"],
+            "title":item["title"],"published_at":item["published_at"],"fetched_at":item["fetched_at"],
+            "origin_group_id":"origin-"+item["source_id"],"content_hash":item["content_hash"],
+            "document_revision_ref":item["document_revision_ref"]})
+    refs=[item["document_revision_ref"] for item in evidence]
+    request=req(source_ids=["news","news-b","news-extra","bank"],document_revision_refs=refs)
+    raw_package={"package_id":"pkg-two-publications","data_classification":"synthetic","tenant_id":"tenant-a",
+        "event_id":"event-1","revision":1,"claims":[],"sources":source_rows,"entities":[],"territories":[],
+        "resources":[],"mechanisms":[],"possible_mechanisms":[],"conditions":[],"alternatives":[],"unknowns":[],
+        "coverage":{"permitted_publications":len(source_rows),"independent_origin_groups":len(source_rows),
+            "policy_source_count":4,"policy_id":"policy-a","policy_version":"2","originals_available":True,
+            "extraction_mode":"deterministic","limitations":[]},"model_version":"fixture","prompt_version":"fixture",
+        "policy_version":"2","created_at":"2026-10-24T11:00:00Z"}
+    package=AnalysisPipeline._normalize_shared_package(raw_package,request)
+    primary=AnalysisPipeline._primary_ids(request,evidence,package=package)
+    wire_b_id=next(item["evidence_id"] for item in evidence if item["source_id"]=="news-b")
+    assert primary=={item["evidence_id"] for item in evidence if item["source_id"] in {"news","news-b"}}
+    class PackageAwareLLM:
+        payload=None
+        def complete(self,messages,**kwargs):
+            self.payload=json.loads(messages[-1]["content"].rsplit("\n",1)[-1])
+            answer={"summary":"Второй источник передаёт сообщение о терминале.","claims":[{
+                "claim_id":"counter-report","kind":"external_fact","text":"Второй источник сообщает о работе терминала.",
+                "evidence_refs":[wire_b_id],"context_refs":[]}],"influence_chain":[],"clarifications":[]}
+            return {"content":json.dumps(answer,ensure_ascii=False),"model":"fixture","response_id":"package-aware",
+                "usage":Usage(prompt_tokens=20,completion_tokens=30)}
+    llm=PackageAwareLLM();pipeline=AnalysisPipeline(corpus,llm)
+    pipeline._model_candidate(request,evidence,[],{"model_calls":0,"input_tokens":0,"output_tokens":0,
+        "total_tokens":0,"errors":[],"attempts":[]},lambda stage:None,
+        config=AnalystConfig(config_id="package-test"),
+        package=package)
+    assert set(llm.payload["PRIMARY_EVENT_EVIDENCE_IDS"])==primary
+    answer={"summary":"Задержка может повлиять на подтверждённую зависимость.","claims":[{
+        "claim_id":"impact","kind":"model_hypothesis","text":"Сообщение источника в том же пакете указывает на возможную задержку.",
+        "evidence_refs":[wire_b_id],"context_refs":["dep-port"],"assumptions":["Условия маршрута совпадают."],
+        "alternatives":["Перевозка идёт другим маршрутом."],"falsifiers":["Маршрут не использует порт."]}],
+        "influence_chain":[],"clarifications":[]}
+    AnalysisPipeline._check_model_payload(answer,request,evidence,package=package)
+    valid_candidate=pipeline._validate_candidate(json.loads(json.dumps(answer)),request,evidence,
+        {"errors":[],"attempts":[]},[],{"document_revision_ref":"event-doc"},AnalystConfig(config_id="package-test"),
+        package=package)
+    assert any(claim.kind=="model_hypothesis" for claim in valid_candidate.claims)
+    legacy_candidate=pipeline._validate_candidate(json.loads(json.dumps(answer)),request,evidence,
+        {"errors":[],"attempts":[]},[],{"document_revision_ref":"event-doc"},AnalystConfig(config_id="package-test"))
+    assert not any(claim.kind=="model_hypothesis" for claim in legacy_candidate.claims)
+    for outside_id in (next(item["evidence_id"] for item in evidence if item["source_id"]=="news-extra"),
+                       next(item["evidence_id"] for item in evidence if item["source_role"]=="bank")):
+        invalid=json.loads(json.dumps(answer))
+        invalid["claims"][0]["evidence_refs"]=[outside_id]
+        try:
+            AnalysisPipeline._check_model_payload(invalid,request,evidence,package=package)
+        except ValueError as exc:
+            assert str(exc)=="impact_requires_primary_event_evidence"
+        else:
+            raise AssertionError("unrelated or bank material cannot establish primary event evidence")
 
 
 def test_adaptation_merges_additional_evidence_without_dropping_primary():
@@ -347,3 +574,16 @@ def test_long_event_model_projection_keeps_original_revision_and_reports_partial
     assert "event_text_excerpt_only" in result.coverage.limitations
     assert result.status=="partial"
     assert request.event.text==text.strip()
+
+
+def test_invalid_model_returns_attributed_local_evidence_not_unchecked_prose(tmp_path):
+    corpus=store(tmp_path,with_bank=False)
+    model=FakeLLM(['{"summary":"непроверенный вывод"}','{"claims":"неверно"}'])
+    result=AnalysisPipeline(corpus,model).run(req())
+    assert result.status=='partial'
+    assert result.execution_mode=='baseline'
+    assert result.usage['model_calls']==2
+    assert 'непроверенный вывод' not in result.summary
+    reports=[claim for claim in result.claims if claim.kind=='external_fact']
+    assert reports and all(claim.evidence_refs for claim in reports)
+    assert 'model_analysis_unavailable_attributed_evidence_only' in result.coverage.limitations

@@ -1,0 +1,77 @@
+{
+  "schema_version": "business-scenario-evaluation-v1",
+  "scenario": "new-multiactivity-terminal-closure",
+  "classification": "synthetic_fixture",
+  "purpose": "Проверить границы доказательств, tenant/source scope и прохождение baseline-пути; не оценка смыслового качества модели.",
+  "expected_grounds": [
+    {
+      "id": "multiple-activities",
+      "company_id": "sensorworks",
+      "expected": [
+        "Производство промышленных датчиков",
+        "Разработка встроенного программного обеспечения",
+        "Импорт керамических изоляторов"
+      ],
+      "source": "scenario:profile:activity-1..3",
+      "automated_check": "all activity labels survive CompanyContext validation and workflow onboarding"
+    },
+    {
+      "id": "possible-input-channel",
+      "expected": "Сообщение о задержке керамических изоляторов может быть проверено относительно заявленного использования этих компонентов.",
+      "basis": [
+        "scenario:profile:resource",
+        "wire-a:terminal-closure"
+      ],
+      "limit": "Не доказывает прямую поставку этой компании, долю импорта или влияние на выпуск."
+    },
+    {
+      "id": "attributed-counter-report",
+      "expected": "wire-a сообщает о временном закрытии; wire-b передаёт сообщение оператора о штатной работе.",
+      "basis": [
+        "wire-a:terminal-closure",
+        "wire-b:terminal-status"
+      ],
+      "limit": "Сообщения объединяются по совпавшему конкретному заголовку и дню в одну группу для проверки. Это не устанавливает, какое сообщение верно; independence_status остаётся unknown."
+    },
+    {
+      "id": "weak-analogy",
+      "expected": "Случай остановки завода на другом маршруте — только повод проверить гипотезу.",
+      "basis": [
+        "wire-a:weak-analogy"
+      ],
+      "limit": "Нет доказанного общего поставщика, маршрута, причины, зависимости или причинной цепочки для sensorworks."
+    },
+    {
+      "id": "profile-unknowns",
+      "expected": "Поставщик, терминал, доля импорта, критичность и покрытие запасами неизвестны.",
+      "basis": [
+        "sensorworks-assertion-supplier",
+        "sensorworks-unknown-exposure"
+      ]
+    }
+  ],
+  "forbidden_assertions": [
+    "Альфа-Банк считает/прогнозирует/рекомендует что-либо: bank source в сценарии отсутствует.",
+    "sensorworks получает керамику именно через Северный причал или у конкретного поставщика.",
+    "Известна доля импорта, выручки, себестоимости, критичных закупок или покрытия запасами.",
+    "Закрытие терминала уже остановило производство, ухудшило результат или вызовет измеримый убыток.",
+    "Второе синтетическое сообщение независимо подтверждает первое или однозначно опровергает его.",
+    "Аналогичный случай на другом маршруте доказывает персональную причинность или риск для sensorworks.",
+    "Отсутствие керамической зависимости в профиле softnorth означает доказанное отсутствие такой связи."
+  ],
+  "automated_contract_checks": [
+    "Collector uses fixture responses; no live network/model calls.",
+    "Two companies and one tenant receive candidates only for permitted source snapshots.",
+    "All three activities survive; an unknown label has no forced services class.",
+    "Counter-message quotes retain source IDs; independence remains unknown.",
+    "wire-b is absent after source exclusion even though its document remains in the shared local corpus.",
+    "A second tenant cannot read the first tenant's documents/events/candidates.",
+    "Candidates use baseline mode and do not include bank_view claims without bank evidence.",
+    "Analogy path does not create a causal edge or a known exposure percentage."
+  ],
+  "not_proven_by_this_fixture": [
+    "Semantic accuracy or completeness of a real LLM response.",
+    "Real-world truth of either terminal report, independence of publishers, supplier identity, or business exposure.",
+    "Production readiness, broad retrieval recall, or statistically significant improvement."
+  ]
+}

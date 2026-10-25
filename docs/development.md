@@ -88,3 +88,6 @@ uv run --frozen python scripts/export_contracts.py --check
 ## Ветки и коммиты
 
 Основная ветка — `main`. Рабочую ветку создавайте под одну задачу: `feat/<задача>`, `fix/<задача>` или `docs/<задача>`. После включения в `main` удаляйте её. Коммиты оформляйте как `type: описание на русском`, сохраняя своё обычное авторство. Инструкция для нового участника: [передача проекта](handoff.md).
+
+
+Проверка смешанного бизнеса без сети и модели: `docker compose run --build --rm intelligence demo-business`. На хосте из `apps/intelligence`: `.venv/bin/python -m intelligence demo-business --state-dir /tmp/alfa-business-demo`. Отдельный набор регрессий: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/test_company_context.py tests/test_workflow_extension.py tests/test_business_scenario.py`. Полный набор и экспорт контрактов проверяются перед завершением изменений.

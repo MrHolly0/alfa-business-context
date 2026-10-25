@@ -142,3 +142,22 @@ def test_pipeline_default_is_safe_analysis_v2_baseline(tmp_path):
     result = AnalysisPipeline(store(tmp_path)).run(req())
     assert result.versions.analyst_config == "baseline@1"
     assert result.versions.prompt == "analysis-v2"
+
+
+def test_register_legacy_default_fields_preserves_original_revision_bytes(tmp_path):
+    import hashlib
+    import json
+    registry=PromptRegistry(tmp_path/'legacy.sqlite3')
+    config=AnalystConfig(config_id='baseline')
+    legacy=config.model_dump(mode='json')
+    for key in ['max_depth','retrieval_expansions','examples']:legacy.pop(key)
+    raw=json.dumps(legacy,sort_keys=True,separators=(',',':'),ensure_ascii=False)
+    digest=hashlib.sha256(raw.encode()).hexdigest()
+    with registry._db() as db:
+        db.execute('UPDATE configs SET config_json=?,content_hash=? WHERE ref=?',(raw,digest,config.ref))
+    registered=registry.register(config)
+    assert registered['content_hash']==digest
+    with registry._db() as db:
+        assert db.execute('SELECT config_json FROM configs WHERE ref=?',(config.ref,)).fetchone()[0]==raw
+    with pytest.raises(ValueError,match='immutable'):
+        registry.register(AnalystConfig(config_id='baseline',focus=['costs']))

@@ -12,6 +12,15 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
+class ValidWindowModel(StrictModel):
+    @model_validator(mode="after")
+    def valid_date_window(self):
+        start, end = getattr(self, "valid_from", None), getattr(self, "valid_until", None)
+        if start is not None and end is not None and end < start:
+            raise ValueError("valid_until must be greater than or equal to valid_from")
+        return self
+
+
 def _aware(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("datetime must include a timezone")
@@ -21,7 +30,7 @@ def _aware(value: datetime) -> datetime:
 NonEmpty = Annotated[str, Field(min_length=1, max_length=8000)]
 
 
-class ProvenancedDependency(StrictModel):
+class ProvenancedDependency(ValidWindowModel):
     dependency_id: NonEmpty
     label: NonEmpty
     kind: NonEmpty
@@ -30,25 +39,93 @@ class ProvenancedDependency(StrictModel):
     source_node: str = Field(default="company", max_length=256)
     target_node: str | None = Field(default=None, max_length=256)
     evidence_refs: list[str] = Field(default_factory=list, max_length=20)
+    observed_at: datetime | None = None
     valid_from: datetime | None = None
     valid_until: datetime | None = None
 
-    _valid_dates = field_validator("valid_from", "valid_until")(lambda v: _aware(v) if v else v)
+    _valid_dates = field_validator("observed_at", "valid_from", "valid_until")(lambda v: _aware(v) if v else v)
 
 
-class CompanyFact(StrictModel):
+CompanyAssertionKind = Literal[
+    "product", "service", "resource", "cost", "market", "territory",
+    "supplier", "customer_group", "contract", "horizon", "dependency", "other",
+]
+CompanyAssertionStatus = Literal["confirmed", "assumption", "contradiction", "unknown"]
+ActivityClass = Literal[
+    "manufacturing", "trade", "logistics", "software", "import", "export",
+    "agriculture", "construction", "finance", "other",
+]
+
+
+class CompanyFact(ValidWindowModel):
     fact_id: NonEmpty
     text: NonEmpty
     provenance: NonEmpty
+    status: CompanyAssertionStatus = "confirmed"
+    evidence_refs: list[NonEmpty] = Field(default_factory=list, max_length=20)
+    observed_at: datetime | None = None
+    valid_from: datetime | None = None
+    valid_until: datetime | None = None
+
+    _aware_dates = field_validator("observed_at", "valid_from", "valid_until")(
+        lambda value: _aware(value) if value else value
+    )
+
+
+class CompanyAssertion(ValidWindowModel):
+    """A versionable profile statement with explicit status and source lineage."""
+    assertion_id: NonEmpty
+    kind: CompanyAssertionKind
+    label: NonEmpty
+    status: CompanyAssertionStatus
+    provenance: NonEmpty
+    evidence_refs: list[NonEmpty] = Field(default_factory=list, max_length=20)
+    observed_at: datetime | None = None
+    valid_from: datetime | None = None
+    valid_until: datetime | None = None
+
+    _aware_dates = field_validator("observed_at", "valid_from", "valid_until")(
+        lambda value: _aware(value) if value else value
+    )
+
+
+class CompanyActivity(ValidWindowModel):
+    """An activity label is retained even when no normalized class is known."""
+    activity_id: NonEmpty
+    label: NonEmpty
+    normalized_class: ActivityClass | None = None
+    status: CompanyAssertionStatus = "confirmed"
+    provenance: NonEmpty
+    evidence_refs: list[NonEmpty] = Field(default_factory=list, max_length=20)
+    observed_at: datetime | None = None
+    valid_from: datetime | None = None
+    valid_until: datetime | None = None
+
+    _aware_dates = field_validator("observed_at", "valid_from", "valid_until")(
+        lambda value: _aware(value) if value else value
+    )
 
 
 class CompanyContext(StrictModel):
+    schema_version: Literal["company-context-v2"] = "company-context-v2"
     name: NonEmpty
     industry: Annotated[str, Field(max_length=1000)] = ""
     description: Annotated[str, Field(max_length=4000)] = ""
     role: Annotated[str, Field(max_length=1000)] = ""
     dependencies: list[ProvenancedDependency] = Field(default_factory=list, max_length=100)
     facts: list[CompanyFact] = Field(default_factory=list, max_length=100)
+    activities: list[CompanyActivity] = Field(default_factory=list, max_length=100)
+    assertions: list[CompanyAssertion] = Field(default_factory=list, max_length=200)
+
+    @model_validator(mode="after")
+    def context_ids_are_unique(self):
+        identifiers = [item.dependency_id for item in self.dependencies]
+        identifiers.extend(item.fact_id for item in self.facts)
+        identifiers.extend(item.activity_id for item in self.activities)
+        identifiers.extend(item.assertion_id for item in self.assertions)
+        if len(identifiers) != len(set(identifiers)):
+            raise ValueError("company context identifiers must be unique")
+        return self
 
 
 class EventInput(StrictModel):
@@ -101,6 +178,8 @@ class AnalysisRequest(StrictModel):
             raise ValueError("event cannot be published after as_of")
         identifiers = [d.dependency_id for d in self.company.dependencies]
         identifiers += [f.fact_id for f in self.company.facts]
+        identifiers += [a.activity_id for a in self.company.activities]
+        identifiers += [a.assertion_id for a in self.company.assertions]
         if len(set(identifiers)) != len(identifiers):
             raise ValueError("company context identifiers must be unique")
         return self

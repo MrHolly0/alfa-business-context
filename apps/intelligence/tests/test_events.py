@@ -375,3 +375,22 @@ def test_extractor_error_is_cached_as_honest_fallback_metadata(store):
     assert metadata["model_error"]=="RuntimeError"
     assert "semantic_extraction_failed" in metadata["limitations"]
     assert all(claim.kind=="reported_fact" for claim in claims)
+
+
+def test_specific_same_day_incident_title_groups_opposing_reports_for_review(tmp_path):
+    store=EventStore(tmp_path/'opposing.sqlite3')
+    title='Закрыт экспортный терминал Северного причала'
+    first=store.ingest(publication(title=title,content='Издание сообщает о закрытии терминала и задержке поставок.',document_revision_ref='doc-a@1'))
+    counter=store.ingest(publication(source='src-b',uri='https://other.example/status',title=title,
+        content='Оператор сообщает: терминал открыт, поставки идут штатно.',document_revision_ref='doc-b@1'))
+    assert counter['event_id']==first['event_id']
+    assert counter['grouping']=='matching_title_review_group'
+    package=store.build_impact_package('tenant-a',first['event_id'],source_policy_id='policy',policy_version='1',allowed_source_ids=['src-a','src-b'])
+    assert {claim.source_id for claim in package.claims}=={'src-a','src-b'}
+    assert any('закрытии' in claim.quote for claim in package.claims)
+    assert any('открыт' in claim.quote for claim in package.claims)
+    assert package.coverage.independence_status=='unknown'
+    replay=store.ingest(publication(title=title,content='Издание сообщает о закрытии терминала и задержке поставок.',document_revision_ref='doc-a@1'))
+    assert replay['changed'] is False
+    with store._connect() as db:
+        assert db.execute('SELECT COUNT(*) FROM publication_versions').fetchone()[0]==2

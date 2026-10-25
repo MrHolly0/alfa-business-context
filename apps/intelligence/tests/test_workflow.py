@@ -58,12 +58,12 @@ def task(tmp_path, *, request_id="request-1", businesses=None, source_policy=Non
         businesses=businesses, data_classification="public", **kwargs)
 
 
-def workflow(tmp_path, *responses):
+def workflow(tmp_path, *responses, clock=None):
     fetcher = FixtureFetcher(*(responses or (FetchResult(status=200,
         headers={"content-type": "application/rss+xml", "etag": '"feed-1"'}, body=FEED),)))
     state = tmp_path / "state"
     # DataWorkflow owns the real CorpusStore; attach a collector using it after construction.
-    instance = DataWorkflow(state)
+    instance = DataWorkflow(state, clock=clock or (lambda: NOW))
     instance.collector = NewsCollector(instance.store, state_path=state / "poll.sqlite3",
         fetcher=fetcher, raw_dir=state / "raw")
     return instance, fetcher
@@ -294,13 +294,13 @@ def test_latest_mode_includes_documents_received_after_requested_as_of(tmp_path,
         def now(cls, tz=None): return NOW + timedelta(hours=2)
     monkeypatch.setattr(workflow_module, "datetime", FixedDateTime)
     requested = NOW - timedelta(days=1)
-    as_of_workflow, _ = workflow(tmp_path / "as-of")
+    as_of_workflow, _ = workflow(tmp_path / "as-of", clock=lambda: NOW + timedelta(hours=2))
     as_of_result = as_of_workflow.run(task(tmp_path, request_id="as-of", as_of=requested,
         operation="collect", trigger="scheduled"))
     assert as_of_result.events == []
     assert as_of_result.coverage["analysis_as_of"] == requested.isoformat()
 
-    latest_workflow, _ = workflow(tmp_path / "latest")
+    latest_workflow, _ = workflow(tmp_path / "latest", clock=lambda: NOW + timedelta(hours=2))
     latest_result = latest_workflow.run(task(tmp_path, request_id="latest", as_of=requested,
         operation="collect", trigger="scheduled", knowledge_mode="latest"))
     assert len(latest_result.events) == 1

@@ -74,3 +74,6 @@ uv export --frozen --only-group dev --no-emit-project -o requirements-dev.lock
 ```
 
 После этого выполните Docker test и schema check, прежде чем считать сборку воспроизводимой. Составная архитектура и внешние зависимости описаны в [architecture](../docs/architecture.md), [contracts](../contracts/intelligence/README.md) и [readiness matrix](../docs/ai-scope-and-readiness.md).
+
+
+Новый профиль с несколькими направлениями и локальными источниками проверяется командой `docker compose run --build --rm intelligence demo-business`. По умолчанию она не вызывает модель. Для модели нужен явный `--mode model`, проверенный provider config и прежний общий ledger в named volume; новый state path не даёт нового разрешения на расходы.

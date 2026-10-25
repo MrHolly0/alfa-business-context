@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import re
 from datetime import datetime, timezone
 from importlib.resources import files
 from typing import Any, Callable
@@ -16,12 +17,27 @@ from .parsers import parse_content
 from .schemas import AnalysisRequest, CandidateAssessment, CandidateClaim, InfluenceEdge, ModelAnswer
 from .analysts import AnalystConfig, PromptRegistry
 from .events import ImpactPackage
+from .company_context import project_company_context
 
 PROMPT_VERSION = "analysis-v2"
-PIPELINE_VERSION = "bounded-pipeline-v1"
+PIPELINE_VERSION = "bounded-pipeline-v2"
 MAX_MODEL_EVENT_CHARS = 2_000
 MAX_QUERY_CHARS = 320
 MAX_EVIDENCE = 16
+_REPAIR_DIAGNOSTIC_CODES = frozenset({
+    "invalid_model_shape", "duplicate_claim_id", "unknown_evidence_id", "unknown_context_id",
+    "context_outside_validity_window", "context_not_confirmed_or_active", "impact_requires_primary_event_evidence",
+    "hypothesis_missing_context_or_checks", "hypothesis_requires_external_event_evidence",
+    "hypothesis_uses_unconfirmed_context", "hypothesis_uses_non_dependency_context",
+    "recommendation_requires_event_evidence", "recommendation_uses_unconfirmed_context",
+    "recommendation_uses_non_dependency_context", "bank_unknown_must_not_cite_evidence",
+    "model_influence_edge_must_be_hypothesis", "hypothesis_chain_missing_basis_or_checks",
+    "duplicate_chain_evidence_ref", "duplicate_chain_context_ref", "unknown_chain_evidence",
+    "influence_edge_requires_external_evidence", "influence_edge_requires_primary_event_evidence",
+    "unknown_chain_context", "chain_uses_unconfirmed_context", "chain_context_outside_validity_window",
+    "chain_context_not_confirmed_or_active", "chain_uses_non_dependency_context",
+    "max_influence_chain_depth_exceeded", "duplicate_edge_id",
+})
 ANALYST_PREFERENCE_GUIDANCE = (
     "Bounded analyst preference meanings (fixed application guidance): focus values are review lenses, "
     "not claims or evidence requirements; costs means operating/input costs, liquidity means cash and financing, "
@@ -31,6 +47,7 @@ ANALYST_PREFERENCE_GUIDANCE = (
     "answer_style concise means prioritize the main finding and one check, "
     "balanced means explain finding, basis, and uncertainty, detailed means include material alternatives and checks. "
     "horizon short means immediate to 30 days, quarter means up to 3 months, long means beyond 3 months. "
+    "Closed examples guide checks, never facts or evidence. max_depth caps influence hypotheses. "
     "These preferences never relax grounding, evidence, uncertainty, JSON-schema, or safety requirements."
 )
 
@@ -111,7 +128,7 @@ class AnalysisPipeline:
                 candidate = self._baseline(request, evidence, trace, usage)
             else:
                 candidate = self._model_candidate(request, evidence, trace, usage, step, config, package=package, data_classification=data_classification)
-            candidate = self._validate_candidate(candidate, request, evidence, usage, trace, event_ingest, config)
+            candidate = self._validate_candidate(candidate, request, evidence, usage, trace, event_ingest, config, package=package)
             if package:
                 candidate.shared_package_ref = package.get("package_id")
                 candidate.usage["shared_package_ref"] = package.get("package_id")
@@ -185,8 +202,11 @@ class AnalysisPipeline:
                 if not broad:
                     terms.append(request.event.text[:MAX_QUERY_CHARS])
             else:
-                terms = [d.label for d in request.company.dependencies if d.status == "confirmed"]
-                terms += [f.text for f in request.company.facts]
+                projection = project_company_context(request.company, as_of=request.as_of)
+                terms = [d.label for d in projection.dependencies]
+                terms += [f.text for f in projection.facts]
+                terms += [a.label for a in projection.activities]
+                terms += [a.label for a in projection.assertions]
                 if broad:
                     terms += [request.company.name, request.company.description, request.company.role, request.company.industry]
                 # Analyst profile expansions are constrained query terms. They
@@ -252,12 +272,18 @@ class AnalysisPipeline:
 
     @classmethod
     def _has_active_company_context(cls, request):
-        return (any(d.status == "confirmed" and cls._context_is_current(d, request.as_of)
-                    for d in request.company.dependencies) or
-                any(cls._context_is_current(f, request.as_of) for f in request.company.facts))
+        projection = project_company_context(request.company, as_of=request.as_of)
+        return bool(projection.activities or projection.assertions or projection.dependencies or projection.facts)
 
     @staticmethod
-    def _primary_ids(request, evidence):
+    def _primary_ids(request, evidence, package=None):
+        if package is not None:
+            package_sources = {(str(source.get("source_id") or ""), str(source.get("document_revision_ref") or ""))
+                               for source in package.get("sources", [])
+                               if source.get("source_role") == "external" and source.get("document_revision_ref")}
+            return {item["evidence_id"] for item in evidence
+                    if item.get("source_role") == "external"
+                    and (str(item.get("source_id") or ""), str(item.get("document_revision_ref") or "")) in package_sources}
         original = parse_content(request.event.text, "text/plain").text
         return {e["evidence_id"] for e in evidence if e["source_role"] == "external"
                 and e["source_id"] == request.event.source_id and e["quote"] in original}
@@ -268,7 +294,7 @@ class AnalysisPipeline:
                 any(item.get("data_classification","confidential") not in {"public","synthetic"} for item in evidence)):
             usage["errors"].append("external_model_data_classification_denied")
             return self._empty_payload(evidence)
-        if not self._primary_ids(request, evidence):
+        if not self._primary_ids(request, evidence, package=package):
             usage["errors"].append("primary_event_evidence_missing")
             return self._empty_payload(evidence)
         configured_output = getattr(getattr(self.llm, "config", None), "max_output_tokens", request.budget.max_output_tokens)
@@ -278,6 +304,7 @@ class AnalysisPipeline:
             usage["errors"].append("model_call_budget_zero")
             return self._empty_payload(evidence)
         context = self._context_payload(request)
+        company_projection = project_company_context(request.company, as_of=request.as_of)
         if context["event_text_truncated"]:
             trace.append({"stage": "event_context_bounded", "original_characters": len(request.event.text),
                           "projected_characters": len(context["event"]["text"])})
@@ -285,12 +312,18 @@ class AnalysisPipeline:
         system = files("intelligence.prompts").joinpath(f"{PROMPT_VERSION}.system.ru.txt").read_text("utf-8")
         payload = {"REQUEST_CONTEXT": context, "RETRIEVED_EVIDENCE": evidence,
                    "ANALYST_PREFERENCES": {"focus": config.focus, "answer_style": config.answer_style,
-                      "horizon": config.horizon, "retrieval_strategy": config.retrieval_strategy},
+                      "horizon": config.horizon, "retrieval_strategy": config.retrieval_strategy,
+                      "max_depth": config.max_depth,
+                      "examples": [example.model_dump(mode="json") for example in config.examples]},
                    "OUTPUT_JSON_SCHEMA": ModelAnswer.model_json_schema(),
-                   "PRIMARY_EVENT_EVIDENCE_IDS": sorted(self._primary_ids(request,evidence)),
-                   "CONFIRMED_CONTEXT_IDS": [d.dependency_id for d in request.company.dependencies if d.status=="confirmed" and self._context_is_current(d,request.as_of)] + [f.fact_id for f in request.company.facts if self._context_is_current(f,request.as_of)],
-                   "UNCONFIRMED_CONTEXT_IDS": [d.dependency_id for d in request.company.dependencies if d.status!="confirmed"],
-                   "CONTEXT_REFERENCE_RULE": "context_refs contains only dependency_id or fact_id; model_hypothesis and recommendation may cite confirmed dependencies/facts only.",
+                   "PRIMARY_EVENT_EVIDENCE_IDS": sorted(self._primary_ids(request,evidence,package=package)),
+                   "CONFIRMED_CONTEXT_IDS": [getattr(item, "dependency_id", getattr(item, "fact_id", getattr(item, "activity_id", getattr(item, "assertion_id", None))))
+                       for item in (*company_projection.dependencies, *company_projection.facts,
+                                    *company_projection.activities, *company_projection.assertions)],
+                   "IMPACT_CONTEXT_IDS": [getattr(item, "dependency_id", getattr(item, "fact_id", getattr(item, "activity_id", getattr(item, "assertion_id", None))))
+                       for item in (*company_projection.dependencies, *company_projection.facts,
+                                    *company_projection.activities, *company_projection.assertions)
+                       if self._context_can_ground_impact(item)],
                    "HORIZON_AND_CONFIRMATION_GUIDANCE": "For each hypothesis or recommendation, state a bounded horizon and observable confirmation_conditions. Do not invent a condition; if unavailable, ask a specific question in clarifications. Keep alternatives and falsifiers separate."}
         # Explicit user permission covers only public/synthetic shared material.
         # Both the execution grant and every persisted source must allow disclosure;
@@ -393,19 +426,19 @@ class AnalysisPipeline:
                 break
             try:
                 parsed = json.loads(raw)
-                self._check_model_payload(parsed, request, evidence)
+                self._check_model_payload(parsed, request, evidence, config=config, package=package)
                 return parsed
             except (ValueError, TypeError, ValidationError, json.JSONDecodeError) as exc:
                 errors = self._repair_diagnostics(exc)
                 trace.append({"stage": "model_output_rejected", "reason": type(exc).__name__, "diagnostics": errors})
                 if attempt + 1 >= max_calls:
-                    usage["errors"].append("model_output_rejected:" + type(exc).__name__)
+                    usage["errors"].append("model_output_rejected:" + errors[0]["type"])
                     break
                 repair = True
         return self._empty_payload(evidence)
 
     @staticmethod
-    def _check_model_payload(payload, request, evidence):
+    def _check_model_payload(payload, request, evidence, *, config=None, package=None):
         if not isinstance(payload, dict):
             raise ValueError("invalid_model_shape")
         answer = ModelAnswer.model_validate(payload)
@@ -417,40 +450,52 @@ class AnalysisPipeline:
             raise ValueError("duplicate_claim_id")
         payload["claims"] = [c.model_dump(mode="json") for c in normalized_claims]
         refs = {x["evidence_id"]: x for x in evidence}
-        primary_ids = AnalysisPipeline._primary_ids(request, evidence)
+        primary_ids = AnalysisPipeline._primary_ids(request, evidence, package=package)
         contexts = {x.dependency_id: x for x in request.company.dependencies}
         contexts.update({x.fact_id: x for x in request.company.facts})
+        contexts.update({x.activity_id: x for x in request.company.activities})
+        contexts.update({x.assertion_id: x for x in request.company.assertions})
+        projection = project_company_context(request.company, as_of=request.as_of)
+        confirmed_context_ids = {getattr(item, "dependency_id", getattr(item, "fact_id", getattr(item, "activity_id", getattr(item, "assertion_id", None))))
+            for item in (*projection.dependencies, *projection.facts, *projection.activities, *projection.assertions)}
         for claim_index, claim in enumerate(payload["claims"]):
             # CandidateClaim validation above normalizes defaults before ref checking.
-            if any(ref not in refs for ref in claim["evidence_refs"]):
-                raise ValueError("unknown_evidence_id")
-            if any(ref not in contexts for ref in claim["context_refs"]):
-                raise ValueError("unknown_context_id")
-            if any(not AnalysisPipeline._context_is_current(contexts[ref], request.as_of)
-                   for ref in claim["context_refs"]):
-                raise ValueError("context_outside_validity_window")
+            for evidence_index, ref in enumerate(claim["evidence_refs"]):
+                if ref not in refs:
+                    raise _GroundingError("unknown_evidence_id", ["claims", claim_index, "evidence_refs", evidence_index])
+            for context_index, ref in enumerate(claim["context_refs"]):
+                if ref not in contexts:
+                    raise _GroundingError("unknown_context_id", ["claims", claim_index, "context_refs", context_index])
+                if ref not in confirmed_context_ids:
+                    if not AnalysisPipeline._context_is_current(contexts[ref], request.as_of):
+                        raise _GroundingError("context_outside_validity_window", ["claims", claim_index, "context_refs", context_index])
+                    raise _GroundingError("context_not_confirmed_or_active", ["claims", claim_index, "context_refs", context_index])
             if claim["kind"] == "external_fact" and (not claim["evidence_refs"] or any(refs[r]["source_role"] != "external" for r in claim["evidence_refs"])):
                 raise _GroundingError("external_fact_requires_external_evidence", ["claims", claim_index, "evidence_refs"])
             if claim["kind"] == "bank_view":
                 if claim.get("origin") != "bank" or not claim["evidence_refs"] or any(refs[r]["source_role"] != "bank" for r in claim["evidence_refs"]):
                     raise _GroundingError("bank_view_requires_bank_evidence", ["claims", claim_index, "evidence_refs"])
             if claim["kind"] in {"model_hypothesis", "recommendation"} and not primary_ids.intersection(claim["evidence_refs"]):
-                raise ValueError("impact_requires_primary_event_evidence")
+                raise _GroundingError("impact_requires_primary_event_evidence", ["claims", claim_index, "evidence_refs"])
             if claim["kind"] == "model_hypothesis":
                 if not claim["context_refs"] or not claim["evidence_refs"] or not claim["alternatives"] or not claim["falsifiers"]:
-                    raise ValueError("hypothesis_missing_context_or_checks")
+                    raise _GroundingError("hypothesis_missing_context_or_checks", ["claims", claim_index])
                 if any(refs[r]["source_role"] != "external" for r in claim["evidence_refs"]):
-                    raise ValueError("hypothesis_requires_external_event_evidence")
+                    raise _GroundingError("hypothesis_requires_external_event_evidence", ["claims", claim_index, "evidence_refs"])
                 for ref in claim["context_refs"]:
                     item = contexts[ref]
                     if getattr(item, "status", "confirmed") != "confirmed":
-                        raise ValueError("hypothesis_uses_unconfirmed_context")
+                        raise _GroundingError("hypothesis_uses_unconfirmed_context", ["claims", claim_index, "context_refs"])
+                    if not AnalysisPipeline._context_can_ground_impact(item):
+                        raise _GroundingError("hypothesis_uses_non_dependency_context", ["claims", claim_index, "context_refs"])
             if claim["kind"] == "recommendation":
                 if (not claim["evidence_refs"] or not claim["context_refs"]
                         or any(refs[r]["source_role"] != "external" for r in claim["evidence_refs"])):
-                    raise ValueError("recommendation_requires_event_evidence")
+                    raise _GroundingError("recommendation_requires_event_evidence", ["claims", claim_index])
                 if any(getattr(contexts[r], "status", "confirmed") != "confirmed" for r in claim["context_refs"]):
-                    raise ValueError("recommendation_uses_unconfirmed_context")
+                    raise _GroundingError("recommendation_uses_unconfirmed_context", ["claims", claim_index, "context_refs"])
+                if any(not AnalysisPipeline._context_can_ground_impact(contexts[ref]) for ref in claim["context_refs"]):
+                    raise _GroundingError("recommendation_uses_non_dependency_context", ["claims", claim_index, "context_refs"])
             if claim["kind"] == "unknown" and claim.get("origin") == "bank" and claim["evidence_refs"]:
                 raise ValueError("bank_unknown_must_not_cite_evidence")
         for edge_index, item in enumerate(payload["influence_chain"]):
@@ -476,11 +521,34 @@ class AnalysisPipeline:
                     raise ValueError("unknown_chain_context")
                 if getattr(contexts[ref], "status", "confirmed") != "confirmed":
                     raise ValueError("chain_uses_unconfirmed_context")
-                if not AnalysisPipeline._context_is_current(contexts[ref], request.as_of):
-                    raise ValueError("chain_context_outside_validity_window")
+                if ref not in confirmed_context_ids:
+                    if not AnalysisPipeline._context_is_current(contexts[ref], request.as_of):
+                        raise ValueError("chain_context_outside_validity_window")
+                    raise ValueError("chain_context_not_confirmed_or_active")
+                if not AnalysisPipeline._context_can_ground_impact(contexts[ref]):
+                    raise ValueError("chain_uses_non_dependency_context")
+        if config is not None and len(payload["influence_chain"]) > config.max_depth:
+            raise ValueError("max_influence_chain_depth_exceeded")
         edge_ids = [item["edge_id"] for item in payload["influence_chain"]]
         if len(set(edge_ids)) != len(edge_ids):
             raise ValueError("duplicate_edge_id")
+
+    @staticmethod
+    def _context_can_ground_impact(item):
+        """Context may support impact only when it expresses a confirmed relation or business fact.
+
+        Activity labels are retrieval context; they alone do not establish input,
+        supplier, customer, contract, or route dependence. Explicit gap statements
+        in otherwise confirmed facts likewise cannot ground an impact hypothesis.
+        """
+        if hasattr(item, "activity_id") or getattr(item, "status", "confirmed") != "confirmed":
+            return False
+        if hasattr(item, "assertion_id"):
+            return getattr(item, "kind", None) in {"resource", "supplier", "customer_group", "contract", "dependency"}
+        if hasattr(item, "fact_id"):
+            text=str(getattr(item, "text", ""))
+            return not re.search(r"\b(?:нет|не|ни|неизвест\w*|отсутств\w*|неподтвержд\w*|не подтвержд\w*|не установ\w*|unknown|no confirmed|not known|not established)\b",text,flags=re.IGNORECASE)
+        return hasattr(item, "dependency_id")
 
     @staticmethod
     def _repair_diagnostics(exc: Exception) -> list[dict[str, Any]]:
@@ -490,7 +558,10 @@ class AnalysisPipeline:
         if isinstance(exc, ValidationError):
             return [{"type": str(item.get("type", "validation_error")),
                      "loc": list(item.get("loc", []))} for item in exc.errors(include_input=False)]
-        return [{"type": str(exc), "loc": []}]
+        if isinstance(exc, json.JSONDecodeError):
+            return [{"type": "invalid_json", "loc": []}]
+        code = str(exc) if isinstance(exc, ValueError) and str(exc) in _REPAIR_DIAGNOSTIC_CODES else "invalid_model_output"
+        return [{"type": code, "loc": []}]
 
     def _baseline(self, request, evidence, trace, usage):
         trace.append({"stage": "baseline"})
@@ -518,14 +589,15 @@ class AnalysisPipeline:
                 "claims": claims, "influence_chain": [],
                 "clarifications": [] if supported else ["Подтвердите зависимости или факты компании, связанные с событием."]}, status
 
-    def _validate_candidate(self, payload, request, evidence, usage, trace, event_ingest, config=None):
+    def _validate_candidate(self, payload, request, evidence, usage, trace, event_ingest, config=None, *, package=None):
         status = "partial"
+        local_fallback = self.llm is not None and isinstance(payload, tuple)
         if isinstance(payload, tuple):
             payload, status = payload
         elif self.llm is not None and not usage["errors"]:
             status = "partial"
         try:
-            self._check_model_payload(payload, request, evidence)
+            self._check_model_payload(payload, request, evidence, config=config, package=package)
             claims = [CandidateClaim.model_validate(c) for c in payload["claims"]]
         except Exception as exc:
             usage["errors"].append("candidate_validation:" + type(exc).__name__)
@@ -559,26 +631,30 @@ class AnalysisPipeline:
               or not self._has_active_company_context(request)
               or not any(c.kind in {"model_hypothesis", "recommendation"} for c in claims)):
             status = "partial"
-        clarifications = list(payload.get("clarifications", []))
+        projection = project_company_context(request.company, as_of=request.as_of)
+        clarifications = list(dict.fromkeys([*payload.get("clarifications", []),
+            *(question.question for question in projection.questions)]))[:30]
         if missing_confirmation:
             clarifications.append("Уточните наблюдаемый показатель или событие, которое подтвердит гипотезу.")
             status = "partial"
-        limitations = []
+        limitations = list(projection.limitations)
+        if local_fallback:
+            limitations.append("model_analysis_unavailable_attributed_evidence_only")
+            trace.append({"stage":"local_evidence_fallback","reason":"model_answer_unavailable_or_rejected"})
         if len(request.event.text) > MAX_MODEL_EVENT_CHARS:
             limitations.append("event_text_excerpt_only")
             if status == "ready": status = "partial"
         return CandidateAssessment(request_id=request.request_id, tenant_id=request.tenant_id,
             company_id=request.company_id, status=status,
-            execution_mode="baseline" if self.llm is None else "model",
+            execution_mode="baseline" if self.llm is None or local_fallback else "model",
             summary=payload.get("summary", "Оснований для надёжного вывода недостаточно."), claims=claims,
             evidence=evidence,
             influence_chain=payload.get("influence_chain", []),
             clarifications=list(dict.fromkeys(clarifications))[:30],
             coverage={"external": sum(e["source_role"] == "external" for e in evidence),
                       "bank": sum(e["source_role"] == "bank" for e in evidence),
-                      "confirmed_dependencies": sum(d.status == "confirmed" and self._context_is_current(d, request.as_of)
-                                                     for d in request.company.dependencies),
-                      "company_facts": len(request.company.facts), "limitations": limitations},
+                      "confirmed_dependencies": len(projection.dependencies),
+                      "company_facts": len(projection.facts), "limitations": limitations},
             versions={"prompt": PROMPT_VERSION, "analyst_config": config.ref if config else "baseline@1", "pipeline": PIPELINE_VERSION,
                       "model": next((a.get("model") for a in reversed(usage["attempts"]) if a.get("model")), None),
                       "context": request.context_version, "source_policy": request.source_policy_version,
@@ -591,10 +667,16 @@ class AnalysisPipeline:
     @staticmethod
     def _context_payload(request):
         event = request.event.model_dump(mode="json")
+        projection = project_company_context(request.company, as_of=request.as_of)
         # This projection never changes the request or its pinned corpus revision.
         # Exact primary quotes remain available in RETRIEVED_EVIDENCE.
         event["text"] = request.event.text[:MAX_MODEL_EVENT_CHARS]
-        return {"company": request.company.model_dump(mode="json"), "event": event,
+        company = request.company.model_dump(mode="json")
+        company.update({"activities": [item.model_dump(mode="json", exclude_none=True) for item in projection.activities],
+                       "assertions": [item.model_dump(mode="json", exclude_none=True) for item in projection.assertions],
+                       "dependencies": [item.model_dump(mode="json", exclude_none=True) for item in projection.dependencies],
+                       "facts": [item.model_dump(mode="json", exclude_none=True) for item in projection.facts]})
+        return {"company": company, "event": event,
                 "event_original_characters": len(request.event.text),
                 "event_text_truncated": len(request.event.text) > MAX_MODEL_EVENT_CHARS,
                 "context_version": request.context_version,
@@ -602,11 +684,25 @@ class AnalysisPipeline:
 
     @staticmethod
     def _empty_payload(evidence):
-        return {"summary": "Модель не вернула проверяемый разбор.", "claims": [],
-                "influence_chain": [], "clarifications": ["Проверьте исходные материалы и контекст компании."]}
+        # Never recycle rejected model prose. A local, attributed evidence view
+        # remains useful while an invalid/failed model answer is explicitly partial.
+        claims=[]
+        seen=set()
+        for item in evidence:
+            if item.get("source_role")!="external" or item["source_id"] in seen:continue
+            seen.add(item["source_id"])
+            claims.append({"claim_id":"source-report-"+str(len(claims)+1),"kind":"external_fact",
+                "text":"Источник «"+item["source_id"]+"» сообщает: "+item["quote"][:500],
+                "evidence_refs":[item["evidence_id"]],"context_refs":[],
+                "assumptions":[],"alternatives":[],"falsifiers":[]})
+            if len(claims)>=3:break
+        return ({"summary":"Модельный разбор недоступен. Показаны сообщения источников; влияние на компанию не установлено.",
+            "claims":claims,"influence_chain":[],
+            "clarifications":["Какая подтверждённая зависимость связывает компанию с этим событием? Требуется проверка по исходным материалам."]},"partial")
 
     def _unknown(self, request, trace, usage, status, evidence=None, config=None):
         evidence = evidence or []
+        projection = project_company_context(request.company, as_of=request.as_of)
         bank_missing = not any(e.get("source_role") == "bank" for e in evidence)
         unknown_claim = CandidateClaim(claim_id="bank-unknown" if bank_missing else "analysis-unknown",
             kind="unknown", text=("Среди использованных материалов не подтверждена позиция банка по этому событию."
@@ -617,12 +713,14 @@ class AnalysisPipeline:
             execution_mode="baseline" if self.llm is None else "model",
             summary="Данных недостаточно для обоснованного вывода о влиянии события.",
             claims=[unknown_claim], evidence=evidence, influence_chain=[],
-            clarifications=["Добавьте подтверждённые материалы и проверьте контекст компании."],
+            clarifications=list(dict.fromkeys(["Добавьте подтверждённые материалы и проверьте контекст компании.",
+                *(question.question for question in projection.questions)]))[:30],
             coverage={"external": sum(e.get("source_role") == "external" for e in evidence),
                       "bank": sum(e.get("source_role") == "bank" for e in evidence),
                       "confirmed_dependencies": sum(d.status == "confirmed" and self._context_is_current(d, request.as_of)
                                                      for d in request.company.dependencies),
-                      "company_facts": len(request.company.facts)},
+                      "company_facts": len(projection.facts),
+                      "limitations": projection.limitations},
             versions={"prompt": PROMPT_VERSION, "analyst_config": config.ref if config else self.analyst_config.ref if self.analyst_config else "baseline@1", "pipeline": PIPELINE_VERSION, "model": None,
                       "context": request.context_version, "source_policy": request.source_policy_version,
                       "as_of": request.as_of, "event_id": request.event.event_id,

@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from .artifacts import ArtifactStore, payload_hash
 from .schemas import AnalysisRequest, CandidateAssessment
-from .workflow import DataTask, DataResult, DataWorkflow, WorkflowNotStarted
+from .workflow import DataTask, DataResult, DataWorkflow, WorkflowNotStarted, WorkflowSnapshotConflict
 from .collection import SourcePolicySnapshot, SourceProbeRequest, SourceProbeResult
 from .client_data import CompanyContextPrepareRequest, CompanyContextPrepareResult, prepare_company_contexts
 from .relevance import RankRequest, RankResult, rank_events
@@ -182,6 +182,11 @@ def create_app(*, store, pipeline, artifact_store: ArtifactStore | None = None,
         try:
             prior = artifacts.get_candidate(tenant_id, req_id, digest)
         except ValueError as e: raise HTTPException(409, "idempotency_conflict") from e
+        if isinstance(request, DataTask):
+            try:
+                validate_snapshot=getattr(get_workflow(),'assert_current',None)
+                if validate_snapshot: validate_snapshot(request)
+            except WorkflowSnapshotConflict as exc: raise HTTPException(409, str(exc)) from exc
         if prior is not None: return prior
         try:
             owner_token = artifacts.claim_candidate(tenant_id, req_id, digest)
@@ -206,6 +211,8 @@ def create_app(*, store, pipeline, artifact_store: ArtifactStore | None = None,
             else:
                 result = CandidateAssessment.model_validate(pipeline.run(request))
             return artifacts.save_candidate(tenant_id, req_id, digest, result, owner_token=owner_token)
+        except WorkflowSnapshotConflict as e:
+            raise HTTPException(409, str(e)) from e
         except ValueError as e:
             if str(e) == "idempotency_conflict": raise HTTPException(409, "idempotency_conflict") from e
             code = str(e)
@@ -215,7 +222,7 @@ def create_app(*, store, pipeline, artifact_store: ArtifactStore | None = None,
     def get_workflow():
         nonlocal data_workflow
         if data_workflow is None:
-            data_workflow = DataWorkflow(Path(artifacts.path).parent,llm=getattr(pipeline,"llm",None),role_services=getattr(pipeline,"role_services",None))
+            data_workflow = DataWorkflow(Path(artifacts.path).parent,llm=getattr(pipeline,"llm",None),role_services=getattr(pipeline,"role_services",None),analyst_config=getattr(pipeline,"analyst_config",None))
         return data_workflow
 
     @app.post("/internal/v1/company-context/prepare",response_model=CompanyContextPrepareResult)

@@ -300,3 +300,29 @@ def test_fixture_schedule_endpoint_and_lifespan_create_ordinary_job(tmp_path):
         assert job["task"]["knowledge_mode"] == "latest"
         assert job["budget"]["max_model_calls"] == 0
 
+
+
+def test_secondary_company_new_version_rejects_whole_batch_before_outbox(tmp_path):
+    stand=CoreStand(tmp_path/'batch.db',clock=Clock())
+    job=envelope()
+    job['task']['businesses']=[{'company_id':'company-a','context_version':2},
+                               {'company_id':'company-b','context_version':5}]
+    stand.seed_job(job)
+    leased=stand.claim()['job']
+    stand.update_versions('tenant-a','company-b',6,3)
+    candidate={'schema_version':'ai-data-result-v1','versions':{'context':2,'source_policy':3},
+               'revisions':[{'company_id':'company-b','event_id':'event-b','publication_revision_required':True}]}
+    ack,status=stand.submit_result(result_for(leased,candidate=candidate))
+    assert status==409 and ack['reason']=='stale_business_context'
+    assert stand.inspect()['outbox']==[] and stand.inspect()['published']==[]
+
+
+def test_result_cannot_publish_company_outside_batch_scope(tmp_path):
+    stand=CoreStand(tmp_path/'scope.db',clock=Clock())
+    stand.seed_job(envelope())
+    leased=stand.claim()['job']
+    candidate={'schema_version':'ai-data-result-v1','versions':{'context':2,'source_policy':3},
+               'revisions':[{'company_id':'ungranted-company','event_id':'event','publication_revision_required':True}]}
+    ack,status=stand.submit_result(result_for(leased,candidate=candidate))
+    assert status==403 and ack['code']=='authorization_denied'
+    assert stand.inspect()['outbox']==[] and stand.inspect()['published']==[]

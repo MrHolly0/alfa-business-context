@@ -109,6 +109,9 @@ def main(argv=None):
     probe = commands.add_parser('probe-source', help='Проверить URL по одноразовому разрешению Core')
     probe.add_argument('--input', required=True)
     probe.add_argument('--state-dir', default=str(DEFAULT_STATE))
+    business_demo=commands.add_parser('demo-business',help='Сквозной пример смешанного бизнеса на локальных RSS; модель только при --mode model')
+    _options(business_demo)
+    business_demo.add_argument('--output')
     demo_data = commands.add_parser('demo-data', help='Полный AI/Data пример с локальным RSS вместо сети')
     demo_data.add_argument('--state-dir')
     demo_data.add_argument('--output')
@@ -210,11 +213,15 @@ def main(argv=None):
             corpus = CorpusStore(Path(args.state_dir)/'corpus.sqlite3')
             collector = NewsCollector(corpus,state_path=Path(args.state_dir)/'collection.sqlite3')
             write_json(collector.probe(SourceProbeRequest.model_validate(read_json(args.input))))
-        elif args.command in {'analyze','evaluate','serve','worker','run-task'}:
+        elif args.command in {'analyze','evaluate','serve','worker','run-task','demo-business'}:
             store, pipeline = make_pipeline(args.state_dir,mode=args.mode,config=args.config,profile=args.profile,compare_hackathon=args.compare_hackathon,analyst=args.analyst,routes=args.routes)
-            if args.command == 'run-task':
+            if args.command == 'demo-business':
+                from .demo_data import run_business_demo
+                write_json(run_business_demo(args.state_dir,llm=pipeline.llm,
+                    role_services=getattr(pipeline,'role_services',None),analyst_config=pipeline.analyst_config),args.output)
+            elif args.command == 'run-task':
                 from .workflow import DataWorkflow, DataTask
-                write_json(DataWorkflow(args.state_dir,llm=pipeline.llm,role_services=getattr(pipeline,"role_services",None)).run(DataTask.model_validate(read_json(args.input))),args.output)
+                write_json(DataWorkflow(args.state_dir,llm=pipeline.llm,role_services=getattr(pipeline,"role_services",None),analyst_config=pipeline.analyst_config).run(DataTask.model_validate(read_json(args.input))),args.output)
             elif args.command == 'analyze':
                 request = AnalysisRequest.model_validate(read_json(args.input))
                 write_json(pipeline.run(request), args.output)
@@ -237,7 +244,7 @@ def main(argv=None):
                 if not 0.05 <= args.heartbeat_seconds <= 60: raise ValueError('invalid_heartbeat_interval')
                 core = CoreClient()
                 from .workflow import DataWorkflow
-                executor = Worker(core,pipeline,ArtifactStore(Path(args.state_dir)/'artifacts.sqlite3'),data_workflow=DataWorkflow(args.state_dir,llm=pipeline.llm,role_services=getattr(pipeline,"role_services",None)),heartbeat_interval=args.heartbeat_seconds)
+                executor = Worker(core,pipeline,ArtifactStore(Path(args.state_dir)/'artifacts.sqlite3'),data_workflow=DataWorkflow(args.state_dir,llm=pipeline.llm,role_services=getattr(pipeline,"role_services",None),analyst_config=pipeline.analyst_config),heartbeat_interval=args.heartbeat_seconds)
                 stop = threading.Event()
                 def halt(*_): stop.set()
                 signal.signal(signal.SIGINT,halt)

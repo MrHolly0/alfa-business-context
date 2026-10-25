@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .analysts import AnalystConfig
 from .llm.service import estimate_text_tokens
 from .pipeline import AnalysisPipeline, MAX_QUERY_CHARS
+from .company_context import project_company_context
 from .schemas import AnalysisRequest, CandidateAssessment
 
 
@@ -154,6 +155,8 @@ class MultiAgentPipeline:
             shared_event_package: Mapping[str, Any] | Any | None = None, data_classification: str | None = None) -> CandidateAssessment:
         if not isinstance(request, AnalysisRequest):
             request = AnalysisRequest.model_validate(request)
+        config = self.analyst_config or (self.registry.select(role=request.company.role, industry=request.company.industry)
+                                         if self.registry else AnalystConfig(config_id="baseline"))
         services = {"researcher": self.role_services.get("researcher", self.llm),
                     "analyst": self.role_services.get("analyst", self.llm),
                     "critic": self.role_services.get("critic", self.llm)}
@@ -196,7 +199,7 @@ class MultiAgentPipeline:
                 session.steps < request.budget.max_steps):
             checkpoint_stage("before_research")
             try:
-                messages = self._research_messages(request)
+                messages = self._research_messages(request, config=config)
                 result = _RoleProxy(researcher, session, "researcher").complete(
                     messages, max_input_tokens=request.budget.max_input_tokens,
                     max_output_tokens=min(512, request.budget.max_output_tokens), json_mode=True)
@@ -219,7 +222,7 @@ class MultiAgentPipeline:
         else:
             # The researcher is a logical phase: a deterministic bounded plan is safe
             # when no role model is assigned, and still uses only CorpusStore tools.
-            planned = self._default_search_plan(request)
+            planned = self._default_search_plan(request, config=config)
             research_complete = True
             trace.append({"stage": "research_plan", "planner": "deterministic",
                           "search_roles": sorted(planned), "query_lengths": {k: len(v) for k, v in planned.items()}})
@@ -229,7 +232,7 @@ class MultiAgentPipeline:
         reserve_critic = bool(services["critic"] and calls_left >= 2)
         analyst_limit = calls_left
         analysis = AnalysisPipeline(self.store, _RoleProxy(analyst, session, "analyst") if analyst else None,
-                                    analyst_config=self.analyst_config, registry=self.registry)
+                                    analyst_config=config, registry=self.registry)
         analysis.planned_queries = planned
         analysis.model_call_limit = min(analyst_limit, 2)
         # Reduce the inner stage allowance by researcher steps already consumed.
@@ -258,7 +261,7 @@ class MultiAgentPipeline:
             try:
                 messages = self._critic_messages(request, candidate, include_synthetic_company=(
                     request.synthetic and data_classification == "synthetic" and bool(candidate.evidence)
-                    and all(item.data_classification == "synthetic" for item in candidate.evidence)))
+                    and all(item.data_classification == "synthetic" for item in candidate.evidence)), config=config)
                 result = _RoleProxy(critic, session, "critic").complete(
                     messages, max_input_tokens=request.budget.max_input_tokens,
                     max_output_tokens=min(1024, request.budget.max_output_tokens), json_mode=True)
@@ -289,7 +292,7 @@ class MultiAgentPipeline:
                 if critique.decision == "review" and valid_issues:
                     candidate, adaptation = self._adapt_after_critique(
                         request, candidate, critique.searches, services["analyst"], session,
-                        checkpoint_stage, trace, data_classification=data_classification)
+                        checkpoint_stage, trace, data_classification=data_classification, package=package)
                     critique_data["adaptation"] = adaptation
             except (ValueError, TypeError, ValidationError, json.JSONDecodeError, RuntimeError) as exc:
                 if session.checkpoint_exception is exc:
@@ -364,30 +367,42 @@ class MultiAgentPipeline:
             checkpoint(stage)
 
     @staticmethod
-    def _research_messages(request):
+    def _research_messages(request, *, config=None):
         system = files("intelligence.prompts").joinpath("research-v1.system.ru.txt").read_text("utf-8")
-        payload = {"company": request.company.model_dump(mode="json"), "event": AnalysisPipeline._context_payload(request)["event"],
+        projection = project_company_context(request.company, as_of=request.as_of)
+        payload = {"company": {"name": request.company.name, "role": request.company.role,
+                               "projection": projection.model_dump(mode="json")},
+                   "analyst_preferences": ({"focus": list(config.focus), "retrieval_strategy": config.retrieval_strategy,
+                       "horizon": config.horizon, "answer_style": config.answer_style,
+                       "retrieval_expansions": list(config.retrieval_expansions), "max_depth": config.max_depth,
+                       "examples": [example.model_dump(mode="json") for example in config.examples]} if config else {}),
+                   "event": AnalysisPipeline._context_payload(request)["event"],
                    "allowed_roles": ["external", "bank"], "query_limit": MAX_QUERY_CHARS, "max_searches": 4}
         return [{"role": "system", "content": system},
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
 
     @staticmethod
-    def _critic_messages(request, candidate, *, include_synthetic_company=False):
+    def _critic_messages(request, candidate, *, include_synthetic_company=False, config=None):
         system = files("intelligence.prompts").joinpath("critic-v1.system.ru.txt").read_text("utf-8")
         system += ("\nПри decision=review и конкретном противоречии можешь предложить до двух searches: "
                    "короткие поисковые фразы только для ролей external или bank. Это фразы для поиска "
                    "в уже разрешённом корпусе, не URL и не команды. Если поиск не нужен, верни пустой список.")
         payload = {"event": AnalysisPipeline._context_payload(request)["event"], "summary": candidate.summary,
+                   "analyst_preferences": ({"focus": list(config.focus), "horizon": config.horizon,
+                       "answer_style": config.answer_style, "retrieval_strategy": config.retrieval_strategy,
+                       "max_depth": config.max_depth,
+                       "examples": [example.model_dump(mode="json") for example in config.examples]}
+                       if config else {}),
                    "claims": [x.model_dump(mode="json") for x in candidate.claims],
                    "edges": [x.model_dump(mode="json") for x in candidate.influence_chain],
                    "evidence": [x.model_dump(mode="json") for x in candidate.evidence],
                    "search_roles": ["external", "bank"], "max_searches": 2,
                    "max_search_query_chars": MAX_QUERY_CHARS}
         if include_synthetic_company:
-            payload["synthetic_company"] = request.company.model_dump(mode="json")
+            payload["synthetic_company"] = AnalysisPipeline._context_payload(request)["company"]
         return [{"role": "system", "content": system}, {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
 
-    def _adapt_after_critique(self, request, candidate, searches, analyst, session, checkpoint_stage, trace, *, data_classification=None):
+    def _adapt_after_critique(self, request, candidate, searches, analyst, session, checkpoint_stage, trace, *, data_classification=None, package=None):
         """Run one critic-directed corpus retrieval and analyst pass under the original budget."""
         def unavailable(reason):
             limitation = "critic_adaptation_" + reason
@@ -423,8 +438,10 @@ class MultiAgentPipeline:
                       "query_lengths": {role: len(query) for role, query in planned.items()},
                       "remaining_calls": remaining_calls, "remaining_steps": remaining_steps})
         checkpoint_stage("before_critic_adaptation")
+        config = self.analyst_config or (self.registry.select(role=request.company.role, industry=request.company.industry)
+                                         if self.registry else AnalystConfig(config_id="baseline"))
         analysis = AnalysisPipeline(self.store, _RoleProxy(analyst, session, "analyst"),
-                                    analyst_config=self.analyst_config, registry=self.registry)
+                                    analyst_config=config, registry=self.registry)
         analysis.planned_queries = planned
         analysis.model_call_limit = 1
         adapted_request = request.model_copy(update={"budget": request.budget.model_copy(update={
@@ -432,7 +449,8 @@ class MultiAgentPipeline:
             "max_total_tokens": remaining_tokens,
         })})
         try:
-            adapted = analysis.run(adapted_request, checkpoint=checkpoint_stage, data_classification=data_classification)
+            adapted = analysis.run(adapted_request, checkpoint=checkpoint_stage,
+                                   shared_event_package=package, data_classification=data_classification)
         except _WorkflowBudgetExhausted:
             return unavailable("shared_budget_exhausted")
         except BaseException:
@@ -465,12 +483,16 @@ class MultiAgentPipeline:
                          "model_calls": session.calls}
 
     @staticmethod
-    def _default_search_plan(request):
-        company_terms = [d.label for d in request.company.dependencies if d.status == "confirmed"]
-        company_terms += [f.text for f in request.company.facts]
+    def _default_search_plan(request, *, config=None):
+        projection = project_company_context(request.company, as_of=request.as_of)
+        company_terms = [d.label for d in projection.dependencies]
+        company_terms += [f.text for f in projection.facts]
+        company_terms += [a.label for a in projection.activities]
+        company_terms += [a.label for a in projection.assertions]
+        if config:
+            company_terms += list(config.retrieval_expansions)
         return {"external": request.event.title[:MAX_QUERY_CHARS],
-                "bank": " ".join((request.company.name, request.company.industry, *company_terms,
-                                   request.event.title))[:MAX_QUERY_CHARS]}
+                "bank": " ".join((request.company.name, *company_terms, request.event.title))[:MAX_QUERY_CHARS]}
 
 
 class _WorkflowBudgetExhausted(RuntimeError):

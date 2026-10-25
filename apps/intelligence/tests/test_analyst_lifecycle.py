@@ -59,9 +59,11 @@ def test_onboard_keeps_company_configuration_private_and_rollback_is_stable(tmp_
     assert rolled_back["config"].retrieval_strategy == "dependencies_first"
     ordinary = store.onboard("tenant-a", "company-1", 3, company())
     updated_context = store.onboard("tenant-a", "company-1", 4, company())
-    assert ordinary["config_ref"] == rolled_back["config_ref"]
-    assert updated_context["config_ref"] == rolled_back["config_ref"]
-    assert store.get("tenant-a", "company-1")["config_ref"] == rolled_back["config_ref"]
+    assert ordinary["config_ref"] != rolled_back["config_ref"]
+    assert ordinary["config"].retrieval_strategy == rolled_back["config"].retrieval_strategy
+    assert updated_context["revision"] == ordinary["revision"] + 1
+    assert updated_context["context_version"] == 4
+    assert store.get("tenant-a", "company-1")["config_ref"] == updated_context["config_ref"]
 
 
 def test_onboard_without_llm_uses_registry_config_and_stores_no_raw_context(tmp_path):
@@ -81,3 +83,87 @@ def test_config_bounds_and_query_term_validation():
         AnalystConfig(config_id="too-many-examples", examples=[
             {"scenario":"other","focus":[],"check_kind":"unknown_data"}
         ] * 4)
+
+
+def test_activity_classes_keep_multiple_directions_and_unknown_is_not_services():
+    from intelligence.analysts import CompanyAnalystStore
+
+    assert CompanyAnalystStore._industry_classes("", ["manufacturing", "trade", "software delivery"]) == ["manufacturing", "trade", "transport"]
+    assert CompanyAnalystStore._industry_class("niche activity absent from taxonomy") == ["unknown"]
+
+
+def test_optimize_is_explicit_revision_fenced_and_rejects_stale_context(tmp_path):
+    registry=PromptRegistry(tmp_path / "shared.sqlite")
+    store=CompanyAnalystStore(tmp_path / "companies.sqlite",registry)
+    initial=store.onboard("tenant","company",1,company())
+    assert initial["revision"] == 1
+    assert initial["generation_status"] == "registry_fallback"
+    optimized=store.optimize("tenant","company",1,company(),ConfigLLM(),expected_revision=1)
+    assert optimized["revision"] == 2
+    assert optimized["config"].retrieval_strategy == "dependencies_first"
+    conflict=store.optimize("tenant","company",1,company(),ConfigLLM(),expected_revision=1)
+    assert conflict["status"] == "revision_conflict"
+    newer=store.onboard("tenant","company",2,company())
+    stale=store.optimize("tenant","company",1,company(),ConfigLLM(),expected_revision=newer["revision"])
+    assert stale["status"] == "stale_context"
+    assert store.get("tenant","company")["revision"] == newer["revision"]
+
+
+def test_same_context_version_cannot_hide_changed_profile(tmp_path):
+    store=CompanyAnalystStore(tmp_path / "companies.sqlite",PromptRegistry(tmp_path / "shared.sqlite"))
+    store.onboard("tenant","company",1,company())
+    changed=company().model_copy(update={"description":"A materially changed business profile."})
+    with pytest.raises(ValueError,match="same context_version"):
+        store.onboard("tenant","company",1,changed)
+
+
+def test_context_change_during_generation_cannot_publish_stale_candidate(tmp_path):
+    store=CompanyAnalystStore(tmp_path / "companies.sqlite",PromptRegistry(tmp_path / "shared.sqlite"))
+    store.onboard("tenant","company",1,company())
+    class RacingLLM(ConfigLLM):
+        def complete(self,messages,**kwargs):
+            store.onboard("tenant","company",2,company())
+            return super().complete(messages,**kwargs)
+    result=store.optimize("tenant","company",1,company(),RacingLLM(),expected_revision=1)
+    assert result["status"]=="stale_context"
+    assert store.get("tenant","company")["context_version"]==2
+
+
+def test_rollback_restores_preferences_but_keeps_current_profile_snapshot(tmp_path):
+    registry=PromptRegistry(tmp_path / "shared.sqlite")
+    store=CompanyAnalystStore(tmp_path / "companies.sqlite",registry)
+    profile_v1=company()
+    initial=store.onboard("tenant","company",1,profile_v1)
+    optimized=store.optimize("tenant","company",1,profile_v1,ConfigLLM(),expected_revision=initial["revision"])
+    profile_v2=profile_v1.model_copy(update={"description":"Updated business description."})
+    rebased=store.onboard("tenant","company",2,profile_v2)
+    rolled=store.rollback("tenant","company",expected_revision=rebased["revision"])
+    assert rolled["config"].retrieval_strategy==initial["config"].retrieval_strategy
+    assert rolled["config"].retrieval_strategy!=optimized["config"].retrieval_strategy
+    assert rolled["context_version"]==2
+    assert store.get("tenant","company")["context_hash"] == store._context_digest(profile_v2)
+    repeated=store.onboard("tenant","company",2,profile_v2)
+    assert repeated["config_ref"]==rolled["config_ref"]
+    assert repeated["revision"]==rolled["revision"]
+
+
+def test_registry_change_is_not_skipped_when_profile_changes_at_same_time(tmp_path):
+    registry=PromptRegistry(tmp_path / "shared.sqlite")
+    store=CompanyAnalystStore(tmp_path / "companies.sqlite",registry)
+    profile_v1=company()
+    store.onboard("tenant","company",1,profile_v1)
+    active=AnalystConfig(config_id="new-global",focus=["growth"],role_scope="any")
+    registry.register(active)
+    scope="impact:any:*"
+    registry.promote(scope=scope,ref=active.ref,reviewer="reviewer",expected_revision=0,
+        report={"schema_version":"tournament-report-v1","winner_ref":active.ref,"baseline_ref":"baseline@1",
+            "baseline_snapshot":registry.snapshot(scope),"mode":"model","shadow":False,
+            "promotion_eligible":True,"synthetic":False,
+            "holdout":{"passed":True,"fresh_for_selection":True},
+            "shadow_validation":{"validated":True,"passed":True,"fresh":True},
+            "human_review":{"approved":True,"reviewer":"reviewer"}})
+    profile_v2=profile_v1.model_copy(update={"description":"Updated business description."})
+    result=store.onboard("tenant","company",2,profile_v2)
+    assert result["generation_status"]=="registry_context_rebased"
+    assert result["config"].focus==["growth"]
+    assert result["history"][-1]["source_config_ref"]==active.ref

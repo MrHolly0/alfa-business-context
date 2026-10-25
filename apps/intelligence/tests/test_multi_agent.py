@@ -1,6 +1,7 @@
 import json
 
 from intelligence.multi_agent import MultiAgentPipeline
+from intelligence.pipeline import AnalysisPipeline
 from test_pipeline import req, store
 from intelligence.llm.types import Usage
 
@@ -78,6 +79,27 @@ def test_analyst_profile_expansions_are_bounded_bank_search_terms(tmp_path, monk
     assert any("аналитика логистика порт" in query for query in bank_queries)
     assert any("резервный маршрут" in query for query in bank_queries)
     assert all(len(query) <= 320 for query in bank_queries)
+
+
+def test_selected_config_and_projected_multiactivity_reach_research_stage(tmp_path):
+    from intelligence.analysts import AnalystConfig
+    corpus = store(tmp_path)
+    role_services = roles(corpus)
+    config = AnalystConfig(config_id="procurement-mix", focus=["supply", "costs"],
+        retrieval_strategy="dependencies_first", retrieval_expansions=["резервные комплектующие"], max_depth=3,
+        examples=[{"scenario": "supply_disruption", "focus": ["supply"], "check_kind": "alternative_supplier"}])
+    request = req(company={"name": "СеверТранс", "industry": "", "role": "операционный директор",
+        "activities": [
+            {"activity_id": "a-production", "label": "производство узлов", "normalized_class": "manufacturing", "provenance": "profile:1"},
+            {"activity_id": "a-import", "label": "импорт комплектующих", "normalized_class": "import", "provenance": "profile:2"}],
+        "dependencies": [], "facts": []}, budget={"max_model_calls": 3})
+    MultiAgentPipeline(corpus, analyst_config=config, role_services=role_services).run(request)
+    research_payload = json.loads(role_services["researcher"].calls[0][0][-1]["content"])
+    assert research_payload["analyst_preferences"]["retrieval_strategy"] == "dependencies_first"
+    assert research_payload["analyst_preferences"]["retrieval_expansions"] == ["резервные комплектующие"]
+    assert research_payload["analyst_preferences"]["max_depth"] == 3
+    assert research_payload["analyst_preferences"]["examples"][0]["scenario"] == "supply_disruption"
+    assert {item["activity_id"] for item in research_payload["company"]["projection"]["activities"]} == {"a-production", "a-import"}
 
 
 def test_critic_contradiction_is_advisory_and_downgrades_ready(tmp_path):
@@ -303,5 +325,5 @@ def test_critic_company_projection_is_synthetic_only_by_default(tmp_path):
     configured=roles(corpus)
     MultiAgentPipeline(corpus,role_services=configured).run(req(budget={"max_model_calls":3}),data_classification="synthetic")
     messages=configured["critic"].calls[0][0]
-    assert json.loads(messages[-1]["content"])["synthetic_company"]==req().company.model_dump(mode="json")
+    assert json.loads(messages[-1]["content"])["synthetic_company"]==AnalysisPipeline._context_payload(req())["company"]
     assert "отсутствующее звено" in messages[0]["content"]

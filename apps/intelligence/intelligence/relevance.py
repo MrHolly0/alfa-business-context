@@ -10,6 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .schemas import CompanyContext, EventInput
+from .company_context import project_company_context
 
 
 class RankRequest(BaseModel):
@@ -33,6 +34,8 @@ class RankRequest(BaseModel):
             raise ValueError("source_ids must be unique")
         context_ids = [dep.dependency_id for dep in self.company.dependencies]
         context_ids.extend(fact.fact_id for fact in self.company.facts)
+        context_ids.extend(item.activity_id for item in self.company.activities)
+        context_ids.extend(item.assertion_id for item in self.company.assertions)
         if len(set(context_ids)) != len(context_ids):
             raise ValueError("company context identifiers must be unique")
         return self
@@ -40,7 +43,7 @@ class RankRequest(BaseModel):
 
 class MatchReason(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["confirmed_dependency", "company_fact", "company_name", "industry", "role_tiebreak"]
+    kind: Literal["confirmed_dependency", "company_fact", "company_activity", "company_assertion", "company_name", "industry", "role_tiebreak"]
     context_ref: str | None = None
     text: str = Field(min_length=1, max_length=500)
 
@@ -143,9 +146,15 @@ def rank_events(*, tenant_id: str, company: CompanyContext | dict, events: list[
         if prior is None or event.revision > prior.revision:
             latest[event.event_id] = event
     company_context = request.company
-    dependencies = [d for d in company_context.dependencies if d.status == "confirmed" and not _is_noncausal_kind(d.kind)]
-    unsupported = [d.dependency_id for d in company_context.dependencies if d.status == "hypothesis" or _is_noncausal_kind(d.kind)]
-    facts = company_context.facts
+    projection = project_company_context(company_context, as_of=request.as_of)
+    dependencies = [d for d in projection.dependencies if not _is_noncausal_kind(d.kind)]
+    facts = projection.facts
+    activities = projection.activities
+    assertions = projection.assertions
+    unsupported = [str(item.get("dependency_id") or item.get("assertion_id") or item.get("activity_id") or item.get("fact_id"))
+                   for item in projection.unresolved]
+    unsupported.extend(d.dependency_id for d in company_context.dependencies if d.status == "confirmed" and _is_noncausal_kind(d.kind))
+    unsupported = list(dict.fromkeys(unsupported))
     company_tokens = _tokens(company_context.name)
     industry_tokens = _tokens(company_context.industry)
     role_group = _role_group(company_context.role)
@@ -162,6 +171,14 @@ def rank_events(*, tenant_id: str, company: CompanyContext | dict, events: list[
             if _lexical_match(fact.text, event_tokens):
                 score += 2
                 reasons.append(MatchReason(kind="company_fact", context_ref=fact.fact_id, text=f"Совпали слова события и факта компании «{fact.text[:240]}»."))
+        for activity in activities:
+            if _lexical_match(activity.label, event_tokens):
+                score += 3
+                reasons.append(MatchReason(kind="company_activity", context_ref=activity.activity_id, text=f"Совпали слова события и подтверждённого направления «{activity.label[:240]}»."))
+        for assertion in assertions:
+            if _lexical_match(assertion.label, event_tokens):
+                score += 3
+                reasons.append(MatchReason(kind="company_assertion", context_ref=assertion.assertion_id, text=f"Совпали слова события и подтверждённого сведения «{assertion.label[:240]}»."))
         if company_tokens & event_tokens:
             score += 3
             reasons.append(MatchReason(kind="company_name", context_ref=None, text="В событии встретились слова из названия компании."))
@@ -179,7 +196,8 @@ def rank_events(*, tenant_id: str, company: CompanyContext | dict, events: list[
                         limitations=["Лексические совпадения — только предварительная сортировка, не вероятность и не оценка воздействия.",
                                      "Сопоставляются точные токены после нормализации регистра и ё/е; русские словоформы автоматически не сводятся.",
                                      "Отрасль и роль не доказывают зависимость; роль влияет только при равном score.",
-                                     "Гипотезы, платежи и групповые признаки не повышают score и не подтверждают причинную связь."])
+                                     "Гипотезы, платежи и групповые признаки не повышают score и не подтверждают причинную связь.",
+                                     *projection.limitations])
     return result.model_dump(mode="json")
 
 

@@ -15,6 +15,7 @@
 - [Установка и команды](development.md), [Docker](../infra/README.md).
 - [Подключение Backend/Frontend](ai-integration.md), [контракты Python](../contracts/intelligence/README.md).
 - [Python-модуль](../apps/intelligence/README.md), [состояние интерфейса](web-status.md).
+- [Настройки аналитика](../apps/intelligence/docs/analysts.md), [турнир](../apps/intelligence/docs/tournament.md).
 - [Источники моделей и бюджеты](llm-providers.md), [подготовка CSV](client-data.md).
 - [Правила изменений](../CONTRIBUTING.md), [распределение работы](team.md), [ближайшие задачи](backlog.md).
 - [Требования кейса](requirements.md), [решение о Symfony/PHP](decisions/001-symfony-core.md), [целевая модель данных](data-model.md).
@@ -22,3 +23,5 @@
 ## Архив
 
 [Ранние планы](reference/README.md) и [версии макетов](../apps/web/docs/README.md) сохранены для истории. Они не описывают текущий запуск. Действующие команды находятся в README проекта и инструкции разработки.
+
+Подробная проверка многопрофильного сценария, версий и подключения: [сквозной сценарий](ai-workflow-checks.md).

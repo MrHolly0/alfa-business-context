@@ -107,3 +107,31 @@ def run_demo(state_dir: str | Path | None = None) -> DataResult:
         return _run(Path(state_dir))
     with tempfile.TemporaryDirectory(prefix="alfa-offline-data-demo-") as temporary:
         return _run(Path(temporary))
+
+
+def run_business_demo(state_dir, *, llm=None, role_services=None, analyst_config=None):
+    """New mixed business example. Source fetches are local fixtures; models explicit."""
+    payload=json.loads((APP_ROOT/'examples/business-scenario.json').read_text())
+    payload['request_id']='business-demo-'+uuid.uuid4().hex
+    payload['operation']='collect'
+    payload['budget']['max_model_calls']=3 if llm or role_services else 0
+    task=DataTask.model_validate(payload)
+    instance=DataWorkflow(state_dir,llm=llm,role_services=role_services,
+        analyst_config=analyst_config,clock=lambda:task.as_of)
+    sources={source.source_id:source for source in task.source_policy.sources}
+    fixtures={sources[key].uri:(APP_ROOT/'examples/feeds'/name).read_bytes()
+        for key,name in [('wire-a','business-a.rss'),('wire-b','business-b.rss')]}
+    calls=[]
+    def fetch(url,headers,**limits):
+        if url not in fixtures: raise ValueError('offline_fixture_url_not_permitted')
+        calls.append(url)
+        return FetchResult(status=200,headers={'content-type':'application/rss+xml'},body=fixtures[url])
+    instance.collector=NewsCollector(instance.store,state_path=Path(state_dir)/'collection.sqlite3',
+        fetcher=fetch,raw_dir=Path(state_dir)/'raw'/'collection')
+    result=instance.run(task)
+    result.coverage['demo_summary']={'source_transport':'local_synthetic_rss',
+        'source_network_access':False,'model_requested':bool(llm or role_services),
+        'fetch_calls':len(calls),'companies':len(task.businesses),
+        'events':len(result.events),'candidates':len(result.candidates),
+        'semantic_expectations':'evaluation/business-scenario.json'}
+    return result

@@ -17,7 +17,7 @@ from intelligence.corpus import CorpusStore
 from intelligence.pipeline import AnalysisPipeline
 from intelligence.relevance import RankRequest,RankResult
 from intelligence.analysts import AnalystConfig
-from intelligence.schemas import AnalysisRequest,CandidateAssessment,ModelAnswer
+from intelligence.schemas import AnalysisRequest,CandidateAssessment,ModelAnswer,CompanyContext
 
 REPO=Path(__file__).resolve().parents[3]
 DEST=REPO/'contracts/intelligence'
@@ -25,7 +25,7 @@ DEST=REPO/'contracts/intelligence'
 
 def contracts():
     output={name: model.model_json_schema() for name,model in [
-        ('analyst-config.schema.json',AnalystConfig),('impact-package.schema.json',ImpactPackage),('watch-condition.schema.json',WatchCondition),('watch-evaluation.schema.json',WatchEvaluation),('period-research.schema.json',PeriodResearchReport),('company-context-prepare.schema.json',CompanyContextPrepareRequest),('company-context-proposal.schema.json',CompanyContextPrepareResult),('analysis-request.schema.json',AnalysisRequest),('candidate-assessment.schema.json',CandidateAssessment),
+        ('company-context.schema.json',CompanyContext),('analyst-config.schema.json',AnalystConfig),('impact-package.schema.json',ImpactPackage),('watch-condition.schema.json',WatchCondition),('watch-evaluation.schema.json',WatchEvaluation),('period-research.schema.json',PeriodResearchReport),('company-context-prepare.schema.json',CompanyContextPrepareRequest),('company-context-proposal.schema.json',CompanyContextPrepareResult),('analysis-request.schema.json',AnalysisRequest),('candidate-assessment.schema.json',CandidateAssessment),
         ('model-answer.schema.json',ModelAnswer),('document.schema.json',DocumentInput),
         ('search.schema.json',SearchInput),('source-policy.schema.json',SourcePolicySnapshot),('source-probe-request.schema.json',SourceProbeRequest),('source-probe-result.schema.json',SourceProbeResult),('original-request.schema.json',OriginalInput),('ai-data-task.schema.json',DataTask),('ai-data-result.schema.json',DataResult),('rank-request.schema.json',RankRequest),('rank-result.schema.json',RankResult)]}
     identifier={'type':'string','minLength':1,'maxLength':256}

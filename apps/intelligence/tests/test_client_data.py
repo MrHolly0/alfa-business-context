@@ -78,6 +78,20 @@ class ClientDataTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate_normalized_column"):
             parse_company_csv("SYNTHETIC_U, synthetic_u\nA,A\n", tenant_id="t", filename="case.csv", origin="upload")
 
+    def test_all_csv_activities_are_preserved_and_unknown_class_stays_unknown(self):
+        result = parse_company_csv(
+            "SYNTHETIC_U,MAINOKVED_NAME,ACTIVITY_2,OKVED_NAME_3,ACTIVITY_4\n"
+            "A,Производство оборудования,Оптовая торговля,Космические исследования,Доставка + разработка; Физика+химия\n",
+            tenant_id="t", filename="multi.csv", origin="upload",
+        )
+        activities = result.proposals[0].context.activities
+        self.assertEqual([item.label for item in activities], [
+            "Производство оборудования", "Оптовая торговля", "Космические исследования",
+            "Доставка", "разработка", "Физика+химия"
+        ])
+        self.assertEqual([item.normalized_class for item in activities], ["manufacturing", "trade", None, "logistics", "software", None])
+        self.assertTrue(all(item.provenance.startswith("multi.csv#row=2") for item in activities))
+
     def test_input_contract_bounds_tenant_and_filename(self):
         data = {"tenant_id": "t", "filename": "case.csv", "origin": "operator", "rows": [{"SYNTHETIC_U": "A"}]}
         self.assertEqual(CompanyContextPrepareRequest.model_validate(data).filename, "case.csv")

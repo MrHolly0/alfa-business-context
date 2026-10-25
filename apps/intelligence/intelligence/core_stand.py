@@ -97,6 +97,10 @@ class CoreStand:
               job_id TEXT NOT NULL, message_id TEXT NOT NULL, created_at TEXT NOT NULL,
               PRIMARY KEY(tenant_scope,company_id,event_id,input_signature)
             );
+            CREATE TABLE IF NOT EXISTS company_versions (
+              tenant_scope TEXT NOT NULL, company_id TEXT NOT NULL, context_version INTEGER NOT NULL,
+              PRIMARY KEY(tenant_scope,company_id)
+            );
             CREATE TABLE IF NOT EXISTS schedules (
               schedule_id TEXT PRIMARY KEY, task TEXT NOT NULL, interval_seconds INTEGER NOT NULL,
               next_due TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1
@@ -152,6 +156,11 @@ class CoreStand:
                 return {"accepted": True, "job_id": job["job_id"], "duplicate": True}
             db.execute("INSERT INTO jobs(job_id,payload,status,generation,tenant_scope,company_id,current_context,current_policy,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
                        (job["job_id"], payload, "queued", job.get("lease_generation", 1), tenant, company, context, policy, now))
+            snapshots=job.get("task",{}).get("businesses",[]) if job["schema_version"]=="ai-job-v1" else []
+            current={company:context,**{item["company_id"]:item["context_version"] for item in snapshots}}
+            for company_id, version in current.items():
+                db.execute("INSERT INTO company_versions VALUES(?,?,?) ON CONFLICT(tenant_scope,company_id) DO UPDATE SET context_version=MAX(company_versions.context_version,excluded.context_version)",
+                           (tenant,company_id,version))
         return {"accepted": True, "job_id": job["job_id"], "duplicate": False}
 
     def claim(self) -> dict[str, Any] | None:
@@ -226,6 +235,12 @@ class CoreStand:
             versions = result.get("input_versions")
             if versions != job.get("input_versions") or versions.get("context_version") != row["current_context"] or versions.get("source_policy_version") != row["current_policy"]:
                 return {"accepted": False, "code": "conflict", "reason": "stale_input_versions"}, 409
+            if job["schema_version"]=="ai-job-v1":
+                for business in job["task"].get("businesses",[]):
+                    current=db.execute("SELECT context_version FROM company_versions WHERE tenant_scope=? AND company_id=?",
+                                       (row["tenant_scope"],business["company_id"])).fetchone()
+                    if current and current[0]!=business["context_version"]:
+                        return {"accepted":False,"code":"conflict","reason":"stale_business_context"},409
             candidate = result.get("candidate")
             if not isinstance(candidate, dict):
                 return {"accepted": False, "code": "invalid_result"}, 422
@@ -240,11 +255,23 @@ class CoreStand:
             message_id = result.get("message_id")
             if not isinstance(message_id, str) or not message_id:
                 return {"accepted": False, "code": "invalid_result"}, 422
-            db.execute("INSERT INTO outbox(message_id,job_id,payload,created_at) VALUES(?,?,?,?)",
-                       (message_id, job_id, json.dumps(result, ensure_ascii=False, sort_keys=True), now))
             revisions = candidate.get("revisions", [])
             if not isinstance(revisions, list):
                 return {"accepted": False, "code": "invalid_result"}, 422
+            if job["schema_version"]=="ai-job-v1":
+                expected_businesses={item["company_id"]:item["context_version"] for item in job["task"].get("businesses",[])}
+                scope_ids=set(expected_businesses)|{row["company_id"]}
+                if any(not isinstance(item,dict) or item.get("company_id") not in scope_ids for item in revisions):
+                    return {"accepted":False,"code":"authorization_denied"},403
+                for item in candidate.get("candidates",[]):
+                    if (not isinstance(item,dict) or item.get("company_id") not in scope_ids or
+                        item.get("tenant_id")!=row["tenant_scope"]):
+                        return {"accepted":False,"code":"authorization_denied"},403
+                    expected=expected_businesses.get(item["company_id"],row["current_context"])
+                    if item.get("versions",{}).get("context")!=expected:
+                        return {"accepted":False,"code":"conflict","reason":"stale_business_context"},409
+            db.execute("INSERT INTO outbox(message_id,job_id,payload,created_at) VALUES(?,?,?,?)",
+                       (message_id, job_id, json.dumps(result, ensure_ascii=False, sort_keys=True), now))
             publications = [item for item in revisions if isinstance(item, dict) and item.get("publication_revision_required") is True]
             if candidate.get("publication_revision_required") is True or (
                 candidate.get("schema_version") != "ai-data-result-v1"
@@ -314,6 +341,8 @@ class CoreStand:
 
     def update_versions(self, tenant_scope: str, company_id: str, context_version: int, source_policy_version: int) -> int:
         with self._lock, self._connect() as db:
+            db.execute("INSERT INTO company_versions VALUES(?,?,?) ON CONFLICT(tenant_scope,company_id) DO UPDATE SET context_version=MAX(company_versions.context_version,excluded.context_version)",
+                       (tenant_scope,company_id,context_version))
             cursor = db.execute("UPDATE jobs SET current_context=?,current_policy=?,updated_at=? WHERE tenant_scope=? AND company_id=? AND status IN ('queued','leased')",
                                 (context_version, source_policy_version, _iso(self.clock()), tenant_scope, company_id))
             return cursor.rowcount

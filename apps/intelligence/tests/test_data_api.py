@@ -86,8 +86,9 @@ def test_schedule_rejects_model_cap_then_executes_local_work_through_worker(tmp_
 
 def test_period_retrospective_includes_late_received_external_not_bank(tmp_path):
     from intelligence.workflow import PeriodSpec
+    from test_workflow import NOW
     data,_=workflow(tmp_path)
-    now=datetime.now(timezone.utc)
+    now=NOW
     published=(now-timedelta(days=2)).isoformat()
     cutoff=now-timedelta(days=1)
     for role,source in [('external','news'),('bank','bank-note')]:

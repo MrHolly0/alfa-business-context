@@ -5,6 +5,8 @@ import json
 import sqlite3
 import threading
 import fcntl
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -29,11 +31,28 @@ class WorkflowNotStarted(ValueError):
         super().__init__(code)
 
 
+class WorkflowSnapshotConflict(ValueError):
+    """A newer Core snapshot was already observed; this result cannot be current."""
+
+
+class BusinessPreferences(StrictModel):
+    """Request preferences never replace facts or immutable evidence requirements."""
+    role: str | None = Field(default=None, max_length=1000)
+    answer_style: Literal['concise', 'balanced', 'detailed'] | None = None
+    horizon: Literal['short', 'quarter', 'long'] | None = None
+
+
 class BusinessSnapshot(StrictModel):
     company_id: str = Field(min_length=1,max_length=256)
     context_version: int = Field(ge=1)
     company: CompanyContext
+    preferences: BusinessPreferences | None = None
+    known_at: datetime | None = None
     dependency_graph: list[DependencyEdge] = Field(default_factory=list,max_length=300)
+    @model_validator(mode='after')
+    def knowledge_timestamp(self):
+        if self.known_at is not None:_aware(self.known_at)
+        return self
 
 class PublishedAssessment(StrictModel):
     """Core acknowledgement that a particular assessment signature was published."""
@@ -60,7 +79,7 @@ class DataTask(StrictModel):
     company_id: str = Field(min_length=1,max_length=256)
     context_version: int = Field(ge=1)
     source_policy_version: int = Field(ge=1)
-    operation: Literal['collect','analyze','reassess','period','onboard'] = 'analyze'
+    operation: Literal['collect','analyze','reassess','period','onboard','optimize','rollback_config'] = 'analyze'
     trigger: Literal['scheduled','manual','context_changed','policy_changed','evidence_changed','watch_due'] = 'manual'
     knowledge_mode: Literal['as_of','latest'] = 'as_of'
     as_of: datetime
@@ -75,6 +94,8 @@ class DataTask(StrictModel):
     data_classification: Literal['synthetic','public','confidential'] = 'confidential'
     synthetic: bool = False
     max_events: int = Field(default=10,ge=1,le=30)
+    max_exploratory_analyses: int = Field(default=1,ge=0,le=3)
+    expected_config_revisions: dict[str, int] = Field(default_factory=dict, max_length=20)
     @model_validator(mode='after')
     def snapshot(self):
         _aware(self.as_of)
@@ -87,6 +108,15 @@ class DataTask(StrictModel):
         if self.operation=='period' and self.period is None: raise ValueError('period_required')
         if self.operation=='period' and self.knowledge_mode!='as_of': raise ValueError('period_requires_as_of_knowledge_mode')
         if self.synthetic and self.data_classification!='synthetic': raise ValueError('synthetic_classification_mismatch')
+        if self.operation in {'optimize', 'rollback_config'}:
+            if not ids or set(self.expected_config_revisions) != set(ids):
+                raise ValueError('expected_config_revisions_required')
+            if any(type(value) is not int or value < 1 for value in self.expected_config_revisions.values()):
+                raise ValueError('invalid_expected_config_revision')
+        elif self.expected_config_revisions:
+            raise ValueError('config_revisions_only_for_configuration_operations')
+        if any(proof.company_id not in allowed_companies for proof in self.published_assessments):
+            raise ValueError('published_assessment_company_scope_mismatch')
         return self
 
 class DataResult(StrictModel):
@@ -115,21 +145,77 @@ class WorkflowState:
         with self.db() as db:
             db.executescript('''CREATE TABLE IF NOT EXISTS workflow_stages(tenant TEXT,request TEXT,digest TEXT,stage TEXT,payload TEXT,PRIMARY KEY(tenant,request,stage));
             CREATE TABLE IF NOT EXISTS workflow_analyses(tenant TEXT,company TEXT,event TEXT,signature TEXT,payload TEXT,PRIMARY KEY(tenant,company,event));
-            CREATE TABLE IF NOT EXISTS workflow_results(tenant TEXT,request TEXT,digest TEXT,payload TEXT,PRIMARY KEY(tenant,request));''')
+            CREATE TABLE IF NOT EXISTS workflow_results(tenant TEXT,request TEXT,digest TEXT,payload TEXT,PRIMARY KEY(tenant,request));
+            CREATE TABLE IF NOT EXISTS workflow_context_heads(tenant TEXT,company TEXT,version INTEGER NOT NULL,digest TEXT NOT NULL,PRIMARY KEY(tenant,company));
+            CREATE TABLE IF NOT EXISTS workflow_policy_heads(tenant TEXT,company TEXT,policy TEXT,version INTEGER NOT NULL,digest TEXT,PRIMARY KEY(tenant,company,policy));''')
+            db.execute('BEGIN IMMEDIATE')
+            if 'digest' not in {row[1] for row in db.execute('PRAGMA table_info(workflow_policy_heads)')}:
+                db.execute('ALTER TABLE workflow_policy_heads ADD COLUMN digest TEXT')
     def db(self): return sqlite3.connect(self.path,timeout=15)
+
+    def observe_snapshot(self, task, *, advance=False, db=None):
+        # These are artifact fences, not an authoritative copy of Core profiles.
+        # Historical research reads a supplied snapshot and never moves current heads.
+        if task.operation == 'period':
+            return
+        if db is None:
+            with self.db() as connection:
+                connection.execute('BEGIN IMMEDIATE')
+                return self.observe_snapshot(task, advance=advance, db=connection)
+        for business in task.businesses:
+            company = business.company.model_dump(mode='json')
+            company.pop('role', None)
+            digest = payload_hash({'company': company,
+                'dependency_graph': [edge.model_dump(mode='json') for edge in business.dependency_graph]})
+            row = db.execute('SELECT version,digest FROM workflow_context_heads WHERE tenant=? AND company=?',
+                (task.tenant_id, business.company_id)).fetchone()
+            if row and (row[0] > business.context_version or
+                        (row[0] == business.context_version and row[1] != digest)):
+                raise WorkflowSnapshotConflict('stale_or_conflicting_company_context')
+            if advance and (row is None or row[0] < business.context_version):
+                db.execute('INSERT INTO workflow_context_heads VALUES(?,?,?,?) ON CONFLICT(tenant,company) DO UPDATE SET version=excluded.version,digest=excluded.digest',
+                    (task.tenant_id, business.company_id, business.context_version, digest))
+        policy=task.source_policy.model_dump(mode='json')
+        for key in ('issued_at','user_excluded_source_ids','user_excluded_publishers','user_excluded_document_uris'):policy.pop(key,None)
+        policy_digest=payload_hash(policy)
+        for company_id in {task.company_id, *(item.company_id for item in task.businesses)}:
+            row = db.execute('SELECT version,digest FROM workflow_policy_heads WHERE tenant=? AND company=? AND policy=?',
+                (task.tenant_id, company_id, task.source_policy.policy_id)).fetchone()
+            if row and (row[0] > task.source_policy_version or
+                        (row[0]==task.source_policy_version and row[1] is not None and row[1]!=policy_digest)):
+                raise WorkflowSnapshotConflict('stale_or_conflicting_source_policy')
+            if advance and (row is None or row[0] < task.source_policy_version or row[1] is None):
+                db.execute('INSERT INTO workflow_policy_heads VALUES(?,?,?,?,?) ON CONFLICT(tenant,company,policy) DO UPDATE SET version=excluded.version,digest=excluded.digest',
+                    (task.tenant_id, company_id, task.source_policy.policy_id, task.source_policy_version,policy_digest))
     def stage(self,task,name,payload):
         with self.db() as db: db.execute('INSERT OR REPLACE INTO workflow_stages VALUES(?,?,?,?,?)',(task.tenant_id,task.request_id,payload_hash(task.model_dump(mode='json')),name,canonical_json(payload)))
     def prior(self,tenant,company,event):
         with self.db() as db: row=db.execute('SELECT payload FROM workflow_analyses WHERE tenant=? AND company=? AND event=?',(tenant,company,event)).fetchone()
         return json.loads(row[0]) if row else None
-    def save_analysis(self,tenant,company,event,signature,payload):
-        with self.db() as db: db.execute('INSERT OR REPLACE INTO workflow_analyses VALUES(?,?,?,?,?)',(tenant,company,event,signature,canonical_json(payload)))
+    def save_analysis(self,tenant,company,event,signature,payload,*,task=None):
+        # Period candidates are research artifacts, not the current monitoring cursor.
+        if task is not None and task.operation == 'period': return
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if task is not None: self.observe_snapshot(task, db=db)
+            prior=db.execute('SELECT payload FROM workflow_analyses WHERE tenant=? AND company=? AND event=?',
+                (tenant,company,event)).fetchone()
+            if prior:
+                old=json.loads(prior[0]).get('candidate',{}).get('versions',{})
+                new=payload.get('candidate',{}).get('versions',{})
+                if (old.get('as_of') and new.get('as_of') and
+                    datetime.fromisoformat(old['as_of'])>datetime.fromisoformat(new['as_of'])):
+                    raise WorkflowSnapshotConflict('stale_analysis_as_of')
+            db.execute('INSERT OR REPLACE INTO workflow_analyses VALUES(?,?,?,?,?)',(tenant,company,event,signature,canonical_json(payload)))
     def cached(self,task):
         with self.db() as db: row=db.execute('SELECT digest,payload FROM workflow_results WHERE tenant=? AND request=?',(task.tenant_id,task.request_id)).fetchone()
         if row and row[0]!=payload_hash(task.model_dump(mode='json')): raise ValueError('idempotency_conflict')
         return DataResult.model_validate_json(row[1]) if row else None
     def save_result(self,task,result):
-        with self.db() as db: db.execute('INSERT INTO workflow_results VALUES(?,?,?,?)',(task.tenant_id,task.request_id,payload_hash(task.model_dump(mode='json')),result.model_dump_json()))
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            self.observe_snapshot(task, db=db)
+            db.execute('INSERT INTO workflow_results VALUES(?,?,?,?)',(task.tenant_id,task.request_id,payload_hash(task.model_dump(mode='json')),result.model_dump_json()))
 
 class _TaskRoleLLM:
     def __init__(self,session,service):
@@ -179,12 +265,14 @@ class _TaskLLM:
         return response
 
 class DataWorkflow:
-    def __init__(self,state_dir,*,llm=None,role_services=None,analyst_registry=None,collector=None,max_concurrency=2):
+    def __init__(self,state_dir,*,llm=None,role_services=None,analyst_registry=None,collector=None,max_concurrency=2,clock=None,analyst_config=None):
         self.state_dir=Path(state_dir); self.state_dir.mkdir(parents=True,exist_ok=True)
-        self.store=CorpusStore(self.state_dir/'corpus.sqlite3')
+        self.clock=clock or (lambda: datetime.now(timezone.utc))
+        self.store=CorpusStore(self.state_dir/'corpus.sqlite3',clock=self.clock)
         self.events=EventStore(self.state_dir/'events.sqlite3')
         self.state=WorkflowState(self.state_dir/'workflow.sqlite3')
         self.llm=llm
+        self.analyst_config=(analyst_config if isinstance(analyst_config,AnalystConfig) else AnalystConfig.model_validate(analyst_config) if analyst_config is not None else None)
         self.role_services=dict(role_services or {})
         # Operator-approved analyst templates are shared. CompanyAnalystStore below
         # still writes only tenant/company-scoped private configurations.
@@ -234,13 +322,25 @@ class DataWorkflow:
     def _release_file_lock(handle):
         try:fcntl.flock(handle.fileno(),fcntl.LOCK_UN)
         finally:handle.close()
+    def assert_current(self, task):
+        self.state.observe_snapshot(task)
+
     def _run(self,task,check):
+        self.state.observe_snapshot(task, advance=True)
+        original_check = check
+        config_fences = {}
+        def check(stage):
+            original_check(stage)
+            self.state.observe_snapshot(task)
+            for company_id, (config_store, expected_ref) in config_fences.items():
+                if config_store.get(task.tenant_id,company_id)['config_ref'] != expected_ref:
+                    raise WorkflowSnapshotConflict('stale_analyst_configuration')
         cached=self.state.cached(task)
         if cached is not None:check('cached_result');return cached
         policy=task.source_policy; allowed=policy.effective_source_ids(); trace=[]
         def stage(name,payload):
             check(name);self.state.stage(task,name,payload);trace.append({'stage':name,**payload})
-        result=DataResult(request_id=task.request_id,tenant_id=task.tenant_id,company_id=task.company_id,status='completed',versions={'context':task.context_version,'source_policy':policy.revision},created_at=datetime.now(timezone.utc))
+        result=DataResult(request_id=task.request_id,tenant_id=task.tenant_id,company_id=task.company_id,status='completed',versions={'context':task.context_version,'source_policy':policy.revision,'company_contexts':{business.company_id:business.context_version for business in task.businesses},'policy_id':policy.policy_id},created_at=self.clock())
         # Confidential snapshots execute locally. No model payload is built or sent for them.
         model_allowed=task.data_classification in {'synthetic','public'}
         model=_TaskLLM(self.llm,task.budget,check,self.role_services) if model_allowed and (self.llm or self.role_services) else None
@@ -248,10 +348,30 @@ class DataWorkflow:
             result.coverage['model_limitation']='confidential_external_model_disabled'
         if task.operation=='collect':
             stage('before_collection',{'source_count':len(allowed)})
-            result.collection=self.collector.collect(policy,now=datetime.now(timezone.utc),checkpoint=check)
+            result.collection=self.collector.collect(policy,now=self.clock(),checkpoint=check)
             stage('collection_complete',{'report_saved':True})
-        analysis_as_of=(datetime.now(timezone.utc) if task.knowledge_mode=='latest' else task.as_of)
-        if task.period and task.period.mode=='retrospective': analysis_as_of=datetime.now(timezone.utc)
+        analysis_as_of=(self.clock() if task.knowledge_mode=='latest' else task.as_of)
+        if task.period and task.period.mode=='retrospective': analysis_as_of=self.clock()
+        elif task.period and task.period.mode=='as_known': analysis_as_of=min(task.as_of,task.period.end)
+        analysis_businesses=task.businesses
+        if task.period and task.period.mode=='as_known':
+            analysis_businesses=[]
+            profile_limits={}
+            for business in task.businesses:
+                if business.known_at is not None and business.known_at<=analysis_as_of:
+                    analysis_businesses.append(business)
+                    continue
+                # A current profile with unknown observation dates is not a
+                # historical snapshot. Retain only individually dated records.
+                company=business.company
+                updates={group:[item for item in getattr(company,group)
+                    if getattr(item,'observed_at',None) is not None]
+                    for group in ('activities','assertions','dependencies','facts')}
+                updates.update(industry='',description='')
+                analysis_businesses.append(business.model_copy(update={
+                    'company':company.model_copy(update=updates),'dependency_graph':[]}))
+                profile_limits[business.company_id]='historical_profile_knowledge_time_not_confirmed'
+            if profile_limits:result.coverage['profile_time_limitations']=profile_limits
         docs=self.store.list_documents(tenant_id=task.tenant_id,source_ids=allowed,as_of=analysis_as_of.isoformat(),policy=policy,as_known=bool(task.period and task.period.mode=='as_known'))
         docs=[d for d in docs if not d['canonical_uri'].startswith('urn:event:')]
         refs=[d['document_revision_ref'] for d in docs]
@@ -264,12 +384,17 @@ class DataWorkflow:
 
         stage('permitted_snapshot',{'documents':len(refs),'policy_version':policy.revision,
             'knowledge_mode':task.knowledge_mode,'analysis_as_of':analysis_as_of.isoformat()})
+        event_store=self.events
+        if task.operation=='period':
+            event_store,snapshot_ref=self._historical_events(task,refs,analysis_as_of,check)
+            result.coverage['event_snapshot_ref']=snapshot_ref
+            result.versions['event_snapshot']=snapshot_ref
         events={};event_document_refs={}
         for doc in docs:
             if doc['source_role']!='external' or not doc['canonical_uri'].startswith(('https://','http://')):continue
             check('event_ingest')
             data={k:doc[k] for k in PublicationInput.model_fields if k in doc and doc[k] is not None}
-            event=self.events.ingest(data);event_id=event['event_id'];events[event_id]=event
+            event=event_store.ingest(data);event_id=event['event_id'];events[event_id]=max([event,events.get(event_id,event)],key=lambda item:item['revision'])
             if doc.get('document_revision_ref'):
                 event_document_refs.setdefault(event_id,set()).add(doc['document_revision_ref'])
         if task.event_ids:events={k:v for k,v in events.items() if k in task.event_ids}
@@ -277,48 +402,98 @@ class DataWorkflow:
             publications=[PeriodPublication(event_id=next((event_id for event_id,event_refs in event_document_refs.items() if document['document_revision_ref'] in event_refs),document['document_id']),
                 revision=document['revision'],event_time=document.get('event_time'),published_at=document['published_at'],server_received_at=document.get('received_at'),
                 source_id=document['source_id'],document_revision_ref=document['document_revision_ref'],title=document['title'],quote=document['content'][:1000]) for document in docs if document['content'] and document['source_role']=='external']
-            report=analyze_period_research(task.period.observations,period_start=task.period.start,period_end=task.period.end,known_at=task.as_of,mode=task.period.mode,publications=publications)
+            report=analyze_period_research(task.period.observations,period_start=task.period.start,period_end=task.period.end,known_at=analysis_as_of if task.period.mode=='as_known' else task.as_of,mode=task.period.mode,publications=publications,evaluated_at=self.clock())
             result.period_report={**report.metrics.model_dump(mode='json'),'publication_timeline':[item.model_dump(mode='json') for item in report.publication_timeline],
                 'research_coverage':report.coverage,'limitations':report.limitations}
             result.coverage['document_revision_refs']=refs
             stage('period_complete',{'metrics':len(report.metrics.metrics),'publications':len(report.publication_timeline)})
-        else:
+            eligible_refs={entry.document_revision_ref for entry in report.publication_timeline}
+            events={key:event for key,event in events.items() if event_document_refs.get(key,set()) & eligible_refs}
+            event_document_refs={key:values & eligible_refs for key,values in event_document_refs.items() if key in events}
+            # Out-of-period external evidence must not leak through retrieval.
+            docs=[doc for doc in docs if doc['source_role']=='bank' or doc['document_revision_ref'] in eligible_refs]
+            refs=[doc['document_revision_ref'] for doc in docs]
+        if task.operation != 'period' or task.businesses:
             personal={}
-            for business in task.businesses:
+            for business in analysis_businesses:
                 folder=self.company_dir(task.tenant_id,business.company_id)
                 registry=self.registry;configs=CompanyAnalystStore(folder/'company-analysts.sqlite3',registry)
-                record=configs.onboard(task.tenant_id,business.company_id,business.context_version,business.company)
+                if task.operation == 'period':
+                    # Avoid publishing historical preferences as the current company method.
+                    config=registry.select(role=business.company.role, industry=business.company.industry)
+                    record={'tenant_id':task.tenant_id,'company_id':business.company_id,
+                        'context_version':business.context_version,'config_ref':config.ref,'config':config,
+                        'generation_status':'historical_registry_snapshot','history':[]}
+                else:
+                    record=configs.onboard(task.tenant_id,business.company_id,business.context_version,business.company)
+                if task.operation == 'optimize':
+                    check('before_config_optimization')
+                    if model is None:
+                        record={**record,'generation_status':'optimization_unavailable',
+                            'limitation':result.coverage.get('model_limitation','model_not_configured')}
+                    else:
+                        record=configs.optimize(task.tenant_id,business.company_id,business.context_version,
+                            business.company,model.for_role('generator'),
+                            expected_revision=task.expected_config_revisions[business.company_id])
+                    check('after_config_optimization')
+                elif task.operation == 'rollback_config':
+                    check('before_config_rollback')
+                    record=configs.rollback(task.tenant_id,business.company_id,
+                        expected_revision=task.expected_config_revisions[business.company_id])
+                    check('after_config_rollback')
+                if task.operation != 'period':
+                    config_fences[business.company_id]=(configs,record['config_ref'])
                 personal[business.company_id]=(registry,record)
                 result.configurations.append({**record,
+                    'runtime_override_ref':self.analyst_config.ref if self.analyst_config else None,
                     'config':record['config'].model_dump(mode='json'),
                     'source_config_ref':record['history'][-1]['source_config_ref'] if record.get('history') else None})
-            if task.operation!='onboard':
-                for event_id in list(events)[:task.max_events]:
+            if task.operation not in {'onboard','optimize','rollback_config'}:
+                ordered_events=self._ordered_events(task,events,event_document_refs,docs,analysis_as_of,businesses=analysis_businesses)
+                exploratory_remaining=task.max_exploratory_analyses
+                result.coverage.update(events_available=len(events),events_selected=min(len(ordered_events),task.max_events),
+                    event_selection='lexical_priority_with_bounded_exploration',
+                    selection_recall_not_established=True)
+                for event_id in ordered_events[:task.max_events]:
                     # Shared packages stay in local artifacts; only the existing pipeline's
                     # explicitly classification-gated summary may be sent to an allowed model.
                     event_refs=sorted(event_document_refs.get(event_id,set()))
                     if not event_refs:continue
-                    package=self.events.build_impact_package(task.tenant_id,event_id,source_policy_id=policy.policy_id,policy_version=str(policy.revision),allowed_source_ids=allowed,allowed_document_revision_refs=event_refs,llm=model.for_role('extractor') if model else None)
+                    package=event_store.build_impact_package(task.tenant_id,event_id,revision=events[event_id]['revision'],source_policy_id=policy.policy_id,policy_version=str(policy.revision),allowed_source_ids=allowed,allowed_document_revision_refs=event_refs,llm=model.for_role('extractor') if model else None)
                     result.events.append(package.model_dump(mode='json'))
                     source=next((d for d in docs if d['document_revision_ref'] in {s.document_revision_ref for s in package.sources}),None)
                     if source is None:continue
-                    selections=select_affected_businesses(package,task.businesses,as_of=analysis_as_of)
+                    selections=select_affected_businesses(package,analysis_businesses,as_of=analysis_as_of)
                     result.selections.extend(selections)
-                    by_id={business.company_id:business for business in task.businesses}
+                    by_id={business.company_id:business for business in analysis_businesses}
                     for selection in selections:
                         business=by_id[selection.company_id]
                         business_model=model
                         if task.trigger=='scheduled' and selection.score<0.10:
-                            business_model=None
-                            stage('business_model_not_selected',{'company_id':business.company_id,'event_id':event_id,'reason':'no_sufficient_signal_in_available_snapshot','fallback':'local_baseline_with_coverage'})
+                            if business_model and exploratory_remaining>0:
+                                exploratory_remaining-=1
+                                stage('business_model_exploration',{'company_id':business.company_id,
+                                    'event_id':event_id,'reason':'audit_low_lexical_signal_within_same_task_budget'})
+                            else:
+                                business_model=None
+                                stage('business_model_not_selected',{'company_id':business.company_id,'event_id':event_id,'reason':'no_sufficient_signal_in_available_snapshot','fallback':'local_baseline_with_coverage'})
                         check('before_business');registry,record=personal[business.company_id]
                         config=record['config'] if isinstance(record['config'],AnalystConfig) else AnalystConfig.model_validate(record['config'])
+                        if self.analyst_config is not None:
+                            config=self.analyst_config
+                        if business.preferences is not None:
+                            overrides=business.preferences.model_dump(exclude_none=True, exclude={'role'})
+                            config=AnalystConfig.model_validate({**config.model_dump(mode='json'),**overrides})
+                            stage('preferences_applied',{'company_id':business.company_id,
+                                'preferences':business.preferences.model_dump(exclude_none=True)})
                         paths=impact_candidates(package,business.company_id,business.dependency_graph,as_of=analysis_as_of.isoformat(),max_hops=config.max_depth)
                         bank_refs=self._relevant_bank_refs(task,business,allowed,refs,config,as_of=analysis_as_of)
                         event_semantics=sorted({(source.content_hash,source.origin_group_id,source.source_role,
                                                   source.title,source.publisher,source.author)
                                                  for source in package.sources})
-                        policy_signature=policy.model_dump(mode='json');policy_signature.pop('issued_at',None)
+                        policy_signature=policy.model_dump(mode='json')
+                        for key in ('issued_at','user_excluded_source_ids','user_excluded_publishers','user_excluded_document_uris'):
+                            policy_signature.pop(key,None)
                         analysis_company=self._analysis_company(business)
                         def model_identity(service):
                             configured=getattr(service,'config',None)
@@ -328,7 +503,10 @@ class DataWorkflow:
                             if self._context_active(item,analysis_as_of))
                         active_fact_ids=sorted(item.fact_id for item in analysis_company.facts
                             if self._context_active(item,analysis_as_of))
+                        from .company_context import project_company_context
+                        context_projection=project_company_context(analysis_company,as_of=analysis_as_of)
                         inputs={'event_id':event_id,'event_semantics':event_semantics,
+                            'context_projection':context_projection.fingerprint,
                             'context_version':business.context_version,
                             'company_snapshot':business.company.model_dump(mode='json'),
                             'analysis_context':analysis_company.model_dump(mode='json'),
@@ -336,13 +514,15 @@ class DataWorkflow:
                             'active_context_ids':active_context_ids,'active_fact_ids':active_fact_ids,
                             'policy':policy_signature,'relevant_bank_refs':bank_refs,
                             'config_ref':record['config_ref'],'config':config.model_dump(mode='json'),
+                            'execution_budget':task.budget.model_dump(mode='json'),
+                            'model_selected':business_model is not None,
                             'model':{'default':model_identity(self.llm),**route_models},'runtime':self.runtime_fingerprint,
                             'data_classification':task.data_classification,'knowledge_mode':task.knowledge_mode,
                             'workflow':'ai-data-v1'}
-                        signature=payload_hash(inputs);previous=self.state.prior(task.tenant_id,business.company_id,event_id)
+                        signature=payload_hash(inputs);previous=(None if task.operation=='period' else self.state.prior(task.tenant_id,business.company_id,event_id))
                         analysis_request_id=hashlib.sha256(f'{task.request_id}:{business.company_id}:{event_id}'.encode()).hexdigest()
-                        force_refresh=task.trigger in {'manual','watch_due'}
-                        proof=next((item for item in task.published_assessments if item.company_id==business.company_id
+                        force_refresh=task.trigger in {'manual','watch_due'} or task.operation=='period'
+                        proof=next((item for item in ([] if task.operation=='period' else task.published_assessments) if item.company_id==business.company_id
                                     and item.event_id==event_id and item.input_signature==signature),None)
                         if proof and not force_refresh:
                             result.revisions.append({'company_id':business.company_id,'event_id':event_id,
@@ -368,7 +548,7 @@ class DataWorkflow:
                             result.candidates.append(candidate);result.revisions.append({'company_id':business.company_id,
                                 'event_id':event_id,**changes})
                             self.state.save_analysis(task.tenant_id,business.company_id,event_id,signature,
-                                {'signature':signature,'inputs':inputs,'candidate':candidate.model_dump(mode='json')})
+                                {'signature':signature,'inputs':inputs,'candidate':candidate.model_dump(mode='json')},task=task)
                             stage('personal_reused',{'company_id':business.company_id,'event_id':event_id,
                                 'status':'candidate_reused_publication_unconfirmed'})
                             continue
@@ -389,6 +569,12 @@ class DataWorkflow:
                             candidate.coverage.limitations=list(dict.fromkeys(candidate.coverage.limitations+['business_relevance_not_established']))
                             candidate.clarifications=list(dict.fromkeys(candidate.clarifications+[
                                 'Какая подтверждённая зависимость компании связана с этим событием? В переданном контексте такая связь не найдена.']))[:30]
+                        if business.company_id in result.coverage.get('profile_time_limitations',{}):
+                            candidate.status='partial'
+                            candidate.coverage.limitations=list(dict.fromkeys(candidate.coverage.limitations+[
+                                'historical_profile_knowledge_time_not_confirmed']))
+                            candidate.clarifications=list(dict.fromkeys(candidate.clarifications+[
+                                'Какие сведения профиля были подтверждены на дату исследования? Нужен исторический снимок Core или даты observed_at.']))[:30]
                         candidate.shared_package_ref=package.package_id
                         candidate.coverage.independent_origins=package.coverage.independent_origin_groups
                         candidate.coverage.origin_groups=package.coverage.origin_group_count
@@ -399,9 +585,9 @@ class DataWorkflow:
                         candidate.trace.append({'stage':'dependency_paths','paths':[p.model_dump(mode='json') for p in paths]})
                         changes=self.changes(previous,candidate,inputs);changes['input_signature']=signature;candidate.changes=changes
                         result.candidates.append(candidate);result.revisions.append({'company_id':business.company_id,'event_id':event_id,**changes})
-                        self.state.save_analysis(task.tenant_id,business.company_id,event_id,signature,{'signature':signature,'inputs':inputs,'candidate':candidate.model_dump(mode='json')})
+                        self.state.save_analysis(task.tenant_id,business.company_id,event_id,signature,{'signature':signature,'inputs':inputs,'candidate':candidate.model_dump(mode='json')},task=task)
                         stage('personal_complete',{'company_id':business.company_id,'event_id':event_id,'status':candidate.status})
-        for proof in task.published_assessments:
+        for proof in ([] if task.operation=='period' else task.published_assessments):
             # A scoped request only observes the requested events. Absence of any
             # other published event from this subset says nothing about its current
             # policy/time eligibility, so do not recommend invalidation for it.
@@ -414,9 +600,62 @@ class DataWorkflow:
             model_calls=model.calls if model else 0,reserved_tokens=model.tokens if model else 0,model_attempts=model.attempts if model else [])
         if not result.candidates and result.revisions and all(r['status']=='no_change' for r in result.revisions):result.status='no_change'
         elif any(c.status!='ready' for c in result.candidates):result.status='partial'
-        elif not result.candidates and task.operation not in {'onboard','period'}:result.status='unknown'
+        elif task.operation in {'optimize','rollback_config'} and any(row.get('status') in {'revision_conflict','stale_context','rollback_unavailable'} for row in result.configurations):result.status='partial'
+        elif task.operation=='optimize' and any(row.get('generation_status') not in {
+                'model_generated_bounded_preferences','stored','optimized','unchanged','already_current'} for row in result.configurations):result.status='partial'
+        elif not result.candidates and task.operation not in {'onboard','period','optimize','rollback_config'}:result.status='unknown'
         result.trace=trace;check('before_result_cache');self.state.save_result(task,result)
         return result
+    def _historical_events(self,task,refs,as_of,check):
+        """Materialize research in an isolated artifact snapshot, never current events."""
+        signature=payload_hash({'tenant':task.tenant_id,'policy':task.source_policy.model_dump(mode='json'),
+            'refs':sorted(refs),'as_of':as_of.isoformat(),'runtime':self.runtime_fingerprint})
+        folder=self.state_dir/'historical-events'
+        folder.mkdir(parents=True,exist_ok=True)
+        target=folder/(signature+'.sqlite3')
+        # Lock only local snapshot creation; no model or HTTP work is inside it.
+        with (folder/(signature+'.lock')).open('a+b') as handle:
+            fcntl.flock(handle.fileno(),fcntl.LOCK_EX)
+            try:
+                if not target.exists():
+                    fd,temporary=tempfile.mkstemp(prefix='snapshot-',suffix='.sqlite3',dir=folder)
+                    os.close(fd)
+                    try:
+                        with sqlite3.connect(self.events.path) as source,sqlite3.connect(temporary) as destination:
+                            source.backup(destination,pages=256,progress=lambda *_:check('historical_snapshot_copy'))
+                        os.replace(temporary,target)
+                    finally:
+                        Path(temporary).unlink(missing_ok=True)
+            finally:
+                fcntl.flock(handle.fileno(),fcntl.LOCK_UN)
+        return EventStore(target),'historical:'+signature
+
+    def _ordered_events(self,task,events,event_refs,docs,as_of,*,businesses=None):
+        from .relevance import rank_events
+        by_ref={doc['document_revision_ref']:doc for doc in docs}
+        inputs=[]
+        for event_id,event in events.items():
+            sources=[by_ref[ref] for ref in event_refs.get(event_id,()) if ref in by_ref]
+            if not sources:continue
+            doc=max(sources,key=lambda item:item['published_at'])
+            inputs.append(EventInput(event_id=event_id,revision=event['revision'],title=doc['title'],
+                text=doc['content'],source_id=doc['source_id'],published_at=doc['published_at'],synthetic=doc['synthetic']))
+        scores={event.event_id:0 for event in inputs}
+        for business in (task.businesses if businesses is None else businesses):
+            for offset in range(0,len(inputs),500):
+                ranked=rank_events(tenant_id=task.tenant_id[:128],company=self._analysis_company(business),
+                    events=inputs[offset:offset+500],source_ids=task.source_policy.effective_source_ids(),as_of=as_of.isoformat())
+                for row in ranked['ranked']:scores[row['event_id']]=max(scores[row['event_id']],row['score'])
+        by_id={event.event_id:event for event in inputs}
+        ordered=sorted(scores,key=lambda key:(-scores[key],-by_id[key].published_at.timestamp(),key))
+        # Inspect a rotating low-score item when a cap would otherwise hide it.
+        if len(ordered)>task.max_events and task.max_exploratory_analyses and task.max_events>1:
+            low=[key for key in ordered[task.max_events-1:] if scores[key]==0]
+            if low:
+                chosen=min(low,key=lambda key:payload_hash({'event':key,'date':as_of.date().isoformat()}))
+                ordered.remove(chosen);ordered.insert(task.max_events-1,chosen)
+        return ordered
+
     def company_dir(self,tenant,company):
         folder=self.state_dir/'companies'/hashlib.sha256(tenant.encode()).hexdigest()/hashlib.sha256(company.encode()).hexdigest()
         folder.mkdir(parents=True,exist_ok=True);return folder
@@ -425,6 +664,8 @@ class DataWorkflow:
     def _analysis_company(business):
         """Combine Core business context and its separately-provenanced graph for analysis."""
         company=business.company
+        if business.preferences and business.preferences.role is not None:
+            company=company.model_copy(update={'role':business.preferences.role})
         dependencies=list(company.dependencies)
         known={item.dependency_id for item in dependencies}|{fact.fact_id for fact in company.facts}
         for edge in business.dependency_graph:
@@ -446,7 +687,8 @@ class DataWorkflow:
     def _context_active(item,as_of):
         valid_from=getattr(item,'valid_from',None)
         valid_until=getattr(item,'valid_until',None)
-        return not ((valid_from is not None and valid_from>as_of) or
+        observed_at=getattr(item,'observed_at',None)
+        return not ((observed_at is not None and observed_at>as_of) or (valid_from is not None and valid_from>as_of) or
                     (valid_until is not None and valid_until<as_of))
 
     def _relevant_bank_refs(self,task,business,allowed,document_refs,config,*,as_of=None):
@@ -456,8 +698,11 @@ class DataWorkflow:
             policy=task.source_policy,as_known=bool(task.period and task.period.mode=='as_known'))
             if doc['source_role']=='bank' and doc['document_revision_ref'] in set(document_refs)]
         if not bank_refs:return []
-        terms=[d.label for d in business.company.dependencies if d.status=='confirmed']
-        terms.extend(fact.text for fact in business.company.facts)
+        from .company_context import project_company_context
+        projected=project_company_context(business.company,as_of=as_of)
+        terms=[d.label for d in projected.dependencies]
+        terms.extend(fact.text for fact in projected.facts)
+        terms.extend(item.label for item in [*projected.activities,*projected.assertions])
         terms.extend([business.company.name,business.company.industry,business.company.role])
         query=' '.join(terms)[:320]
         if not query:return []

@@ -16,7 +16,7 @@ from typing import Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 
-from .schemas import CompanyContext, CompanyFact, ProvenancedDependency, StrictModel
+from .schemas import CompanyActivity, CompanyAssertion, CompanyContext, CompanyFact, ProvenancedDependency, StrictModel
 
 MAX_CSV_BYTES = 10_000_000
 MAX_ROWS = 500
@@ -115,7 +115,7 @@ class CompanyContextPrepareResult(StrictModel):
 
 
 _KNOWN_COLUMNS = {
-    "SYNTHETIC_U", "MAINOKVED_NAME", "REVENUE_COMPANY", "REVENUE_UNIT",
+    "SYNTHETIC_U", "MAINOKVED_NAME", "MAINOKVED_CODE", "REVENUE_COMPANY", "REVENUE_UNIT",
     "COUNTRY", "COUNTRY_NAME", "REGION", "REGION_NAME", "GROUP_ID",
     "ROLE", "USER_ROLE", "COMPANY_ROLE", "PAYER", "BENEFICIARY",
     "PAY_AMT", "PAY_AMT_UNIT", "PAY_CNT", "SYNTHETIC_F",
@@ -125,6 +125,21 @@ _PRODUCT_COLUMNS = {"LOAN", "LEASE", "LEASING", "CREDIT", "DEPOSIT", "ACQUIRING"
                     "LOAN_ACTIVE", "LEASE_ACTIVE", "LEASING_ACTIVE"}
 _TRUE_VALUES = {"1", "true", "yes", "y", "да", "есть", "active", "активен", "подключен", "подключён"}
 _FALSE_VALUES = {"0", "false", "no", "n", "нет", "отсутствует", "inactive", "неактивен", "не подключен", "не подключён"}
+
+
+def _activity_class(label: str):
+    value = label.casefold()
+    rules = (
+        ("manufacturing", ("производств", "изготовлен", "manufactur")),
+        ("trade", ("торгов", "розничн", "оптов", "продаж", "trade")),
+        ("logistics", ("логист", "достав", "перевоз", "склад", "logistic")),
+        ("software", ("программ", "разработк", "software", "it-деятельност")),
+        ("import", ("импорт", "import")), ("export", ("экспорт", "export")),
+        ("agriculture", ("сельск", "растениевод", "животновод", "agricultur")),
+        ("construction", ("строительств", "construction")),
+        ("finance", ("финансов", "страхован", "finance")),
+    )
+    return next((kind for kind, needles in rules if any(needle in value for needle in needles)), None)
 
 
 def _filename(value: str) -> str:
@@ -155,7 +170,7 @@ def _normalize_row(row: Mapping[str, Any], *, index: int) -> dict[str, str]:
         normalized[key] = value
     unknown = sorted(key for key in normalized
                      if key not in _KNOWN_COLUMNS and key not in _PRODUCT_COLUMNS
-                     and not key.startswith("PRODUCT_"))
+                     and not key.startswith(("PRODUCT_", "ACTIVITY_", "OKVED_", "ADDITIONAL_OKVED_")))
     if unknown:
         raise ValueError("unsupported_columns:" + ",".join(unknown[:20]))
     return normalized
@@ -340,10 +355,43 @@ def _proposal(row: dict[str, str], *, tenant_id: str, filename: str, origin: str
 
     payment = _payment_observation(row, filename, row_index, company_id, warnings)
     relationships = [payment.relationship] if payment and payment.relationship else []
+    activity_values: list[tuple[str, str]] = []
+    if industry:
+        activity_values.append(("MAINOKVED_NAME", industry))
+    # Preserve every explicitly supplied activity/OKVED description. Codes are
+    # not emitted as descriptions when a matching name is present.
+    for column, raw_value in row.items():
+        value = _text(raw_value)
+        if not value or column == "MAINOKVED_NAME" or not column.startswith(("ACTIVITY_", "OKVED_", "ADDITIONAL_OKVED_")):
+            continue
+        if column.endswith("_CODE") or "_CODE_" in column:
+            continue
+        # Split only explicit list separators. A plus surrounded by whitespace
+        # is treated as a list delimiter; embedded '+' stays part of the name.
+        activity_values.extend((column, part.strip()) for part in re.split(r";|(?<=\s)\+(?=\s)", value) if part.strip())
+    activities: list[CompanyActivity] = []
+    seen_activity_labels: set[str] = set()
+    for column, label in activity_values:
+        if label.casefold() in seen_activity_labels:
+            continue
+        seen_activity_labels.add(label.casefold())
+        activities.append(CompanyActivity(
+            activity_id=f"csv-{row_index}-activity-{len(activities) + 1}", label=label,
+            normalized_class=_activity_class(label), status="confirmed",
+            provenance=_provenance(filename, row_index, column),
+            evidence_refs=[_provenance(filename, row_index, column)],
+        ))
+    assertions = [CompanyAssertion(
+        assertion_id=f"csv-{row_index}-product-{column.lower()}", kind="product",
+        label=f"{column}={'yes' if value else 'no' if value is False else 'unknown'}",
+        status="confirmed" if value is not None else "unknown",
+        provenance=_provenance(filename, row_index, column),
+        evidence_refs=[_provenance(filename, row_index, column)] if column in row else [],
+    ) for column, value in product_flags.items() if value is not None or column in row]
     context = CompanyContext(
         name=f"Анонимизированная компания {identifier}", industry=industry,
         description="Контекст предложен по обезличенной CSV-строке; не является сохранённым Core-профилем.",
-        role=role, facts=facts,
+        role=role, facts=facts, activities=activities, assertions=assertions,
     )
     if not industry:
         missing_fields.append("MAINOKVED_NAME")

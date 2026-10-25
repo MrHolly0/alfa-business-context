@@ -662,6 +662,58 @@
         ],
         "title": "AnalysisRequest"
       },
+      "BusinessPreferences": {
+        "properties": {
+          "role": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "answer_style": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "concise",
+                  "balanced",
+                  "detailed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer Style"
+          },
+          "horizon": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "short",
+                  "quarter",
+                  "long"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Horizon"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "BusinessPreferences",
+        "description": "Request preferences never replace facts or immutable evidence requirements."
+      },
       "BusinessSnapshot": {
         "properties": {
           "company_id": {
@@ -677,6 +729,28 @@
           },
           "company": {
             "$ref": "#/components/schemas/CompanyContext"
+          },
+          "preferences": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BusinessPreferences"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "known_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Known At"
           },
           "dependency_graph": {
             "items": {
@@ -940,8 +1014,232 @@
         ],
         "title": "CandidateClaim"
       },
+      "CompanyActivity": {
+        "properties": {
+          "activity_id": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Activity Id"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Label"
+          },
+          "normalized_class": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "manufacturing",
+                  "trade",
+                  "logistics",
+                  "software",
+                  "import",
+                  "export",
+                  "agriculture",
+                  "construction",
+                  "finance",
+                  "other"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Normalized Class"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "confirmed",
+              "assumption",
+              "contradiction",
+              "unknown"
+            ],
+            "title": "Status",
+            "default": "confirmed"
+          },
+          "provenance": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Provenance"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string",
+              "maxLength": 8000,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Evidence Refs"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "valid_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid From"
+          },
+          "valid_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Until"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "activity_id",
+          "label",
+          "provenance"
+        ],
+        "title": "CompanyActivity",
+        "description": "An activity label is retained even when no normalized class is known."
+      },
+      "CompanyAssertion": {
+        "properties": {
+          "assertion_id": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Assertion Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "product",
+              "service",
+              "resource",
+              "cost",
+              "market",
+              "territory",
+              "supplier",
+              "customer_group",
+              "contract",
+              "horizon",
+              "dependency",
+              "other"
+            ],
+            "title": "Kind"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Label"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "confirmed",
+              "assumption",
+              "contradiction",
+              "unknown"
+            ],
+            "title": "Status"
+          },
+          "provenance": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Provenance"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string",
+              "maxLength": 8000,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Evidence Refs"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "valid_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid From"
+          },
+          "valid_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Until"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "assertion_id",
+          "kind",
+          "label",
+          "status",
+          "provenance"
+        ],
+        "title": "CompanyAssertion",
+        "description": "A versionable profile statement with explicit status and source lineage."
+      },
       "CompanyContext": {
         "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "company-context-v2",
+            "title": "Schema Version",
+            "default": "company-context-v2"
+          },
           "name": {
             "type": "string",
             "maxLength": 8000,
@@ -981,6 +1279,22 @@
             "type": "array",
             "maxItems": 100,
             "title": "Facts"
+          },
+          "activities": {
+            "items": {
+              "$ref": "#/components/schemas/CompanyActivity"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Activities"
+          },
+          "assertions": {
+            "items": {
+              "$ref": "#/components/schemas/CompanyAssertion"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "title": "Assertions"
           }
         },
         "additionalProperties": false,
@@ -1295,6 +1609,63 @@
             "maxLength": 8000,
             "minLength": 1,
             "title": "Provenance"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "confirmed",
+              "assumption",
+              "contradiction",
+              "unknown"
+            ],
+            "title": "Status",
+            "default": "confirmed"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string",
+              "maxLength": 8000,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Evidence Refs"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "valid_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid From"
+          },
+          "valid_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Until"
           }
         },
         "additionalProperties": false,
@@ -1566,7 +1937,9 @@
               "analyze",
               "reassess",
               "period",
-              "onboard"
+              "onboard",
+              "optimize",
+              "rollback_config"
             ],
             "title": "Operation",
             "default": "analyze"
@@ -1675,6 +2048,21 @@
             "minimum": 1.0,
             "title": "Max Events",
             "default": 10
+          },
+          "max_exploratory_analyses": {
+            "type": "integer",
+            "maximum": 3.0,
+            "minimum": 0.0,
+            "title": "Max Exploratory Analyses",
+            "default": 1
+          },
+          "expected_config_revisions": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "maxProperties": 20,
+            "title": "Expected Config Revisions"
           }
         },
         "additionalProperties": false,
@@ -2542,6 +2930,8 @@
             "enum": [
               "confirmed_dependency",
               "company_fact",
+              "company_activity",
+              "company_assertion",
               "company_name",
               "industry",
               "role_tiebreak"
@@ -2857,6 +3247,18 @@
             "type": "array",
             "maxItems": 20,
             "title": "Evidence Refs"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
           },
           "valid_from": {
             "anyOf": [

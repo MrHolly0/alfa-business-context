@@ -9,6 +9,8 @@ import re
 from typing import Any, Iterable, Literal, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from .company_context import project_company_context
+from .schemas import CompanyContext
 
 
 def _time(value: str|datetime, name: str) -> datetime:
@@ -195,8 +197,10 @@ def select_affected_businesses(package, businesses: Sequence[Any], *,
         company_name=str(_get(company,"name") or "")
         roots={_norm(company_id),_norm(company_name)}-{""}
         graph_raw=list(_get(business,"dependency_graph",[]) or [])
-        company_deps=list(_get(company,"dependencies",[]) or [])
-        facts=list(_get(company,"facts",[]) or [])
+        company_context = company if isinstance(company, CompanyContext) else CompanyContext.model_validate(company)
+        projection = project_company_context(company_context, as_of=instant)
+        company_deps=list(projection.dependencies)
+        facts=list(projection.facts)
         edges=[]; invalid_graph_edges=0; payment_edges=0; inactive_edges=0
         active_declared_graph_edges=0
         for raw in graph_raw:
@@ -257,13 +261,24 @@ def select_affected_businesses(package, businesses: Sequence[Any], *,
         fact_matches=[]
         for raw in facts:
             fact=_as_mapping(raw)
-            fact_text=str(fact.get("text") or "")
+            fact_text=_affirmative_context_text(str(fact.get("text") or ""))
             matches=_matching_terms(fact_text,event_terms)
             if matches:
                 fact_matches.extend(matches);matched_nodes.extend(matches)
         if fact_matches:
             reasons.append("company_fact_text_matches_event_term")
             signal_scores.append(0.34)
+
+        for activity in projection.activities:
+            matches=_matching_terms(activity.label,event_terms)
+            if matches:
+                matched_nodes.extend(matches);signal_scores.append(0.55)
+                reasons.append("confirmed_activity_text_matches_event_term")
+        for assertion in projection.assertions:
+            matches=_matching_terms(_affirmative_context_text(assertion.label),event_terms)
+            if matches:
+                matched_nodes.extend(matches);signal_scores.append(0.50)
+                reasons.append("confirmed_assertion_text_matches_event_term")
 
         # General descriptive/industry overlap is deliberately weak and never a path.
         industry=str(_get(company,"industry") or "")
@@ -294,6 +309,8 @@ def select_affected_businesses(package, businesses: Sequence[Any], *,
             uncertainty.append("Some matching dependency paths include assumed or user-reported edges.")
         if industry_matches and not (paths or fact_matches):
             uncertainty.append("Industry overlap is weak prioritization context and does not establish a business dependency.")
+        uncertainty.extend(projection.limitations)
+        uncertainty.extend("Follow-up: " + question.question for question in projection.questions)
         if not event_terms:
             uncertainty.append("The impact package supplied no explicit entities, resources, or territories to match.")
         confirmed_context=sum(1 for dep in company_deps if _as_mapping(dep).get("status")=="confirmed")
@@ -311,6 +328,8 @@ def select_affected_businesses(package, businesses: Sequence[Any], *,
             "confirmed_company_dependencies":confirmed_context,"assumed_company_dependencies":assumed_context,
             "inactive_company_dependencies":inactive_context_deps,
             "payment_company_dependencies_excluded":payment_context_deps,"company_facts":len(facts),
+            "company_activities":len(projection.activities),"company_assertions":len(projection.assertions),
+            "company_context_fingerprint":projection.fingerprint,
             "matched_event_terms":len(matched_nodes),"grounded_paths":len(paths),
             "signal_basis":list(dict.fromkeys(reasons)),
             "as_of":instant.isoformat()}
@@ -338,15 +357,30 @@ def _event_terms(package):
     for name in ("entities","territories","resources"):
         values=_get(package,name,[]) or []
         terms.extend(str(x).strip() for x in values if isinstance(x,str) and x.strip())
+    # Deterministic extractors may leave resources empty while preserving the
+    # source wording in attributed claims. These phrases are retrieval leads,
+    # not new evidence or extracted entities.
+    phrase_stop = _STOP_TOKENS | {"что", "как", "источник", "издание", "сообщает", "сообщение",
+        "сообщили", "оператор", "компания", "компании", "отдельном", "случае", "неизвестно",
+        "неизвестна", "установлены", "подтверждает", "временно", "штатно", "работает", "открыт",
+        "открыта", "после", "перед", "который", "которая", "которые", "были", "будет",
+        "дата", "срок", "сроки", "может", "могут", "другом", "другая", "другой"}
+    for claim in (_get(package,"claims",[]) or [])[:32]:
+        words=_match_tokens(str(_get(claim,"quote","") or "")[:1200])
+        for size in (2,3):
+            for start in range(max(0,len(words)-size+1)):
+                phrase=words[start:start+size]
+                if len(phrase)==size and not any(word in phrase_stop for word in phrase):
+                    terms.append(" ".join(phrase))
     # Deduplicate by normalized phrase while retaining the literal source spelling.
     unique={}
     for term in terms:
         key=tuple(_match_tokens(term))
         if key:unique.setdefault(key,term)
-    return list(unique.values())
+    return list(unique.values())[:128]
 
 
-_RU_ENDINGS=("иями","ями","ами","иях","ях","ах","ого","ему","ому","ыми","ими",
+_RU_ENDINGS=("иями","ями","ами","иях","ях","ах","ого","ему","ому","ыми","ими","ых","их",
     "ее","ие","ые","ая","яя","ый","ий","ого","ой","ей","ое","ее","ую","юю",
     "ов","ев","ей","ам","ям","ом","ем","ы","и","а","я","у","ю","е","о")
 _STOP_TOKENS={"и","в","во","на","по","за","из","к","ко","с","со","для","при","через",
@@ -375,6 +409,15 @@ def _phrase_in_text(phrase,text):
 
 def _matching_terms(text,terms):
     return [term for term in terms if _phrase_in_text(term,text)]
+
+
+_UNKNOWN_CLAUSE = re.compile(r"\b(?:нет|не|ни|неизвест\w*|отсутств\w*|неподтвержд\w*|не подтвержд\w*|не установ\w*|unknown|no confirmed|not known|not established)\b", re.IGNORECASE)
+
+
+def _affirmative_context_text(text):
+    """Exclude clauses stating a data gap, retaining affirmative parts of mixed assertions."""
+    clauses=re.split(r"[;.!?\n]+",text)
+    return " ".join(clause for clause in clauses if clause.strip() and not _UNKNOWN_CLAUSE.search(clause))
 
 
 def _active_validity(valid_from,valid_until,instant):

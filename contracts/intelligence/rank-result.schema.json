@@ -31,6 +31,8 @@
           "enum": [
             "confirmed_dependency",
             "company_fact",
+            "company_activity",
+            "company_assertion",
             "company_name",
             "industry",
             "role_tiebreak"

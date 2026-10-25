@@ -88,3 +88,20 @@ def test_ё_normalizes_to_e_and_output_models_forbid_extra_fields():
         RankResult.model_validate({**result, "unexpected": True})
     with pytest.raises(ValidationError):
         RankRequest.model_validate({"tenant_id": "t", "company": company(), "events": [], "source_ids": [], "as_of": AS_OF, "unexpected": 1})
+
+
+def test_all_confirmed_activities_participate_and_unconfirmed_activity_does_not():
+    company_data = company(industry="", activities=[
+        {"activity_id": "act-build", "label": "производство редукторов", "normalized_class": "manufacturing",
+         "status": "confirmed", "provenance": "profile:activity:1"},
+        {"activity_id": "act-software", "label": "разработка ПО для складов", "normalized_class": "software",
+         "status": "confirmed", "provenance": "profile:activity:2"},
+        {"activity_id": "act-assumed", "label": "импорт турбин", "normalized_class": "import",
+         "status": "assumption", "provenance": "model-proposal"},
+    ])
+    result = run(company_data, [event("e", "Разработка ПО для складов расширяется")])
+    item = result["ranked"][0]
+    assert item["score"] == 3
+    assert item["reasons"][0]["kind"] == "company_activity"
+    assert item["reasons"][0]["context_ref"] == "act-software"
+    assert "act-assumed" in result["unsupported_context"]

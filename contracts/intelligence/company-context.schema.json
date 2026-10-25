@@ -1,0 +1,502 @@
+{
+  "$defs": {
+    "CompanyActivity": {
+      "additionalProperties": false,
+      "description": "An activity label is retained even when no normalized class is known.",
+      "properties": {
+        "activity_id": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Activity Id",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "normalized_class": {
+          "anyOf": [
+            {
+              "enum": [
+                "manufacturing",
+                "trade",
+                "logistics",
+                "software",
+                "import",
+                "export",
+                "agriculture",
+                "construction",
+                "finance",
+                "other"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Normalized Class"
+        },
+        "status": {
+          "default": "confirmed",
+          "enum": [
+            "confirmed",
+            "assumption",
+            "contradiction",
+            "unknown"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "provenance": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Provenance",
+          "type": "string"
+        },
+        "evidence_refs": {
+          "items": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "observed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed At"
+        },
+        "valid_from": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid From"
+        },
+        "valid_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid Until"
+        }
+      },
+      "required": [
+        "activity_id",
+        "label",
+        "provenance"
+      ],
+      "title": "CompanyActivity",
+      "type": "object"
+    },
+    "CompanyAssertion": {
+      "additionalProperties": false,
+      "description": "A versionable profile statement with explicit status and source lineage.",
+      "properties": {
+        "assertion_id": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Assertion Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "product",
+            "service",
+            "resource",
+            "cost",
+            "market",
+            "territory",
+            "supplier",
+            "customer_group",
+            "contract",
+            "horizon",
+            "dependency",
+            "other"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "confirmed",
+            "assumption",
+            "contradiction",
+            "unknown"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "provenance": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Provenance",
+          "type": "string"
+        },
+        "evidence_refs": {
+          "items": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "observed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed At"
+        },
+        "valid_from": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid From"
+        },
+        "valid_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid Until"
+        }
+      },
+      "required": [
+        "assertion_id",
+        "kind",
+        "label",
+        "status",
+        "provenance"
+      ],
+      "title": "CompanyAssertion",
+      "type": "object"
+    },
+    "CompanyFact": {
+      "additionalProperties": false,
+      "properties": {
+        "fact_id": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Fact Id",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "provenance": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Provenance",
+          "type": "string"
+        },
+        "status": {
+          "default": "confirmed",
+          "enum": [
+            "confirmed",
+            "assumption",
+            "contradiction",
+            "unknown"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "evidence_refs": {
+          "items": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "observed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed At"
+        },
+        "valid_from": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid From"
+        },
+        "valid_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid Until"
+        }
+      },
+      "required": [
+        "fact_id",
+        "text",
+        "provenance"
+      ],
+      "title": "CompanyFact",
+      "type": "object"
+    },
+    "ProvenancedDependency": {
+      "additionalProperties": false,
+      "properties": {
+        "dependency_id": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Dependency Id",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "kind": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "confirmed",
+            "hypothesis"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "provenance": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Provenance",
+          "type": "string"
+        },
+        "source_node": {
+          "default": "company",
+          "maxLength": 256,
+          "title": "Source Node",
+          "type": "string"
+        },
+        "target_node": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Node"
+        },
+        "evidence_refs": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "observed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed At"
+        },
+        "valid_from": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid From"
+        },
+        "valid_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid Until"
+        }
+      },
+      "required": [
+        "dependency_id",
+        "label",
+        "kind",
+        "status",
+        "provenance"
+      ],
+      "title": "ProvenancedDependency",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "company-context-v2",
+      "default": "company-context-v2",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "name": {
+      "maxLength": 8000,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "industry": {
+      "default": "",
+      "maxLength": 1000,
+      "title": "Industry",
+      "type": "string"
+    },
+    "description": {
+      "default": "",
+      "maxLength": 4000,
+      "title": "Description",
+      "type": "string"
+    },
+    "role": {
+      "default": "",
+      "maxLength": 1000,
+      "title": "Role",
+      "type": "string"
+    },
+    "dependencies": {
+      "items": {
+        "$ref": "#/$defs/ProvenancedDependency"
+      },
+      "maxItems": 100,
+      "title": "Dependencies",
+      "type": "array"
+    },
+    "facts": {
+      "items": {
+        "$ref": "#/$defs/CompanyFact"
+      },
+      "maxItems": 100,
+      "title": "Facts",
+      "type": "array"
+    },
+    "activities": {
+      "items": {
+        "$ref": "#/$defs/CompanyActivity"
+      },
+      "maxItems": 100,
+      "title": "Activities",
+      "type": "array"
+    },
+    "assertions": {
+      "items": {
+        "$ref": "#/$defs/CompanyAssertion"
+      },
+      "maxItems": 200,
+      "title": "Assertions",
+      "type": "array"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "CompanyContext",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

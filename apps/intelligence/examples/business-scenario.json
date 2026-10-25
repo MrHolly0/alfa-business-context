@@ -1,0 +1,57 @@
+{
+  "schema_version": "ai-data-task-v1",
+  "request_id": "business-scenario-baseline",
+  "tenant_id": "scenario-tenant",
+  "company_id": "sensorworks",
+  "context_version": 1,
+  "source_policy_version": 1,
+  "operation": "analyze",
+  "trigger": "manual",
+  "knowledge_mode": "as_of",
+  "as_of": "2026-10-25T12:00:00Z",
+  "source_policy": {
+    "policy_id": "business-scenario-policy",
+    "revision": 1,
+    "tenant_id": "scenario-tenant",
+    "issued_at": "2026-10-25T12:00:00Z",
+    "sources": [
+      {"source_id":"wire-a","source_role":"external","data_classification":"synthetic","uri":"https://news-a.example/feed.xml","content_type":"application/rss+xml","title":"Fixture wire-a","publisher":"Учебное издание wire-a","language":"ru","enabled":true,"poll_interval_seconds":3600,"timeout_seconds":5,"max_bytes":100000,"fetch_articles":false,"article_hosts":["news-a.example"]},
+      {"source_id":"wire-b","source_role":"external","data_classification":"synthetic","uri":"https://news-b.example/feed.xml","content_type":"application/rss+xml","title":"Fixture wire-b","publisher":"Учебное издание wire-b","language":"ru","enabled":true,"poll_interval_seconds":3600,"timeout_seconds":5,"max_bytes":100000,"fetch_articles":false,"article_hosts":["news-b.example"]}
+    ],
+    "excluded_source_ids": [], "excluded_publishers": [], "user_excluded_source_ids": [],
+    "user_excluded_publishers": [], "excluded_document_uris": [], "user_excluded_document_uris": []
+  },
+  "businesses": [
+    {
+      "company_id":"sensorworks","context_version":1,
+      "company": {
+        "schema_version":"company-context-v2","name":"Датчик и код (синтетический пример)","industry":"производство датчиков","role":"директор по операциям",
+        "activities":[
+          {"activity_id":"sensorworks-activity-1","label":"Производство промышленных датчиков","normalized_class":"manufacturing","provenance":"scenario:profile:activity-1"},
+          {"activity_id":"sensorworks-activity-2","label":"Разработка встроенного программного обеспечения","normalized_class":"software","provenance":"scenario:profile:activity-2"},
+          {"activity_id":"sensorworks-activity-3","label":"Импорт керамических изоляторов","normalized_class":"import","provenance":"scenario:profile:activity-3"}
+        ],
+        "assertions":[
+          {"assertion_id":"sensorworks-assertion-product","kind":"product","label":"Промышленные датчики","status":"confirmed","provenance":"scenario:profile:product"},
+          {"assertion_id":"sensorworks-assertion-resource","kind":"resource","label":"Керамические изоляторы используются в части датчиков; доля и критичность неизвестны","status":"confirmed","provenance":"scenario:profile:resource"},
+          {"assertion_id":"sensorworks-assertion-supplier","kind":"supplier","label":"Поставщик и конкретный терминал поставок неизвестны","status":"unknown","provenance":"scenario:profile:unknown"}
+        ],
+        "facts":[{"fact_id":"sensorworks-unknown-exposure","text":"Нет подтверждённых данных о доле импорта, запасах или сроке покрытия","provenance":"scenario:profile:known-gap"}]
+      },
+      "dependency_graph": []
+    },
+    {
+      "company_id":"softnorth","context_version":1,
+      "company": {
+        "schema_version":"company-context-v2","name":"СофтСевер (синтетический пример)","industry":"разработка ПО","role":"генеральный директор",
+        "activities":[{"activity_id":"softnorth-activity-1","label":"Разработка корпоративного ПО","normalized_class":"software","provenance":"scenario:profile:activity"}],
+        "facts":[{"fact_id":"softnorth-no-ceramic","text":"В учебном профиле сведений о керамике, терминале и поставщике нет; отсутствие сведений не означает отсутствия связей.","provenance":"scenario:profile:known-gap"}]
+      },
+      "dependency_graph": []
+    }
+  ],
+  "event_ids": [],
+  "published_assessments": [],
+  "budget": {"max_model_calls":0,"max_input_tokens":24000,"max_output_tokens":2048,"max_total_tokens":60000,"max_steps":12},
+  "data_classification":"synthetic","synthetic":true,"max_events":10
+}

@@ -97,3 +97,25 @@ def test_no_package_terms_returns_coverage_and_never_claims_safe_exclusion():
     assert row.score == 0
     assert row.coverage["event_term_count"] == 0
     assert any("no explicit entities" in item for item in row.uncertainty)
+
+
+def test_attributed_claim_terms_select_confirmed_resource_dependency_but_not_data_gap():
+    package = SimpleNamespace(event_id="evt-ceramic", revision=1, entities=["Отгрузка"],
+        territories=[], resources=[], claims=[SimpleNamespace(
+            quote="Отгрузка керамических изоляторов задерживается; дата возобновления неизвестна")])
+    dependency = ProvenancedDependency(dependency_id="dep-insulators",
+        label="Подтверждённые закупки керамических изоляторов", kind="resource",
+        status="confirmed", provenance="profile:contract-7", evidence_refs=["contract:7"])
+    gap = CompanyFact(fact_id="fact-gap",
+        text="Сведения о керамике, терминале и поставщике отсутствуют.", provenance="profile:gap")
+    selected = select_affected_businesses(package, [
+        business("co-dependent", dependencies=[dependency]),
+        business("co-unknown", facts=[gap]),
+    ], as_of=AS_OF)
+    by_id = {item.company_id: item for item in selected}
+    assert by_id["co-dependent"].status == "signal_found"
+    assert by_id["co-dependent"].score == 0.8
+    assert "company_dependency_text_matches_event_term" in by_id["co-dependent"].reasons
+    assert by_id["co-dependent"].paths[0].evidence_refs == ["contract:7"]
+    assert by_id["co-unknown"].status == "no_signal_found"
+    assert by_id["co-unknown"].score == 0

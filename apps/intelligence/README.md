@@ -10,6 +10,7 @@ Python получает из Core разрешённый snapshot: source policy
 .venv/bin/python -m intelligence --help
 .venv/bin/python -m intelligence demo
 .venv/bin/python -m intelligence demo-data --state-dir /tmp/alfa-data-demo
+.venv/bin/python -m intelligence demo-business --state-dir /tmp/alfa-business-demo
 .venv/bin/python -m intelligence evaluate --mode baseline
 .venv/bin/python -m pytest -q -p no:cacheprovider tests
 ```
@@ -76,3 +77,5 @@ Scheduler создаёт обычные fixture jobs. Реальную очер�
 Читайте [процесс](../../docs/ai-process.md), [границы и готовность](../../docs/ai-scope-and-readiness.md), [сбор источников](docs/collection.md), [проверки](docs/checks.md), [аналитические конфигурации](docs/analysts.md) и [турнир](docs/tournament.md). Актуальный отчёт о live-проверках: [ai-live-checks.md](../../docs/ai-live-checks.md).
 
 Успешные schema/tests не доказывают точность выводов. В репозитории нет реальных 9 банковских PDF и CSV кейса, PHP интеграции, лицензированных production источников или независимой оценки на 200–300 примерах.
+
+`demo-business` проверяет новый смешанный профиль, два сообщения о терминале и слабую аналогию на локальных RSS. `optimize`/`rollback_config` — отдельные операции DataTask; обычный анализ использует выбранную конфигурацию без нового турнира. Профиль `company-context-v2`, предпочтения, версии и порядок подключения описаны в [процессе](../../docs/ai-process.md) и [контракте](../../contracts/intelligence/README.md).

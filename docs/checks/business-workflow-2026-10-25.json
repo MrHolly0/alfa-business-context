@@ -1,0 +1,373 @@
+{
+  "date": "2026-10-25",
+  "data": "Only explicitly synthetic profiles and local synthetic RSS; no customer data or keys.",
+  "checks": {
+    "python_host": "400 passed, 11 subtests",
+    "python_docker": "400 passed, 11 subtests",
+    "contracts": "runtime JSON Schema/OpenAPI export --check passed",
+    "source_network_in_scenario": false,
+    "offline_scenario": {
+      "events": 2,
+      "companies": 2,
+      "candidates": 4
+    },
+    "offline_tournament": {
+      "winner_ref": "baseline@1",
+      "promotion_eligible": false,
+      "synthetic": true
+    }
+  },
+  "prompt_sha256": {
+    "research-v1.system.ru.txt": "5baf2e06d452b6232ad5de73df78962f0a5a5fc6f3e3e38fb61df209a2a9f374",
+    "analysis-v2.user.ru.txt": "7d8951f73657f0c2038933753363d4809a9c843a92edd01e60e93db9ad29e142",
+    "analysis-v2.system.ru.txt": "f6f881039111aa5b9eecd7dd4d989d1a6ad250207a30dbccacca44a7447583b2",
+    "critic-v1.system.ru.txt": "3fe0eb2828053fc54d6b62f4ca44871593c0757c57edde2214b9bc5875987007"
+  },
+  "openrouter": {
+    "currency": "USD",
+    "scope": "alfa-openrouter-paid-tests",
+    "task_cap": "0.05",
+    "prior_spent": "0.026409489306",
+    "this_task_spent": "0.013024234000",
+    "cumulative_spent": "0.039433723306",
+    "lifetime_limit": "5",
+    "remaining": "4.960566276694",
+    "reserved": "0",
+    "uncertain_count": 0,
+    "cost_basis": "provider_reported, including failed generations",
+    "runs": [
+      {
+        "run": 1,
+        "model": "qwen/qwen3.6-35b-a3b",
+        "optimization_status": "already_current",
+        "analysis_status": "partial",
+        "execution_mode": "model",
+        "analysis_model_calls": 3,
+        "errors": [],
+        "candidate_summary": "Модель не вернула проверяемый разбор.",
+        "rollback_status": null,
+        "spent_usd": "0.002526000000",
+        "failure": {
+          "type": "ValueError",
+          "code": null
+        }
+      },
+      {
+        "run": 2,
+        "model": "qwen/qwen3.6-35b-a3b",
+        "optimization_status": "model_generated_bounded_preferences",
+        "analysis_status": "partial",
+        "execution_mode": "model",
+        "analysis_model_calls": 3,
+        "errors": [
+          "model_output_rejected:ValueError"
+        ],
+        "candidate_summary": "Модель не вернула проверяемый разбор.",
+        "rollback_status": "completed",
+        "spent_usd": "0.002881650000",
+        "failure": null
+      },
+      {
+        "run": 3,
+        "model": "qwen/qwen3.6-35b-a3b",
+        "optimization_status": "model_generated_bounded_preferences",
+        "analysis_status": "partial",
+        "execution_mode": "model",
+        "analysis_model_calls": 2,
+        "errors": [],
+        "candidate_summary": "Открытие терминала Северного причала противоречиво: один источник сообщает о задержках отгрузки керамических изоляторов, другой — о штатной работе. Компания «Датчик и код» использует эти изоляторы, но доля их критичности и объемы запасов неизвестны. Влияние на производство датчиков остается неизвестным до подтверждения логистических данных.",
+        "rollback_status": "completed",
+        "spent_usd": "0.001663500000",
+        "failure": null
+      },
+      {
+        "run": 4,
+        "model": "qwen/qwen3.6-35b-a3b",
+        "optimization_status": "already_current",
+        "analysis_status": "partial",
+        "execution_mode": "model",
+        "analysis_model_calls": 3,
+        "errors": [
+          "model_output_rejected:impact_requires_primary_event_evidence"
+        ],
+        "candidate_summary": "Модель не вернула проверяемый разбор.",
+        "rollback_status": "not_needed_config_unchanged",
+        "spent_usd": "0.001945250000",
+        "failure": null
+      },
+      {
+        "run": 5,
+        "model": "qwen/qwen3.6-35b-a3b",
+        "optimization_status": "model_generated_bounded_preferences",
+        "analysis_status": "partial",
+        "execution_mode": "model",
+        "analysis_model_calls": 3,
+        "errors": [
+          "model_output_rejected:bank_view_requires_bank_evidence"
+        ],
+        "candidate_summary": "Модель не вернула проверяемый разбор.",
+        "rollback_status": "completed",
+        "spent_usd": "0.002476550000",
+        "failure": null
+      },
+      {
+        "run": 6,
+        "model": "google/gemma-4-26b-a4b-it",
+        "optimization_status": "model_generated_bounded_preferences",
+        "analysis_status": "partial",
+        "execution_mode": "baseline",
+        "analysis_model_calls": 3,
+        "errors": [
+          "malformed_json_output"
+        ],
+        "candidate_summary": "Модельный разбор недоступен. Показаны сообщения источников; влияние на компанию не установлено.",
+        "rollback_status": "completed",
+        "spent_usd": "0.000838306000",
+        "failure": null
+      },
+      {
+        "run": 7,
+        "model": "z-ai/glm-5.3-flash",
+        "optimization_status": "model_generated_bounded_preferences",
+        "analysis_status": "partial",
+        "execution_mode": "model",
+        "analysis_model_calls": 2,
+        "errors": [],
+        "candidate_summary": "Источник wire-a сообщает о временном закрытии терминала Северного причала и задержках отгрузки керамических изоляторов; оператор терминала (wire-b) утверждает, что терминал работает штатно и не подтверждает ограничений отгрузки керамических изоляторов. Данные противоречивы. Компания импортирует керамические изоляторы, но доля и критичность ресурса неизвестны, поэтому влияние на производство датчиков пока неопределённое.",
+        "rollback_status": "completed",
+        "spent_usd": "0.000692978000",
+        "failure": null
+      }
+    ]
+  },
+  "final_model_scenario": {
+    "model": "z-ai/glm-5.3-flash",
+    "optimization": {
+      "status": "completed",
+      "generation_status": "model_generated_bounded_preferences",
+      "config_ref": "company-8c2919493234c236e1b5547e@2",
+      "config": {
+        "config_id": "company-8c2919493234c236e1b5547e",
+        "revision": 2,
+        "template_version": "analysis-v2",
+        "focus": [
+          "supply",
+          "uncertainty"
+        ],
+        "retrieval_strategy": "balanced",
+        "answer_style": "balanced",
+        "horizon": "quarter",
+        "role_scope": "any",
+        "industry_scope": [],
+        "evidence_limit": 16,
+        "max_depth": 2,
+        "retrieval_expansions": [],
+        "examples": []
+      },
+      "calls": 1,
+      "attempts": [
+        {
+          "model": "z-ai/glm-5.3-flash",
+          "cost": "0.00002544",
+          "currency": "USD",
+          "cost_source": "provider_reported",
+          "usage": {
+            "prompt_tokens": 260,
+            "completion_tokens": 57,
+            "cached_tokens": 0,
+            "reported_cost": "0.00002544",
+            "cost_currency": "USD"
+          }
+        }
+      ]
+    },
+    "candidate": {
+      "status": "partial",
+      "execution_mode": "model",
+      "config_ref": "company-8c2919493234c236e1b5547e@2",
+      "summary": "Источник wire-a сообщает о временном закрытии терминала Северного причала и задержках отгрузки керамических изоляторов; оператор терминала (wire-b) утверждает, что терминал работает штатно и не подтверждает ограничений отгрузки керамических изоляторов. Данные противоречивы. Компания импортирует керамические изоляторы, но доля и критичность ресурса неизвестны, поэтому влияние на производство датчиков пока неопределённое.",
+      "claims": [
+        {
+          "claim_id": "cl_external_closure",
+          "kind": "external_fact",
+          "text": "Издание (wire-a) сообщает, что терминал Северного причала временно закрылся после сбоя оборудования, отгрузка керамических изоляторов задерживается, дата возобновления неизвестна.",
+          "evidence_refs": [
+            "ev_61041cfc2b055a25393f411fdd5e8ecae70ce2ab"
+          ],
+          "context_refs": [],
+          "assumptions": [],
+          "alternatives": [],
+          "falsifiers": [],
+          "origin": null,
+          "horizon": null,
+          "confirmation_conditions": []
+        },
+        {
+          "claim_id": "cl_external_operator",
+          "kind": "external_fact",
+          "text": "Оператор терминала (wire-b) сообщает, что грузовой терминал открыт и работает штатно; ограничений отгрузки керамических изоляторов оператор не подтверждает.",
+          "evidence_refs": [
+            "ev_df2e4804059fab4abdcb8f6b5b7f61b8f14ef8b2"
+          ],
+          "context_refs": [],
+          "assumptions": [],
+          "alternatives": [],
+          "falsifiers": [],
+          "origin": null,
+          "horizon": null,
+          "confirmation_conditions": []
+        },
+        {
+          "claim_id": "cl_unknown_impact",
+          "kind": "unknown",
+          "text": "Влияние события на компанию неизвестно: импорт керамических изоляторов подтверждён, но доля этого канала, запасы, срок покрытия и критичность ресурса не подтверждены (см. sensorworks-unknown-exposure). Противоречие между wire-a и wire-b также не разрешено.",
+          "evidence_refs": [],
+          "context_refs": [
+            "sensorworks-unknown-exposure",
+            "sensorworks-activity-3",
+            "sensorworks-assertion-resource"
+          ],
+          "assumptions": [],
+          "alternatives": [],
+          "falsifiers": [],
+          "origin": null,
+          "horizon": null,
+          "confirmation_conditions": []
+        },
+        {
+          "claim_id": "cl_hypothesis_supply",
+          "kind": "model_hypothesis",
+          "text": "Если задержка отгрузки керамических изоляторов реальна и подтвердится, поставки для импорта изоляторов могут задержаться в горизонте квартала; это может повлиять на производство датчиков, в которых они используются. Пока гипотеза не подтверждена.",
+          "evidence_refs": [
+            "ev_61041cfc2b055a25393f411fdd5e8ecae70ce2ab"
+          ],
+          "context_refs": [
+            "sensorworks-assertion-resource"
+          ],
+          "assumptions": [
+            "Задержка отгрузки реальна (противоречит заявлению оператора)",
+            "Изоляторы поставляются через данный терминал",
+            "Запасы ограничены"
+          ],
+          "alternatives": [
+            "Терминал работает штатно (по оператору), задержки нет",
+            "Поставки идут через другие терминалы/маршруты",
+            "Достаточные запасы покрывают квартал"
+          ],
+          "falsifiers": [
+            "Подтверждение оператором нормальной отгрузки изоляторов",
+            "Данные поставщика о неизменённых сроках",
+            "Подтверждение иного маршрута поставки"
+          ],
+          "origin": null,
+          "horizon": "до 3 месяцев",
+          "confirmation_conditions": [
+            "Подтверждение задержки отгрузки независимым источником",
+            "Подтверждение маршрута поставки через данный терминал"
+          ]
+        },
+        {
+          "claim_id": "bank-unknown",
+          "kind": "unknown",
+          "text": "Среди использованных материалов не подтверждена позиция банка по этому событию.",
+          "evidence_refs": [],
+          "context_refs": [],
+          "assumptions": [],
+          "alternatives": [],
+          "falsifiers": [],
+          "origin": "bank",
+          "horizon": null,
+          "confirmation_conditions": []
+        }
+      ],
+      "evidence_sources": [
+        "wire-a",
+        "wire-b"
+      ],
+      "clarifications": [
+        "Поставляются ли керамические изоляторы через терминал Северного причала и какова доля этого канала?",
+        "Каков текущий запас изоляторов и на какой срок производства он хватает?",
+        "Есть ли альтернативные поставщики или маршруты импорта изоляторов?",
+        "Какова критичность изоляторов для выпуска (доля продукции, зависящей от них)?",
+        "Действует ли направление деятельности «Производство промышленных датчиков»?",
+        "Действует ли направление деятельности «Разработка встроенного программного обеспечения»?",
+        "Действует ли направление деятельности «Импорт керамических изоляторов»?",
+        "Подтверждается ли сейчас утверждение «Промышленные датчики»?",
+        "Подтверждается ли сейчас утверждение «Керамические изоляторы используются в части датчиков; доля и критичность неизвестны»?",
+        "Уточните, неизвестен статус/актуальность: «Поставщик и конкретный терминал поставок неизвестны».",
+        "Актуально ли сейчас сведение «Нет подтверждённых данных о доле импорта, запасах или сроке покрытия»?",
+        "Какие критичные ресурсы, поставщики, рынки или логистические маршруты могут изменить оценку воздействия? Отсутствие этих сведений не означает отсутствия зависимости."
+      ],
+      "limitations": [
+        "freshness_unknown:activities:sensorworks-activity-1",
+        "freshness_unknown:activities:sensorworks-activity-2",
+        "freshness_unknown:activities:sensorworks-activity-3",
+        "freshness_unknown:assertions:sensorworks-assertion-product",
+        "freshness_unknown:assertions:sensorworks-assertion-resource",
+        "unresolved:assertions:sensorworks-assertion-supplier",
+        "freshness_unknown:facts:sensorworks-unknown-exposure",
+        "dependencies_not_confirmed",
+        "external_web_search_unavailable",
+        "independent_origin_count_unavailable"
+      ]
+    },
+    "config_ref_used": "company-8c2919493234c236e1b5547e@2",
+    "config_ref_selected": "company-8c2919493234c236e1b5547e@2",
+    "critic": {
+      "mode": "semantic",
+      "decision": "accept",
+      "issues": [],
+      "invalid_issue_count": 0,
+      "clarifications": [
+        "Требуется уточнение у источника/оператора: подтверждается ли ограничение отгрузки именно керамических изоляторов через Северный причал и проходит ли импорт компании через этот терминал (для разрешения противоречия wire-a/wire-b и проверки маршрута поставки)."
+      ],
+      "search_count": 0
+    },
+    "rollback": {
+      "status": "completed",
+      "config": {
+        "config_id": "company-8c2919493234c236e1b5547e",
+        "revision": 3,
+        "template_version": "analysis-v2",
+        "focus": [],
+        "retrieval_strategy": "balanced",
+        "answer_style": "balanced",
+        "horizon": "quarter",
+        "role_scope": "any",
+        "industry_scope": [],
+        "evidence_limit": 16,
+        "max_depth": 2,
+        "retrieval_expansions": [],
+        "examples": []
+      },
+      "context_version": 1
+    }
+  },
+  "hackathon_gateway": {
+    "provider": "hackathon",
+    "generative_calls": 0,
+    "endpoints": {
+      "/v1/models": {
+        "status": 200
+      },
+      "/model/info": {
+        "status": 200,
+        "models": 6,
+        "models_with_both_rates": 0
+      },
+      "/key/info": {
+        "status": 200,
+        "max_budget": 500.0,
+        "spend": 0.0
+      }
+    }
+  },
+  "quality_improvement_proven": false,
+  "limits": [
+    "Synthetic scenario, not independent or statistically sufficient quality evidence.",
+    "Model errors and reasoning/output truncation were observed; rejected prose is never published as verified analysis.",
+    "Final GLM output is partial: company route, stocks, criticality and bank position remain unknown.",
+    "No generative calls through Alfa gateway: no usable pair of input/output rates.",
+    "Actual Symfony/frontend integration and real bank corpus are not included."
+  ]
+}

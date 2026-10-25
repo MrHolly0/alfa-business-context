@@ -94,7 +94,8 @@ def _chunks(text: str, size: int = 850, overlap: int = 100) -> list[tuple[str, s
 
 
 class CorpusStore:
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, *, clock=None):
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.path = str(path)
         if self.path == ":memory:":
             raise ValueError("CorpusStore requires a persistent SQLite path")
@@ -338,7 +339,7 @@ class CorpusStore:
         classification="synthetic" if document["synthetic"] else document.get("data_classification","confidential")
         if classification not in {"public","synthetic","confidential"}: raise ValueError("invalid_data_classification")
         db.execute("INSERT OR IGNORE INTO document_provenance(document_revision_ref,author,event_time,received_at,raw_sha256,data_classification) VALUES(?,?,?,?,?,?)", (ref, str(document.get("author", "")), event_time,
-            datetime.now(timezone.utc).isoformat(), digest, classification))
+            self.clock().isoformat(), digest, classification))
 
     def list_documents(self, *, tenant_id, source_ids, as_of, policy=None, as_known=False):
         """Latest eligible versions, with policy exclusions applied before retrieval."""

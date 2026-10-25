@@ -319,12 +319,22 @@ class EventStore:
                 normalized = _normalized_text(item.content)
                 match = None
                 if normalized:
-                    recent = db.execute("""SELECT p.event_id,v.content FROM publications p JOIN publication_versions v
+                    recent = db.execute("""SELECT p.event_id,v.content,v.title,v.published_at FROM publications p JOIN publication_versions v
                         ON (v.tenant_id,v.publication_id)=(p.tenant_id,p.publication_id)
                         WHERE p.tenant_id=? AND v.version=(SELECT MAX(v2.version) FROM publication_versions v2
                           WHERE v2.tenant_id=p.tenant_id AND v2.publication_id=p.publication_id)
                           AND abs(julianday(v.published_at)-julianday(?))<=7""", (tenant, item.published_at)).fetchall()
                     for row in recent:
+                        # Opposing reports about the same named incident can have
+                        # different bodies. Group exact, specific same-day titles
+                        # for review; every source claim remains attributed.
+                        anchors=re.findall(r"\b[А-ЯЁA-Z][а-яёa-zA-ZА-ЯЁ-]{3,}\b",item.title)[1:]
+                        if (len(_normalized_text(item.title))>=32 and anchors and
+                            _normalized_text(row["title"])==_normalized_text(item.title) and
+                            row["published_at"][:10]==item.published_at[:10]):
+                            match=(1.0,row["event_id"])
+                            grouping="matching_title_review_group"
+                            break
                         old = _normalized_text(row["content"])
                         if old == normalized:
                             match = (1.0,row["event_id"])
@@ -335,7 +345,8 @@ class EventStore:
                         if ratio >= NEAR_DUPLICATE_THRESHOLD and (match is None or ratio > match[0]):
                             match = (ratio, row["event_id"])
                 if match:
-                    event_id, grouping = match[1], "near_duplicate_review_group"
+                    event_id=match[1]
+                    if grouping!="matching_title_review_group":grouping="near_duplicate_review_group"
                 else:
                     event_id, grouping = "evt_" + uuid4().hex, "new_event"
                     db.execute("INSERT INTO events(tenant_id,event_id,created_at) VALUES(?,?,?)", (tenant, event_id, now))
@@ -346,6 +357,20 @@ class EventStore:
                 db.execute("""INSERT INTO publications(tenant_id,publication_id,event_id,source_id,source_role,
                     canonical_uri,origin_group_id,created_at) VALUES(?,?,?,?,?,?,?,?)""",
                     (tenant, publication_id, event_id, item.source_id, item.source_role, uri, origin, now))
+            # A corpus revision is immutable. Replaying an older as-of snapshot
+            # must not append its old contents as a new current publication.
+            if item.document_revision_ref:
+                known=db.execute("SELECT * FROM publication_versions WHERE tenant_id=? AND publication_id=? AND document_revision_ref=? ORDER BY version LIMIT 1",
+                                 (tenant,publication_id,item.document_revision_ref)).fetchone()
+                if known:
+                    if known["content_hash"]!=content_hash or known["title"]!=item.title:
+                        raise ValueError("immutable_document_revision_conflict")
+                    prior=db.execute("SELECT MIN(event_revision) FROM event_revision_publications WHERE tenant_id=? AND event_id=? AND publication_id=? AND publication_revision=?",
+                                     (tenant,event_id,publication_id,known["version"])).fetchone()[0]
+                    db.commit()
+                    return {"tenant_id":tenant,"event_id":event_id,"revision":prior,
+                        "publication_id":publication_id,"publication_revision":known["version"],
+                        "content_hash":content_hash,"grouping":"existing_revision","changed":False}
             old = db.execute("SELECT * FROM publication_versions WHERE tenant_id=? AND publication_id=? ORDER BY version DESC LIMIT 1",
                              (tenant, publication_id)).fetchone()
             unchanged_metadata = old and (

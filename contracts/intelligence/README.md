@@ -23,7 +23,7 @@
 
 ## DataTask и результат
 
-`ai-data-task-v1` содержит tenant/company/request IDs, `context_version`, `source_policy_version`, `as_of`, operation (`collect`, `analyze`, `reassess`, `period`, `onboard`), immutable `SourcePolicySnapshot`, до 20 бизнес-контекстов, `published_assessments` Core, бюджет и ограничения. `source_policy.tenant_id/revision` обязаны совпасть с task. Классификация источника берётся из Core-owned `SourceGrant`, а не из текста материала или task label.
+`ai-data-task-v1` содержит tenant/company/request IDs, `context_version`, `source_policy_version`, `as_of`, operation (`collect`, `analyze`, `reassess`, `period`, `onboard`, `optimize`, `rollback_config`), immutable `SourcePolicySnapshot`, до 20 бизнес-контекстов, `published_assessments` Core, бюджет и ограничения. `source_policy.tenant_id/revision` обязаны совпасть с task. Классификация источника берётся из Core-owned `SourceGrant`, а не из текста материала или task label.
 
 `ai-data-result-v1` содержит collection report, event/package refs, selections/invalidations, candidates по компаниям, revisions, analyst configurations, period/watch результаты, coverage и trace. Кандидат не равен опубликованной ситуации. Core проверяет актуальность versions, lease/generation, cancellation и policy перед публикацией.
 
@@ -69,3 +69,22 @@ Fixture stand (`python -m intelligence core-stand --fixture-mode`) исполн�
 `EventInput.text` допускает до 2 млн символов. Модельная проекция ограничена 2000 символов плюс процитированные фрагменты; оригинал и primary revision не усекались. `event_text_excerpt_only` означает частичное покрытие и `partial`.
 
 В coverage различаются количество публикаций, `origin_group_count` пакета / `origin_groups` кандидата и `independence_status`. Значение `unknown` запрещает трактовать счёт групп как число доказанных независимых подтверждений. Точные копии объединяются; доказанная самостоятельность источника не выводится из домена. [Изменения и проверки](../../docs/ai-review-and-fixes.md).
+
+
+## Контекст и конфигурации
+
+`businesses[].company` поддерживает [company-context-v2](company-context.schema.json): `activities[]`, `assertions[]`, прежние `facts[]`/`dependencies[]`. Все ID уникальны в профиле. Подтверждённость, provenance и даты относятся к каждому утверждению. `observed_at > as_of` не разрешает использовать сведение в историческом выводе. Поля `industry` и `role` сохранены для совместимости; пользовательские предпочтения передавайте отдельно в `businesses[].preferences` (`role`, `answer_style`, `horizon`).
+
+`onboard` возвращает `configurations[].revision/config_ref` без LLM. Для фоновых `optimize` и `rollback_config` обязательна карта `expected_config_revisions` ровно по всем компаниям задания, например `{"sensorworks": 1}`. Это прежний `ai-job-v1`, не отдельная очередь. При генерации используется разрешённый маршрут `generator` и прежние task/provider лимиты. `optimization_unavailable`, `optimization_failed`, `revision_conflict`, `stale_context` сохраняют рабочую настройку и видны в результате; такой результат не означает успешную оптимизацию.
+
+`DataResult.versions.company_contexts` перечисляет версии всех компаний. Core проверяет каждую перед публикацией всего batch, а также источник/политику, lease и актуальность выбранной конфигурации. Контрактный стенд отвергает смену вторичной компании и публикацию компании вне task scope до записи outbox. Локальные monotonic fences Python предотвращают перезапись уже наблюдённого нового профиля старой задачей, но не заменяют транзакционную проверку прав и версий в настоящем Core.
+
+HTTP `409` дополнительно обозначает `stale_or_conflicting_company_context`, `stale_or_conflicting_source_policy`, `stale_analysis_as_of`, `stale_analyst_configuration`. Для устаревшего snapshot создавайте новый job с актуальными версиями; повтор старого тела не исправляет конфликт. `period` возвращает исследовательские кандидаты, не обновляя текущий мониторинговый курсор Python; решение об их публикации принадлежит Core.
+
+Сквозной пример и порядок подключения: [процесс](../../docs/ai-process.md), [Backend/Frontend](../../docs/ai-integration.md). Проверки кодом находятся в `test_workflow_extension.py`, `test_business_scenario.py` и `test_core_stand.py`; подставленные ответы моделей не являются доказательством смыслового качества.
+
+Для `period.mode=as_known` фактическая дата знания — `min(as_of, period.end)`. Полный профиль допустим при `businesses[].known_at <= cutoff`: это заверение Core о сохранённом историческом снимке. Без него AI/Data использует только индивидуально датированные сведения `observed_at`, исключает недатированный граф/описание/отрасль и возвращает `historical_profile_knowledge_time_not_confirmed`. Будущие значения не передаются даже как unresolved. Для исторического event snapshot проверяйте namespace `versions.event_snapshot`, а оригиналы читайте по неизменным document refs.
+
+`revision_conflict` и отсутствие предыдущей стабильной конфигурации при откате — завершённые результаты `partial` с прежней настройкой, а не неопределённая повторяемая HTTP-операция. Backend не должен повторять платную генерацию по такому результату автоматически.
+
+Невалидный/недоступный модельный разбор возвращает `execution_mode=baseline`, `status=partial` и явное ограничение; доступны цитаты источников, а непроверенный модельный текст не публикуется. `usage` по-прежнему содержит совершённые платные попытки.

@@ -138,7 +138,13 @@ class PromptRegistry:
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT config_json,content_hash FROM configs WHERE ref=?", (c.ref,)).fetchone()
-            if row and row["content_hash"] != digest: raise ValueError("config revision is immutable")
+            if row and row["content_hash"] != digest:
+                # Older rows omit fields later added with defaults. Reading them
+                # already applies those defaults; preserve their original bytes/hash.
+                stored=AnalystConfig.model_validate_json(row["config_json"])
+                if stored.model_dump(mode="json")!=c.model_dump(mode="json"):
+                    raise ValueError("config revision is immutable")
+                digest=row["content_hash"]
             db.execute("INSERT OR IGNORE INTO configs VALUES(?,?,?)", (c.ref, raw, digest))
         return {"ref": c.ref, "content_hash": digest}
 
@@ -246,11 +252,14 @@ class CompanyAnalystStore:
                 tenant_id TEXT NOT NULL,company_id TEXT NOT NULL,revision INTEGER NOT NULL,
                 config_ref TEXT NOT NULL,context_version INTEGER NOT NULL,config_json TEXT NOT NULL,
                 content_hash TEXT NOT NULL,stable INTEGER NOT NULL,source_config_ref TEXT,
-                created_at TEXT NOT NULL,PRIMARY KEY(tenant_id,company_id,revision),
+                created_at TEXT NOT NULL,context_hash TEXT NOT NULL DEFAULT '',PRIMARY KEY(tenant_id,company_id,revision),
                 UNIQUE(tenant_id,company_id,config_ref));
                 CREATE TABLE IF NOT EXISTS company_analyst_current(
                 tenant_id TEXT NOT NULL,company_id TEXT NOT NULL,revision INTEGER NOT NULL,
                 PRIMARY KEY(tenant_id,company_id));""")
+            columns={r[1] for r in db.execute("PRAGMA table_info(company_analyst_versions)")}
+            if "context_hash" not in columns:
+                db.execute("ALTER TABLE company_analyst_versions ADD COLUMN context_hash TEXT NOT NULL DEFAULT ''")
 
     @contextmanager
     def _db(self):
@@ -270,18 +279,45 @@ class CompanyAnalystStore:
         return value.strip()
 
     @staticmethod
-    def _industry_class(industry: str) -> str:
-        value=industry.casefold()
-        for name,terms in (("manufacturing",("производ","manufactur","промышлен")),
-                           ("trade",("торгов","retail","оптов")),("transport",("логист","transport","транспорт")),
-                           ("finance",("банк","финанс","finance")),("energy",("энерг","energy")),
-                           ("agriculture",("сельск","агро","agri"))):
-            if any(term in value for term in terms): return name
-        return "services" if value else "unknown"
+    def _industry_classes(industry: str, activities=()) -> list[str]:
+        """Return every recognized closed class; unknown descriptions stay unknown."""
+        sources=[industry] if isinstance(industry,str) else []
+        for activity in activities or ():
+            if isinstance(activity,str): sources.append(activity)
+            elif isinstance(activity,dict):
+                if isinstance(activity.get("normalized_class"),str): sources.append(activity["normalized_class"])
+                if isinstance(activity.get("label"),str): sources.append(activity["label"])
+            else:
+                normalized=getattr(activity,"normalized_class",None)
+                label=getattr(activity,"label",None)
+                if isinstance(normalized,str): sources.append(normalized)
+                if isinstance(label,str): sources.append(label)
+        terms=(("manufacturing",("manufactur","manufacturing","производ","промышлен")),
+               ("trade",("trade","retail","wholesale","торгов","оптов")),
+               ("transport",("logistic","transport","delivery","логист","транспорт","достав")),
+               ("finance",("bank","finance","финанс","банк")),
+               ("energy",("energy","энерг")),
+               ("agriculture",("agri","agricultur","сельск","агро")))
+        value=" ".join(sources).casefold()
+        return [name for name,needles in terms if any(term in value for term in needles)]
+
+    @staticmethod
+    def _industry_class(industry: str, activities=()) -> list[str]:
+        """Return all recognized directions; unknown is explicit and never services."""
+        return CompanyAnalystStore._industry_classes(industry,activities) or ["unknown"]
 
     @staticmethod
     def _focus_from_context(company: CompanyContext) -> list[str]:
-        values=" ".join([company.role,*(d.kind for d in company.dependencies)]).casefold()
+        values=" ".join([company.role,*(d.kind for d in company.dependencies)])
+        # CompanyContext v2 additions are read by closed enums only; raw assertion
+        # text never enters an analyst config or model prompt.
+        for activity in getattr(company,"activities",[]) or []:
+            cls=getattr(activity,"normalized_class",None)
+            if cls: values += " " + str(cls)
+        for assertion in getattr(company,"assertions",[]) or []:
+            kind=getattr(assertion,"kind",None)
+            if kind: values += " " + str(kind)
+        values=values.casefold()
         result=[]
         mapping=(("liquidity",("finance","liquid","финанс","денеж")),("supply",("supply","supplier","постав","закуп")),
                  ("regulation",("regulat","прав","compliance","лиценз")),("growth",("growth","demand","рынок","рост")),
@@ -298,6 +334,10 @@ class CompanyAnalystStore:
         candidates += [f.text for f in company.facts]
         candidates += [d.label for d in company.dependencies]
         candidates += [d.provenance for d in company.dependencies]
+        for activity in getattr(company,"activities",[]) or []:
+            candidates += [str(getattr(activity,key,"")) for key in ("label","provenance")]
+        for assertion in getattr(company,"assertions",[]) or []:
+            candidates += [str(getattr(assertion,key,"")) for key in ("label","provenance")]
         for raw in candidates:
             phrase=" ".join(unicodedata.normalize("NFKC",raw).casefold().split())
             if len(phrase)>=12 and phrase in " ".join(body.split()): return True
@@ -306,7 +346,9 @@ class CompanyAnalystStore:
     def _generate(self, base: AnalystConfig, company: CompanyContext, llm) -> tuple[AnalystConfig,str]:
         if llm is None: return base,"registry_fallback"
         dependency_focus=self._focus_from_context(company)
-        features={"role_bucket":_role_bucket(company.role),"industry_class":self._industry_class(company.industry),
+        industry_classes=self._industry_classes(company.industry,getattr(company,"activities",[]))
+        features={"role_bucket":_role_bucket(company.role),"industry_classes":industry_classes or ["unknown"],
+            "industry_class":industry_classes[0] if industry_classes else "unknown",
             "dependency_count":len(company.dependencies),"confirmed_dependency_count":sum(d.status=="confirmed" for d in company.dependencies),
             "hypothesis_dependency_count":sum(d.status=="hypothesis" for d in company.dependencies),
             "fact_count":len(company.facts),"suggested_focus":dependency_focus}
@@ -327,14 +369,15 @@ class CompanyAnalystStore:
         except Exception:
             return base,"registry_fallback_after_invalid_generation"
 
-    def onboard(self, tenant_id: str, company_id: str, context_version: int,
-                company: CompanyContext, llm=None) -> dict[str,Any]:
+    def _onboard_baseline(self, tenant_id: str, company_id: str, context_version: int,
+                          company: CompanyContext) -> dict[str,Any]:
         tenant_id=self._identity(tenant_id,"tenant_id"); company_id=self._identity(company_id,"company_id")
         if isinstance(context_version,bool) or not isinstance(context_version,int) or context_version<1:
             raise ValueError("context_version must be a positive integer")
         company=company if isinstance(company,CompanyContext) else CompanyContext.model_validate(company)
+        context_hash=self._context_digest(company)
         base=self.registry.select(role=company.role,industry=company.industry)
-        config,generation_status=self._generate(base,company,llm)
+        config,generation_status=base,"registry_fallback"
         private_id="company-"+hashlib.sha256((tenant_id+"\0"+company_id).encode()).hexdigest()[:24]
         config=AnalystConfig.model_validate({**config.model_dump(mode="json"),"config_id":private_id,"revision":1})
         # Config may contain query terms but may never persist company facts or prose.
@@ -348,33 +391,95 @@ class CompanyAnalystStore:
             current=db.execute("SELECT revision FROM company_analyst_current WHERE tenant_id=? AND company_id=?",(tenant_id,company_id)).fetchone()
             if current:
                 row=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=? AND company_id=? AND revision=?",(tenant_id,company_id,current["revision"])).fetchone()
-                # Context is supplied to each analysis request independently. A routine
-                # onboarding/read must not silently replace a selected private method
-                # with the newly selected registry base. Passing an LLM is the explicit
-                # request to generate a new bounded preference version.
-                if llm is None and row["source_config_ref"]==base.ref:
-                    return self._record(row,"stored",db,tenant_id,company_id)
-                if row["context_version"]==context_version and row["content_hash"]==self._content_digest(config):
-                    return self._record(row,generation_status,db,tenant_id,company_id)
+                if context_version < row["context_version"]:
+                    record=self._record(row,"stale_context",db,tenant_id,company_id);record["status"]="stale_context";return record
+                if row["context_version"]==context_version:
+                    if row["context_hash"] and row["context_hash"]!=context_hash:
+                        raise ValueError("same context_version has different company context")
+                    if row["source_config_ref"]==base.ref:
+                        return self._record(row,"stored",db,tenant_id,company_id)
+                # Registry changes take precedence even when the company context also
+                # changed. Otherwise a current registry selection could be skipped by
+                # writing its ref beside an older company's strategy.
+                if row["source_config_ref"]!=base.ref:
+                    config=AnalystConfig.model_validate({**base.model_dump(mode="json"),
+                        "config_id":private_id,"revision":row["revision"]+1})
+                    generation_status="registry_rebased" if context_version==row["context_version"] else "registry_context_rebased"
+                elif context_version>row["context_version"]:
+                    # A context change gets a new version while preserving the selected
+                    # strategy; optimization is an explicit separate operation.
+                    config=AnalystConfig.model_validate_json(row["config_json"])
+                    generation_status="context_rebased"
+                stable=int(row["stable"])
+            else:
+                stable=1
             revision=1 if current is None else current["revision"]+1
             now=datetime.now(timezone.utc).isoformat()
-            if current is None and generation_status=="model_generated_bounded_preferences":
-                base_private=AnalystConfig.model_validate({**base.model_dump(mode="json"),"config_id":private_id,"revision":1})
-                base_raw=json.dumps(base_private.model_dump(mode="json"),sort_keys=True,separators=(",",":"),ensure_ascii=False)
-                db.execute("INSERT INTO company_analyst_versions VALUES(?,?,?,?,?,?,?,?,?,?)",
-                    (tenant_id,company_id,1,base_private.ref,context_version,base_raw,self._content_digest(base_private),1,base.ref,now))
-                revision=2
             config=AnalystConfig.model_validate({**config.model_dump(mode="json"),"revision":revision})
             ref=config.ref
             raw=json.dumps(config.model_dump(mode="json"),sort_keys=True,separators=(",",":"),ensure_ascii=False)
             digest=self._content_digest(config)
-            db.execute("INSERT INTO company_analyst_versions VALUES(?,?,?,?,?,?,?,?,?,?)",
-                (tenant_id,company_id,revision,ref,context_version,raw,digest,
-                 int(generation_status!="model_generated_bounded_preferences"),base.ref,now))
+            db.execute("INSERT INTO company_analyst_versions(tenant_id,company_id,revision,config_ref,context_version,config_json,content_hash,stable,source_config_ref,created_at,context_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (tenant_id,company_id,revision,ref,context_version,raw,digest,stable,base.ref,now,context_hash))
             db.execute("INSERT INTO company_analyst_current VALUES(?,?,?) ON CONFLICT(tenant_id,company_id) DO UPDATE SET revision=excluded.revision",
                        (tenant_id,company_id,revision))
             row=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=? AND company_id=? AND revision=?",(tenant_id,company_id,revision)).fetchone()
             return self._record(row,generation_status,db,tenant_id,company_id)
+
+    def onboard(self, tenant_id: str, company_id: str, context_version: int,
+                company: CompanyContext, llm=None) -> dict[str,Any]:
+        """Create/rebase a baseline synchronously; legacy explicit llm opts into optimize."""
+        record=self._onboard_baseline(tenant_id,company_id,context_version,company)
+        if llm is None or record.get("status")=="stale_context": return record
+        return self.optimize(tenant_id,company_id,context_version,company,llm,
+                             expected_revision=record["revision"])
+
+    def optimize(self, tenant_id: str, company_id: str, context_version: int,
+                 company: CompanyContext, llm, *, expected_revision: int) -> dict[str,Any]:
+        """Explicit bounded LLM optimization; only commits against its captured snapshot."""
+        tenant_id=self._identity(tenant_id,"tenant_id");company_id=self._identity(company_id,"company_id")
+        if isinstance(context_version,bool) or not isinstance(context_version,int) or context_version<1:
+            raise ValueError("context_version must be a positive integer")
+        if isinstance(expected_revision,bool) or not isinstance(expected_revision,int) or expected_revision<1:
+            raise ValueError("expected_revision must be a positive integer")
+        company=company if isinstance(company,CompanyContext) else CompanyContext.model_validate(company)
+        context_hash=self._context_digest(company)
+        # Ensure a baseline exists; this is local and immediate, never invokes a model.
+        current=self._onboard_baseline(tenant_id,company_id,context_version,company)
+        if current.get("status")=="stale_context": return current
+        if current["history"][-1]["config_ref"] != current["config_ref"]:
+            raise ValueError("analyst current snapshot is inconsistent")
+        if current["config"].revision != expected_revision:
+            return {**current,"generation_status":"revision_conflict","status":"revision_conflict"}
+        base=current["config"]
+        candidate,status=self._generate(base,company,llm)
+        if status!="model_generated_bounded_preferences":
+            return {**current,"generation_status":status,"status":"optimization_failed",
+                    "error_code":"configuration_generation_failed"}
+        # Candidate generation is the only model operation. Guard the commit against
+        # context changes or concurrent config publication after that call completes.
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row=db.execute("""SELECT v.* FROM company_analyst_current c JOIN company_analyst_versions v
+                ON (v.tenant_id,v.company_id,v.revision)=(c.tenant_id,c.company_id,c.revision)
+                WHERE c.tenant_id=? AND c.company_id=?""",(tenant_id,company_id)).fetchone()
+            if row is None: raise KeyError("company analyst configuration not found")
+            if row["context_version"]!=context_version or row["context_hash"]!=context_hash:
+                record=self._record(row,"stale_context",db,tenant_id,company_id);record["status"]="stale_context";return record
+            if row["revision"]!=expected_revision:
+                record=self._record(row,"revision_conflict",db,tenant_id,company_id);record["status"]="revision_conflict";return record
+            if row["content_hash"]==self._content_digest(candidate):
+                return self._record(row,"already_current",db,tenant_id,company_id)
+            revision=row["revision"]+1
+            candidate=AnalystConfig.model_validate({**candidate.model_dump(mode="json"),"revision":revision})
+            raw=json.dumps(candidate.model_dump(mode="json"),sort_keys=True,separators=(",",":"),ensure_ascii=False)
+            now=datetime.now(timezone.utc).isoformat()
+            db.execute("INSERT INTO company_analyst_versions(tenant_id,company_id,revision,config_ref,context_version,config_json,content_hash,stable,source_config_ref,created_at,context_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (tenant_id,company_id,revision,candidate.ref,context_version,raw,self._content_digest(candidate),0,row["source_config_ref"],now,row["context_hash"]))
+            db.execute("UPDATE company_analyst_current SET revision=? WHERE tenant_id=? AND company_id=? AND revision=?",
+                (revision,tenant_id,company_id,expected_revision))
+            saved=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=? AND company_id=? AND revision=?",(tenant_id,company_id,revision)).fetchone()
+            return self._record(saved,status,db,tenant_id,company_id)
 
     @staticmethod
     def _content_digest(config: AnalystConfig) -> str:
@@ -383,11 +488,19 @@ class CompanyAnalystStore:
         return hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
 
     @staticmethod
+    def _context_digest(company: CompanyContext) -> str:
+        payload=company.model_dump(mode="json")
+        # Role/preferences are user-level inputs, not company facts.
+        payload.pop("role",None)
+        return hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(",",":"),ensure_ascii=False,default=str).encode()).hexdigest()
+
+    @staticmethod
     def _record(row,generation_status,db,tenant_id,company_id):
         history=[{"config_ref":r["config_ref"],"context_version":r["context_version"],"stable":bool(r["stable"]),
                   "source_config_ref":r["source_config_ref"],"created_at":r["created_at"]}
                  for r in db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=? AND company_id=? ORDER BY revision",(tenant_id,company_id))]
-        return {"tenant_id":tenant_id,"company_id":company_id,"context_version":row["context_version"],
+        return {"tenant_id":tenant_id,"company_id":company_id,"revision":row["revision"],"context_version":row["context_version"],
+                "context_hash":row["context_hash"],
                 "config_ref":row["config_ref"],"config":AnalystConfig.model_validate_json(row["config_json"]),
                 "generation_status":generation_status,"history":history}
 
@@ -404,12 +517,18 @@ class CompanyAnalystStore:
             if row is None: raise KeyError("company analyst configuration not found")
             return self._record(row,"stored",db,tenant_id,company_id)
 
-    def mark_stable(self, tenant_id: str, company_id: str, config_ref: str) -> dict[str,Any]:
+    def mark_stable(self, tenant_id: str, company_id: str, config_ref: str, *, expected_revision: int|None=None) -> dict[str,Any]:
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
-            row=db.execute("SELECT revision FROM company_analyst_versions WHERE tenant_id=? AND company_id=? AND config_ref=?",
+            row=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=? AND company_id=? AND config_ref=?",
                            (tenant_id,company_id,config_ref)).fetchone()
             if row is None: raise KeyError("company analyst configuration not found")
+            current=db.execute("SELECT revision FROM company_analyst_current WHERE tenant_id=? AND company_id=?",
+                               (tenant_id,company_id)).fetchone()
+            if current is None or current["revision"]!=row["revision"]:
+                raise ValueError("only current company configuration can be marked stable")
+            if expected_revision is not None and current["revision"]!=expected_revision:
+                raise ValueError("company analyst revision conflict")
             db.execute("UPDATE company_analyst_versions SET stable=0 WHERE tenant_id=? AND company_id=?",(tenant_id,company_id))
             db.execute("UPDATE company_analyst_versions SET stable=1 WHERE tenant_id=? AND company_id=? AND config_ref=?",
                        (tenant_id,company_id,config_ref))
@@ -421,20 +540,30 @@ class CompanyAnalystStore:
         tenant_id=self._identity(tenant_id,"tenant_id"); company_id=self._identity(company_id,"company_id")
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
-            current=db.execute("SELECT revision FROM company_analyst_current WHERE tenant_id=? AND company_id=?",(tenant_id,company_id)).fetchone()
+            current=db.execute("""SELECT v.* FROM company_analyst_current c JOIN company_analyst_versions v
+                ON (v.tenant_id,v.company_id,v.revision)=(c.tenant_id,c.company_id,c.revision)
+                WHERE c.tenant_id=? AND c.company_id=?""",(tenant_id,company_id)).fetchone()
             if current is None: raise KeyError("company analyst configuration not found")
-            if isinstance(expected_revision,bool) or current["revision"]!=expected_revision: raise ValueError("company analyst revision conflict")
+            if isinstance(expected_revision,bool) or current["revision"]!=expected_revision:
+                row=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=? AND company_id=? AND revision=?",
+                               (tenant_id,company_id,current["revision"])).fetchone()
+                record=self._record(row,"revision_conflict",db,tenant_id,company_id)
+                record["status"]="revision_conflict"
+                return record
             previous=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=? AND company_id=? AND stable=1 AND revision<? ORDER BY revision DESC LIMIT 1",
                                 (tenant_id,company_id,current["revision"])).fetchone()
-            if previous is None: raise ValueError("no previous stable company configuration")
+            if previous is None:
+                record=self._record(current,"no_previous_stable",db,tenant_id,company_id)
+                record["status"]="rollback_unavailable"
+                return record
             revision=current["revision"]+1
             config=AnalystConfig.model_validate_json(previous["config_json"])
             config=AnalystConfig.model_validate({**config.model_dump(mode="json"),"revision":revision})
             raw=json.dumps(config.model_dump(mode="json"),sort_keys=True,separators=(",",":"),ensure_ascii=False)
             digest=self._content_digest(config)
             now=datetime.now(timezone.utc).isoformat()
-            db.execute("INSERT INTO company_analyst_versions VALUES(?,?,?,?,?,?,?,?,?,?)",
-                (tenant_id,company_id,revision,config.ref,previous["context_version"],raw,digest,1,previous["source_config_ref"],now))
+            db.execute("INSERT INTO company_analyst_versions(tenant_id,company_id,revision,config_ref,context_version,config_json,content_hash,stable,source_config_ref,created_at,context_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (tenant_id,company_id,revision,config.ref,current["context_version"],raw,digest,1,current["source_config_ref"],now,current["context_hash"]))
             db.execute("UPDATE company_analyst_current SET revision=? WHERE tenant_id=? AND company_id=?",(revision,tenant_id,company_id))
             row=db.execute("SELECT * FROM company_analyst_versions WHERE tenant_id=? AND company_id=? AND revision=?",(tenant_id,company_id,revision)).fetchone()
             return self._record(row,"rollback",db,tenant_id,company_id)
