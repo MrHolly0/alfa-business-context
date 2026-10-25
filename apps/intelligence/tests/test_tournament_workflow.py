@@ -117,4 +117,3 @@ def test_fake_tournament_publication_rebases_company_workflow_and_rollback(tmp_p
         assert assessment.versions.analyst_config == baseline_config["config_ref"]
         assert any(item["stage"] == "research_plan" and item["query_lengths"]["external"] > 0
                    for item in assessment.trace)
-
