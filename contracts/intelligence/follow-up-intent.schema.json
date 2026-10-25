@@ -1,0 +1,77 @@
+{
+  "additionalProperties": false,
+  "description": "A request for Core to consider one bounded company-config optimization.",
+  "properties": {
+    "schema_version": {
+      "const": "ai-follow-up-intent-v1",
+      "default": "ai-follow-up-intent-v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "kind": {
+      "const": "optimize_company_analyst",
+      "default": "optimize_company_analyst",
+      "title": "Kind",
+      "type": "string"
+    },
+    "parent_request_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Parent Request Id",
+      "type": "string"
+    },
+    "tenant_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Tenant Id",
+      "type": "string"
+    },
+    "company_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Company Id",
+      "type": "string"
+    },
+    "context_version": {
+      "minimum": 1,
+      "title": "Context Version",
+      "type": "integer"
+    },
+    "profile_fingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Profile Fingerprint",
+      "type": "string"
+    },
+    "expected_config_revision": {
+      "minimum": 1,
+      "title": "Expected Config Revision",
+      "type": "integer"
+    },
+    "idempotency_key": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Idempotency Key",
+      "type": "string"
+    },
+    "reason": {
+      "enum": [
+        "onboard",
+        "context_changed"
+      ],
+      "title": "Reason",
+      "type": "string"
+    }
+  },
+  "required": [
+    "parent_request_id",
+    "tenant_id",
+    "company_id",
+    "context_version",
+    "profile_fingerprint",
+    "expected_config_revision",
+    "idempotency_key",
+    "reason"
+  ],
+  "title": "FollowUpIntent",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

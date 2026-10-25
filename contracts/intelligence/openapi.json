@@ -338,6 +338,67 @@
         ]
       }
     },
+    "/internal/v1/company-context/from-description": {
+      "post": {
+        "summary": "Description Context",
+        "operationId": "description_context_internal_v1_company_context_from_description_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DescriptionPrepareRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DescriptionProposal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ]
+      }
+    },
     "/internal/v1/sources/probe": {
       "post": {
         "summary": "Probe",
@@ -1677,6 +1738,50 @@
         ],
         "title": "CompanyFact"
       },
+      "ContextHypothesis": {
+        "properties": {
+          "hypothesis_id": {
+            "type": "string",
+            "title": "Hypothesis Id"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Text"
+          },
+          "basis": {
+            "items": {
+              "$ref": "#/components/schemas/SourceSpan"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Basis"
+          },
+          "confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence"
+          },
+          "status": {
+            "type": "string",
+            "const": "assumption",
+            "title": "Status",
+            "default": "assumption"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "hypothesis_id",
+          "text",
+          "basis",
+          "confidence"
+        ],
+        "title": "ContextHypothesis"
+      },
       "Coverage": {
         "properties": {
           "external": {
@@ -1844,6 +1949,22 @@
             "type": "array",
             "title": "Configurations"
           },
+          "context_proposals": {
+            "items": {
+              "$ref": "#/components/schemas/DescriptionProposal"
+            },
+            "type": "array",
+            "maxItems": 1,
+            "title": "Context Proposals"
+          },
+          "follow_up_intents": {
+            "items": {
+              "$ref": "#/components/schemas/FollowUpIntent"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Follow Up Intents"
+          },
           "period_report": {
             "anyOf": [
               {
@@ -1939,7 +2060,8 @@
               "period",
               "onboard",
               "optimize",
-              "rollback_config"
+              "rollback_config",
+              "prepare_description"
             ],
             "title": "Operation",
             "default": "analyze"
@@ -2056,6 +2178,21 @@
             "title": "Max Exploratory Analyses",
             "default": 1
           },
+          "auto_optimize": {
+            "type": "boolean",
+            "title": "Auto Optimize",
+            "default": true
+          },
+          "description_input": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DescriptionPrepareRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "expected_config_revisions": {
             "additionalProperties": {
               "type": "integer"
@@ -2167,6 +2304,154 @@
         ],
         "title": "DependencyEdge",
         "description": "One asserted business dependency; edges require traceable evidence and time bounds."
+      },
+      "DescriptionPrepareRequest": {
+        "properties": {
+          "tenant_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Tenant Id"
+          },
+          "company_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Company Id"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Description"
+          },
+          "provenance": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Provenance"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          },
+          "data_classification": {
+            "type": "string",
+            "enum": [
+              "public",
+              "synthetic",
+              "confidential"
+            ],
+            "title": "Data Classification"
+          },
+          "statement_status": {
+            "type": "string",
+            "enum": [
+              "unconfirmed",
+              "core_confirmed"
+            ],
+            "title": "Statement Status",
+            "default": "unconfirmed"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "company_id",
+          "name",
+          "description",
+          "provenance",
+          "as_of",
+          "data_classification"
+        ],
+        "title": "DescriptionPrepareRequest"
+      },
+      "DescriptionProposal": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "company-description-proposal-v1",
+            "title": "Schema Version",
+            "default": "company-description-proposal-v1"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "company_id": {
+            "type": "string",
+            "title": "Company Id"
+          },
+          "context": {
+            "$ref": "#/components/schemas/CompanyContext"
+          },
+          "hypotheses": {
+            "items": {
+              "$ref": "#/components/schemas/ContextHypothesis"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Hypotheses"
+          },
+          "questions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Questions"
+          },
+          "significance": {
+            "items": {
+              "$ref": "#/components/schemas/SignificanceSignal"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Significance"
+          },
+          "search_directions": {
+            "items": {
+              "$ref": "#/components/schemas/SearchDirection"
+            },
+            "type": "array",
+            "maxItems": 3,
+            "title": "Search Directions"
+          },
+          "extraction_mode": {
+            "type": "string",
+            "enum": [
+              "deterministic",
+              "llm",
+              "deterministic_fallback"
+            ],
+            "title": "Extraction Mode"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Limitations"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "company_id",
+          "context",
+          "extraction_mode"
+        ],
+        "title": "DescriptionProposal"
       },
       "DocumentInput": {
         "properties": {
@@ -2524,6 +2809,82 @@
           "reason"
         ],
         "title": "ExcludedEvent"
+      },
+      "FollowUpIntent": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "ai-follow-up-intent-v1",
+            "title": "Schema Version",
+            "default": "ai-follow-up-intent-v1"
+          },
+          "kind": {
+            "type": "string",
+            "const": "optimize_company_analyst",
+            "title": "Kind",
+            "default": "optimize_company_analyst"
+          },
+          "parent_request_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Parent Request Id"
+          },
+          "tenant_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Tenant Id"
+          },
+          "company_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Company Id"
+          },
+          "context_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Context Version"
+          },
+          "profile_fingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Profile Fingerprint"
+          },
+          "expected_config_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Config Revision"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Idempotency Key"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "onboard",
+              "context_changed"
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "parent_request_id",
+          "tenant_id",
+          "company_id",
+          "context_version",
+          "profile_fingerprint",
+          "expected_config_revision",
+          "idempotency_key",
+          "reason"
+        ],
+        "title": "FollowUpIntent",
+        "description": "A request for Core to consider one bounded company-config optimization."
       },
       "HTTPValidationError": {
         "properties": {
@@ -3549,6 +3910,55 @@
         ],
         "title": "RevenueUnit"
       },
+      "SearchDirection": {
+        "properties": {
+          "direction": {
+            "type": "string",
+            "title": "Direction"
+          },
+          "rule": {
+            "type": "string",
+            "enum": [
+              "confirmed_dependency_match",
+              "activity_lead",
+              "assumptions"
+            ],
+            "title": "Rule"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "high",
+              "normal",
+              "explore"
+            ],
+            "title": "Priority"
+          },
+          "basis_item_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Basis Item Ids"
+          },
+          "confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "direction",
+          "rule",
+          "priority",
+          "confidence"
+        ],
+        "title": "SearchDirection"
+      },
       "SearchInput": {
         "properties": {
           "source_policy": {
@@ -3634,6 +4044,52 @@
           "query"
         ],
         "title": "SearchInput"
+      },
+      "SignificanceSignal": {
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "title": "Item Id"
+          },
+          "rule": {
+            "type": "string",
+            "enum": [
+              "confirmed_dependency_match",
+              "activity_lead",
+              "assumptions"
+            ],
+            "title": "Rule"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "high",
+              "normal",
+              "explore"
+            ],
+            "title": "Priority"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "item_id",
+          "rule",
+          "priority",
+          "reason",
+          "confidence"
+        ],
+        "title": "SignificanceSignal"
       },
       "SourceGrant": {
         "properties": {
@@ -4125,6 +4581,34 @@
           "requested_url"
         ],
         "title": "SourceProbeResult"
+      },
+      "SourceSpan": {
+        "properties": {
+          "start": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Start"
+          },
+          "end": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "End"
+          },
+          "quote": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Quote"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "quote"
+        ],
+        "title": "SourceSpan"
       },
       "ValidationError": {
         "properties": {

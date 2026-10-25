@@ -634,6 +634,75 @@
       "title": "DependencyEdge",
       "type": "object"
     },
+    "DescriptionPrepareRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "tenant_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Tenant Id",
+          "type": "string"
+        },
+        "company_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Company Id",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "provenance": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Provenance",
+          "type": "string"
+        },
+        "as_of": {
+          "format": "date-time",
+          "title": "As Of",
+          "type": "string"
+        },
+        "data_classification": {
+          "enum": [
+            "public",
+            "synthetic",
+            "confidential"
+          ],
+          "title": "Data Classification",
+          "type": "string"
+        },
+        "statement_status": {
+          "default": "unconfirmed",
+          "enum": [
+            "unconfirmed",
+            "core_confirmed"
+          ],
+          "title": "Statement Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tenant_id",
+        "company_id",
+        "name",
+        "description",
+        "provenance",
+        "as_of",
+        "data_classification"
+      ],
+      "title": "DescriptionPrepareRequest",
+      "type": "object"
+    },
     "JSONAdapterMapping": {
       "additionalProperties": false,
       "description": "Declarative dot-path mapping only; never a URL, expression, or executable adapter.",
@@ -1500,7 +1569,8 @@
         "period",
         "onboard",
         "optimize",
-        "rollback_config"
+        "rollback_config",
+        "prepare_description"
       ],
       "title": "Operation",
       "type": "string"
@@ -1617,6 +1687,22 @@
       "minimum": 0,
       "title": "Max Exploratory Analyses",
       "type": "integer"
+    },
+    "auto_optimize": {
+      "default": true,
+      "title": "Auto Optimize",
+      "type": "boolean"
+    },
+    "description_input": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DescriptionPrepareRequest"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "expected_config_revisions": {
       "additionalProperties": {

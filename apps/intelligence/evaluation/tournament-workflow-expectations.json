@@ -1,0 +1,31 @@
+{
+  "schema_version": "tournament-workflow-expectations-v1",
+  "purpose": "Deterministic protocol and registry integration assertions; not a quality evaluation.",
+  "test": "tests/test_tournament_workflow.py::test_fake_tournament_publication_rebases_company_workflow_and_rollback",
+  "evidence_classification": {
+    "real_independent_samples_available": false,
+    "quality_improvement_claimed": false,
+    "dataset_cases_are_test_fixtures": true,
+    "model_judge_and_human_review_are_test_doubles": true,
+    "synthetic_guard_bypassed": false
+  },
+  "expected_assertions": [
+    "Baseline config is captured in the company's private config store before publication.",
+    "Tournament compares baseline and candidate on the same fixture dataset and passes holdout and shadow gates.",
+    "Human review is an explicit deterministic test fixture and is not represented as a real review.",
+    "After publication, the next DataWorkflow analyze operation rebases the private company config and its candidate versions to the registry winner.",
+    "After registry rollback, the next DataWorkflow analyze operation rebases the private company config and candidate versions to baseline@1.",
+    "Existing tournament tests keep baseline on ties and reject ineligible or reused holdout runs."
+  ],
+  "not_proven": [
+    "Semantic answer quality or a real-world quality gain.",
+    "Independent human labels or real-world holdout independence.",
+    "Production traffic behavior or an external Core onboarding integration."
+  ],
+  "related_tests": [
+    "tests/test_tournament.py::test_tied_candidate_margins_keep_baseline_and_decimal_identity_is_repeatable",
+    "tests/test_tournament_guards.py::test_position_bias_is_tie_and_replays_do_not_call_models",
+    "tests/test_tournament_audit.py::test_reused_holdout_is_visible_and_never_eligible_for_second_selection",
+    "tests/test_tournament_lifecycle.py::test_generated_candidate_refines_rechecks_holds_shadow_promotes_runs_and_rolls_back"
+  ]
+}

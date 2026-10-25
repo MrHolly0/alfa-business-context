@@ -23,6 +23,7 @@ from typing import Any, Callable
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
+from .personalization import AutoOptimizationPolicy, FollowUpIntent
 
 
 def _now() -> datetime:
@@ -65,11 +66,14 @@ class CoreStand:
     """SQLite-backed fixture state and job state machine."""
 
     def __init__(self, state_path: str | Path, *, clock: Callable[[], datetime] = _now,
-                 lease_seconds: int = 60):
+                 lease_seconds: int = 60,
+                 auto_optimization_policy: AutoOptimizationPolicy | dict[str, Any] | None = None):
         self.state_path = Path(state_path)
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         self.clock = clock
         self.lease_seconds = max(1, int(lease_seconds))
+        self.auto_optimization_policy = (AutoOptimizationPolicy.model_validate(auto_optimization_policy)
+                                         if auto_optimization_policy is not None else None)
         self._lock = threading.RLock()
         with self._connect() as db:
             db.executescript("""
@@ -104,6 +108,16 @@ class CoreStand:
             CREATE TABLE IF NOT EXISTS schedules (
               schedule_id TEXT PRIMARY KEY, task TEXT NOT NULL, interval_seconds INTEGER NOT NULL,
               next_due TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE IF NOT EXISTS auto_optimization_intents (
+              idempotency_key TEXT PRIMARY KEY, tenant_scope TEXT NOT NULL, company_id TEXT NOT NULL,
+              context_version INTEGER NOT NULL, profile_fingerprint TEXT NOT NULL,
+              allocation_id TEXT, job_id TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS company_config_versions (
+              tenant_scope TEXT NOT NULL, company_id TEXT NOT NULL, context_version INTEGER NOT NULL,
+              profile_fingerprint TEXT NOT NULL, revision INTEGER NOT NULL,
+              PRIMARY KEY(tenant_scope,company_id)
             );
             """)
             published_columns = {row[1] for row in db.execute("PRAGMA table_info(published)")}
@@ -244,6 +258,14 @@ class CoreStand:
             candidate = result.get("candidate")
             if not isinstance(candidate, dict):
                 return {"accepted": False, "code": "invalid_result"}, 422
+            if candidate.get("schema_version") == "ai-data-result-v1" and any(
+                    key in candidate for key in ("tenant_id", "company_id", "request_id")):
+                task = job.get("task", {})
+                if (candidate.get("tenant_id") != row["tenant_scope"] or
+                        candidate.get("company_id") != row["company_id"] or
+                        candidate.get("request_id") != task.get("request_id")):
+                    return {"accepted": False, "code": "authorization_denied",
+                            "reason": "candidate_outside_parent_scope"}, 403
             candidate_versions = candidate.get("versions", {})
             # Legacy candidate uses `context`/`source_policy`; ai-result-v1 contract
             # uses the envelope's *_version names. Validate where candidate includes them.
@@ -270,6 +292,14 @@ class CoreStand:
                     expected=expected_businesses.get(item["company_id"],row["current_context"])
                     if item.get("versions",{}).get("context")!=expected:
                         return {"accepted":False,"code":"conflict","reason":"stale_business_context"},409
+            config_records, config_error = self._validate_configurations(db, candidate, row["tenant_scope"], job)
+            if config_error:
+                code, reason = config_error
+                return {"accepted": False, "code": code, "reason": reason}, (403 if code == "authorization_denied" else 409 if code == "conflict" else 422)
+            proposal_error = self._validate_context_proposals(candidate, row["tenant_scope"], row["company_id"], job)
+            if proposal_error:
+                return {"accepted": False, "code": "authorization_denied", "reason": proposal_error}, 403
+            self._accept_configurations(db, config_records, row["tenant_scope"])
             db.execute("INSERT INTO outbox(message_id,job_id,payload,created_at) VALUES(?,?,?,?)",
                        (message_id, job_id, json.dumps(result, ensure_ascii=False, sort_keys=True), now))
             publications = [item for item in revisions if isinstance(item, dict) and item.get("publication_revision_required") is True]
@@ -300,10 +330,200 @@ class CoreStand:
                 if isinstance(signature, str) and signature:
                     db.execute("INSERT INTO publication_history(tenant_scope,company_id,event_id,input_signature,assessment_revision,job_id,message_id,created_at) VALUES(?,?,?,?,?,?,?,?)",
                                (row["tenant_scope"], company_id, event_id, signature, revision, job_id, message_id, now))
+            self._enqueue_follow_up_intents(db, job, candidate, now)
             db.execute("UPDATE outbox SET published=1 WHERE message_id=?", (message_id,))
             db.execute("UPDATE jobs SET status='complete',result_hash=?,accepted_result=?,updated_at=? WHERE job_id=?",
                        (digest, json.dumps(result, ensure_ascii=False, sort_keys=True), now, job_id))
         return {"accepted": True, "message_id": message_id, "duplicate": False}, 200
+
+    def _enqueue_follow_up_intents(self, db, parent_job: dict[str, Any], candidate: dict[str, Any], now: str) -> None:
+        """Atomically deduplicate and enqueue Core-authorized optimization jobs."""
+        raw_intents = candidate.get("follow_up_intents", [])
+        if not raw_intents:
+            return
+        if not isinstance(raw_intents, list) or len(raw_intents) > 20:
+            return
+        raw_task = parent_job.get("task")
+        if not isinstance(raw_task, dict):
+            return
+        try:
+            from .workflow import DataTask
+            task = DataTask.model_validate(raw_task).model_dump(mode="json")
+        except Exception:
+            return
+        if task.get("auto_optimize") is not True:
+            return
+        for raw in raw_intents:
+            try:
+                intent = FollowUpIntent.model_validate(raw)
+            except Exception:
+                continue
+            if (intent.tenant_id != parent_job.get("tenant_scope") or
+                    intent.parent_request_id != task.get("request_id") or
+                    intent.reason == "onboard" and task.get("operation") != "onboard"):
+                continue
+            if task.get("operation") not in {"onboard", "analyze", "reassess", "collect"}:
+                continue
+            if intent.context_version != task.get("context_version") and not any(
+                    item.get("company_id") == intent.company_id and item.get("context_version") == intent.context_version
+                    for item in task.get("businesses", []) if isinstance(item, dict)):
+                continue
+            if intent.company_id != parent_job.get("company_id") and not any(
+                    item.get("company_id") == intent.company_id for item in task.get("businesses", [])
+                    if isinstance(item, dict)):
+                continue
+            if intent.context_version != self._current_company_context(db, intent.tenant_id, intent.company_id):
+                continue
+            configuration = next((item for item in candidate.get("configurations", [])
+                                  if isinstance(item, dict) and item.get("company_id") == intent.company_id), None)
+            if (not configuration or configuration.get("revision") != intent.expected_config_revision or
+                    configuration.get("context_version") != intent.context_version or
+                    configuration.get("context_hash") != intent.profile_fingerprint):
+                continue
+            config_head = db.execute("SELECT context_version,profile_fingerprint,revision FROM company_config_versions WHERE tenant_scope=? AND company_id=?",
+                                     (intent.tenant_id, intent.company_id)).fetchone()
+            if (not config_head or config_head["context_version"] != intent.context_version or
+                    config_head["profile_fingerprint"] != intent.profile_fingerprint or
+                    config_head["revision"] != intent.expected_config_revision):
+                continue
+            duplicate = db.execute("SELECT status FROM auto_optimization_intents WHERE idempotency_key=?",
+                                   (intent.idempotency_key,)).fetchone()
+            if duplicate:
+                continue
+            policy = self.auto_optimization_policy
+            status, allocation_id, followup_job_id = "skipped_budget", None, None
+            if policy is not None:
+                used = db.execute("SELECT COUNT(*) FROM auto_optimization_intents WHERE allocation_id=? AND status='queued'",
+                                  (policy.allocation_id,)).fetchone()[0]
+                if used < policy.max_jobs:
+                    followup = self._make_auto_optimization_job(parent_job, task, intent, policy, now)
+                    _, _, context_version, source_policy_version = self._validate_job(followup)
+                    db.execute("INSERT INTO jobs(job_id,payload,status,generation,tenant_scope,company_id,current_context,current_policy,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                               (followup["job_id"], json.dumps(followup, ensure_ascii=False, sort_keys=True), "queued", 1,
+                                followup["tenant_scope"], followup["company_id"], context_version, source_policy_version, now))
+                    status, allocation_id, followup_job_id = "queued", policy.allocation_id, followup["job_id"]
+            db.execute("INSERT INTO auto_optimization_intents VALUES(?,?,?,?,?,?,?,?,?)",
+                       (intent.idempotency_key, intent.tenant_id, intent.company_id, intent.context_version,
+                        intent.profile_fingerprint, allocation_id, followup_job_id, status, now))
+
+    def _validate_configurations(self, db, candidate: dict[str, Any], tenant_scope: str,
+                                 parent_job: dict[str, Any]) -> tuple[list[dict[str, Any]], tuple[str, str] | None]:
+        from .analysts import CompanyAnalystStore
+        task = parent_job.get("task", {})
+        snapshots = {item.get("company_id"): item for item in task.get("businesses", []) if isinstance(item, dict)}
+        if task.get("company_id") and task.get("company"):
+            snapshots.setdefault(task["company_id"], {"company_id": task["company_id"],
+                "context_version": task.get("context_version"), "company": task.get("company")})
+        records = candidate.get("configurations", [])
+        if not isinstance(records, list):
+            return [], ("invalid_result", "invalid_configurations")
+        accepted = []
+        for item in records:
+            if not isinstance(item, dict):
+                return [], ("invalid_result", "invalid_configuration_record")
+            company_id, context_version = item.get("company_id"), item.get("context_version")
+            fingerprint, revision = item.get("context_hash"), item.get("revision")
+            if (not isinstance(company_id, str) or type(context_version) is not int or context_version < 1 or
+                    not isinstance(fingerprint, str) or len(fingerprint) != 64 or type(revision) is not int or revision < 1):
+                return [], ("invalid_result", "invalid_configuration_record")
+            snapshot = snapshots.get(company_id)
+            if not snapshot:
+                return [], ("authorization_denied", "configuration_company_outside_parent_scope")
+            if (not snapshot or snapshot.get("context_version") != context_version or
+                    self._current_company_context(db, tenant_scope, company_id) != context_version):
+                return [], ("conflict", "stale_configuration_context")
+            try:
+                from .schemas import CompanyContext
+                computed_fingerprint = CompanyAnalystStore._context_digest(CompanyContext.model_validate(snapshot["company"]))
+            except (KeyError, TypeError, ValueError):
+                return [], ("invalid_result", "invalid_configuration_snapshot")
+            if fingerprint != computed_fingerprint:
+                return [], ("conflict", "configuration_fingerprint_mismatch")
+            current = db.execute("SELECT context_version,profile_fingerprint,revision FROM company_config_versions WHERE tenant_scope=? AND company_id=?",
+                                 (tenant_scope, company_id)).fetchone()
+            if task.get("operation") == "optimize":
+                expected = task.get("expected_config_revisions", {}).get(company_id)
+                if (not current or current["context_version"] != context_version or
+                        current["profile_fingerprint"] != fingerprint or current["revision"] != expected):
+                    return [], ("conflict", "stale_configuration_revision")
+                if revision not in {expected, expected + 1}:
+                    return [], ("conflict", "configuration_revision_out_of_sequence")
+            if current and context_version < current["context_version"]:
+                return [], ("conflict", "stale_configuration_context")
+            if current and context_version == current["context_version"] and fingerprint != current["profile_fingerprint"]:
+                return [], ("conflict", "configuration_fingerprint_mismatch")
+            if current and context_version == current["context_version"] and revision < current["revision"]:
+                return [], ("conflict", "stale_configuration_revision")
+            accepted.append({"company_id": company_id, "context_version": context_version,
+                             "profile_fingerprint": fingerprint, "revision": revision})
+        return accepted, None
+
+    @staticmethod
+    def _validate_context_proposals(candidate: dict[str, Any], tenant_scope: str,
+                                    primary_company_id: str, parent_job: dict[str, Any]) -> str | None:
+        proposals = candidate.get("context_proposals", [])
+        if not isinstance(proposals, list):
+            return "invalid_context_proposals"
+        task = parent_job.get("task", {})
+        for proposal in proposals:
+            if not isinstance(proposal, dict):
+                return "invalid_context_proposal"
+            if (proposal.get("tenant_id") != tenant_scope or
+                    proposal.get("company_id") != primary_company_id or
+                    proposal.get("company_id") != task.get("company_id")):
+                return "context_proposal_outside_parent_scope"
+        return None
+
+    @staticmethod
+    def _accept_configurations(db, accepted: list[dict[str, Any]], tenant_scope: str) -> None:
+        for item in accepted:
+            company_id, context_version = item["company_id"], item["context_version"]
+            fingerprint, revision = item["profile_fingerprint"], item["revision"]
+            db.execute("INSERT INTO company_config_versions VALUES(?,?,?,?,?) ON CONFLICT(tenant_scope,company_id) DO UPDATE SET context_version=excluded.context_version,profile_fingerprint=excluded.profile_fingerprint,revision=excluded.revision",
+                       (tenant_scope, company_id, context_version, fingerprint, revision))
+
+    @staticmethod
+    def _current_company_context(db, tenant_id: str, company_id: str) -> int | None:
+        row = db.execute("SELECT context_version FROM company_versions WHERE tenant_scope=? AND company_id=?",
+                         (tenant_id, company_id)).fetchone()
+        return row[0] if row else None
+
+    def _make_auto_optimization_job(self, parent_job, parent_task, intent, policy, now):
+        """Build a source-free optimize task from the accepted company snapshot."""
+        from .workflow import DataTask
+        businesses = [item for item in parent_task.get("businesses", [])
+                      if isinstance(item, dict) and item.get("company_id") == intent.company_id]
+        if intent.company_id == parent_task.get("company_id") and not businesses:
+            businesses = [{"company_id": intent.company_id, "context_version": intent.context_version,
+                           "company": parent_task.get("company", {})}]
+        if len(businesses) != 1:
+            raise ValueError("automatic optimize requires one accepted company snapshot")
+        source_policy_version = parent_job["input_versions"]["source_policy_version"]
+        empty_policy = {"policy_id": "auto-optimization:" + policy.allocation_id,
+                        "tenant_id": intent.tenant_id, "revision": source_policy_version,
+                        "issued_at": now, "sources": [], "excluded_source_ids": [],
+                        "excluded_publishers": [], "user_excluded_source_ids": [],
+                        "user_excluded_publishers": [], "excluded_document_uris": [],
+                        "user_excluded_document_uris": []}
+        task = DataTask.model_validate({
+            "schema_version": "ai-data-task-v1", "request_id": "autoopt-" + intent.idempotency_key[:32],
+            "tenant_id": intent.tenant_id, "company_id": intent.company_id,
+            "context_version": intent.context_version, "source_policy_version": source_policy_version,
+            "operation": "optimize", "trigger": "context_changed", "knowledge_mode": "as_of",
+            "as_of": now, "source_policy": empty_policy, "businesses": businesses,
+            "budget": policy.task_budget(), "data_classification": parent_task.get("data_classification", "confidential"),
+            "synthetic": parent_task.get("synthetic", False), "expected_config_revisions": {
+                intent.company_id: intent.expected_config_revision},
+        }).model_dump(mode="json")
+        deadline = self.clock() + timedelta(minutes=15)
+        job_id = "autoopt-" + intent.idempotency_key[:32]
+        return {"schema_version": "ai-job-v1", "message_id": "autoopt-message-" + intent.idempotency_key[:32],
+                "job_id": job_id, "tenant_scope": intent.tenant_id, "company_id": intent.company_id,
+                "trace_id": "autoopt-trace-" + intent.idempotency_key[:24], "lease_generation": 1,
+                "input_versions": {"context_version": intent.context_version,
+                                   "source_policy_version": source_policy_version, "event_versions": []},
+                "deadline": _iso(deadline), "lease_until": _iso(min(self.clock() + timedelta(seconds=self.lease_seconds), deadline)),
+                "budget": policy.budget(), "scope": {"source_ids": [], "document_revision_refs": []}, "task": task}
 
     def failure(self, job_id: str, generation: int, code: str) -> dict[str, Any]:
         with self._lock, self._connect() as db:
@@ -319,7 +539,9 @@ class CoreStand:
             published = [dict(row) for row in db.execute("SELECT tenant_scope,job_id,company_id,event_id,message_id,revision,created_at FROM published ORDER BY tenant_scope,company_id,event_id")]
             proofs = [dict(row) for row in db.execute("SELECT tenant_scope,company_id,event_id,input_signature,assessment_revision,job_id,message_id,created_at FROM publication_history ORDER BY tenant_scope,company_id,event_id,assessment_revision")]
             outbox = [dict(row) for row in db.execute("SELECT message_id,job_id,published,created_at FROM outbox ORDER BY created_at")]
-        return {"jobs": jobs, "outbox": outbox, "published": published, "publication_history": proofs}
+            auto_optimization = [dict(row) for row in db.execute("SELECT idempotency_key,tenant_scope,company_id,context_version,profile_fingerprint,allocation_id,job_id,status,created_at FROM auto_optimization_intents ORDER BY created_at")]
+        return {"jobs": jobs, "outbox": outbox, "published": published, "publication_history": proofs,
+                "auto_optimization_intents": auto_optimization}
 
     def published_assessments(self, tenant_scope: str, company_id: str, *, limit: int = 600) -> list[dict[str, Any]]:
         """Return Core publication proofs suitable for a new DataTask snapshot."""
@@ -417,6 +639,14 @@ class CoreStand:
                     "scope": {"source_ids": source_ids, "document_revision_refs": []}, "task": task,
                 }
                 tenant, company, current_context, current_policy = self._validate_job(job)
+                # Fixture schedules carry an operator-approved company snapshot.
+                # Register its version head before the job can return a configuration
+                # record, so result validation sees the same authoritative snapshot.
+                snapshot_contexts = {task["company_id"]: task["context_version"],
+                    **{item["company_id"]: item["context_version"] for item in task.get("businesses", [])}}
+                for snapshot_company, snapshot_version in snapshot_contexts.items():
+                    db.execute("INSERT INTO company_versions VALUES(?,?,?) ON CONFLICT(tenant_scope,company_id) DO UPDATE SET context_version=MAX(company_versions.context_version,excluded.context_version)",
+                               (tenant, snapshot_company, snapshot_version))
                 db.execute("INSERT INTO jobs(job_id,payload,status,generation,tenant_scope,company_id,current_context,current_policy,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
                            (job_id, json.dumps(job, ensure_ascii=False, sort_keys=True), "queued", 1, tenant, company, current_context, current_policy, _iso(now)))
                 db.execute("UPDATE schedules SET next_due=? WHERE schedule_id=?", (_iso(now + timedelta(seconds=row["interval_seconds"])), row["schedule_id"]))
@@ -427,11 +657,13 @@ class CoreStand:
 def create_app(state_path: str | Path, *, fixture_mode: bool = False,
                operator_token: str | None = None,
                clock: Callable[[], datetime] = _now,
-               lease_seconds: int = 60) -> FastAPI:
+               lease_seconds: int = 60,
+               auto_optimization_policy: AutoOptimizationPolicy | dict[str, Any] | None = None) -> FastAPI:
     if not fixture_mode:
         raise ValueError("CoreStand only runs with explicit fixture_mode=True")
     token = operator_token if operator_token is not None else secrets.token_urlsafe(32)
-    stand = CoreStand(state_path, clock=clock, lease_seconds=lease_seconds)
+    stand = CoreStand(state_path, clock=clock, lease_seconds=lease_seconds,
+                      auto_optimization_policy=auto_optimization_policy)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -553,6 +785,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--schedule", help="register one ai-data-task-v1 collection JSON before serving")
     parser.add_argument("--schedule-id", help="stable fixture schedule ID (default: task request_id)")
     parser.add_argument("--interval", type=int, help="fixture schedule interval; minimum 60 seconds")
+    parser.add_argument("--auto-optimization-policy", help="operator-owned finite JSON budget allocation for automatic optimize jobs")
     args = parser.parse_args(argv)
     import ipaddress
     if not ipaddress.ip_address(args.host).is_loopback:
@@ -561,7 +794,15 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--fixture-mode is required")
     import uvicorn
     token = os.environ.get("CORE_STAND_OPERATOR_TOKEN") or secrets.token_urlsafe(32)
-    app = create_app(Path(args.state_dir) / "core-stand.sqlite3", fixture_mode=True, operator_token=token)
+    auto_policy = None
+    if args.auto_optimization_policy:
+        try:
+            auto_policy = AutoOptimizationPolicy.model_validate(
+                json.loads(Path(args.auto_optimization_policy).read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            parser.error(f"invalid automatic optimization policy: {type(exc).__name__}")
+    app = create_app(Path(args.state_dir) / "core-stand.sqlite3", fixture_mode=True,
+                     operator_token=token, auto_optimization_policy=auto_policy)
     stand = app.state.core_stand
     try:
         if args.seed:

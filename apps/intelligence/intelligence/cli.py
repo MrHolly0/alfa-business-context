@@ -99,6 +99,9 @@ def main(argv=None):
         return stand_main(arguments[1:])
     parser = argparse.ArgumentParser(description='Загрузка материалов, поиск и анализ бизнес-контекста')
     commands = parser.add_subparsers(dest='command', required=True)
+    description=commands.add_parser('prepare-description',help='Предложить профиль по тексту без сохранения в Core и без модели')
+    description.add_argument('--input',required=True)
+    description.add_argument('--output')
     prepare = commands.add_parser('prepare-context', help='Подготовить контекст из предоставленных строк CSV без изменения данных Core')
     prepare.add_argument('--input', required=True)
     prepare.add_argument('--output')
@@ -109,6 +112,10 @@ def main(argv=None):
     probe = commands.add_parser('probe-source', help='Проверить URL по одноразовому разрешению Core')
     probe.add_argument('--input', required=True)
     probe.add_argument('--state-dir', default=str(DEFAULT_STATE))
+    comparison=commands.add_parser('demo-personalization',help='Описание → профиль → настройки → одинаковые события для трёх компаний')
+    _options(comparison)
+    comparison.add_argument('--input')
+    comparison.add_argument('--output')
     business_demo=commands.add_parser('demo-business',help='Сквозной пример смешанного бизнеса на локальных RSS; модель только при --mode model')
     _options(business_demo)
     business_demo.add_argument('--output')
@@ -163,7 +170,10 @@ def main(argv=None):
     worker.add_argument('--heartbeat-seconds', type=float, default=10)
     args = parser.parse_args(arguments)
     try:
-        if args.command == 'prepare-context':
+        if args.command == 'prepare-description':
+            from .description_context import DescriptionPrepareRequest,prepare_description
+            write_json(prepare_description(DescriptionPrepareRequest.model_validate(read_json(args.input))),args.output)
+        elif args.command == 'prepare-context':
             from .client_data import CompanyContextPrepareRequest,prepare_company_contexts
             request=CompanyContextPrepareRequest.model_validate(read_json(args.input))
             write_json(prepare_company_contexts(**request.model_dump()),args.output)
@@ -213,9 +223,13 @@ def main(argv=None):
             corpus = CorpusStore(Path(args.state_dir)/'corpus.sqlite3')
             collector = NewsCollector(corpus,state_path=Path(args.state_dir)/'collection.sqlite3')
             write_json(collector.probe(SourceProbeRequest.model_validate(read_json(args.input))))
-        elif args.command in {'analyze','evaluate','serve','worker','run-task','demo-business'}:
+        elif args.command in {'analyze','evaluate','serve','worker','run-task','demo-business','demo-personalization'}:
             store, pipeline = make_pipeline(args.state_dir,mode=args.mode,config=args.config,profile=args.profile,compare_hackathon=args.compare_hackathon,analyst=args.analyst,routes=args.routes)
-            if args.command == 'demo-business':
+            if args.command == 'demo-personalization':
+                from .comparison import run_comparison,DEFAULT_INPUT
+                write_json(run_comparison(args.state_dir,input_path=args.input or DEFAULT_INPUT,llm=pipeline.llm,
+                    role_services=getattr(pipeline,'role_services',None)),args.output)
+            elif args.command == 'demo-business':
                 from .demo_data import run_business_demo
                 write_json(run_business_demo(args.state_dir,llm=pipeline.llm,
                     role_services=getattr(pipeline,'role_services',None),analyst_config=pipeline.analyst_config),args.output)

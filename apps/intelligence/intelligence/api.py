@@ -16,6 +16,7 @@ from .workflow import DataTask, DataResult, DataWorkflow, WorkflowNotStarted, Wo
 from .collection import SourcePolicySnapshot, SourceProbeRequest, SourceProbeResult
 from .client_data import CompanyContextPrepareRequest, CompanyContextPrepareResult, prepare_company_contexts
 from .relevance import RankRequest, RankResult, rank_events
+from .description_context import DescriptionPrepareRequest, DescriptionProposal, prepare_description
 
 
 class _StrictBody(BaseModel):
@@ -229,6 +230,13 @@ def create_app(*, store, pipeline, artifact_store: ArtifactStore | None = None,
     def prepare_context(request: CompanyContextPrepareRequest, _: bool = Depends(auth)):
         tenant(request.model_dump(mode="json"))
         return prepare_company_contexts(**request.model_dump())
+
+    @app.post("/internal/v1/company-context/from-description",response_model=DescriptionProposal)
+    def description_context(request: DescriptionPrepareRequest, _: bool = Depends(auth)):
+        tenant(request.model_dump(mode="json"))
+        # The short deterministic route never calls a provider. Model extraction
+        # uses the ordinary prepare_description Core job and its shared budget.
+        return prepare_description(request)
 
     @app.post("/internal/v1/sources/probe", response_model=SourceProbeResult)
     def probe(request: SourceProbeRequest, _: bool = Depends(auth)):

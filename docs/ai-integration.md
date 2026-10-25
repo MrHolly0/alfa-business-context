@@ -148,7 +148,7 @@ Collector поддерживает RSS/Atom, HTML, PDF и ограниченны
 
 ## Операции, настройки и публикация
 
-`DataTask.operation` принимает `collect`, `analyze`, `reassess`, `period` или `onboard`; `trigger` различает ручной, scheduled и повторный запуск. `period` требует диапазон и режим `retrospective` либо `as_known`. `businesses` несёт разрешённые контекстные snapshots (до 20), а `published_assessments` — Core proofs (до 600). `as_known` ограничивает документы временем, когда они уже были известны.
+`DataTask.operation` принимает `collect`, `analyze`, `reassess`, `period`, `onboard`, `optimize`, `rollback_config` или `prepare_description`; `trigger` различает ручной, scheduled и повторный запуск. `period` требует диапазон и режим `retrospective` либо `as_known`. `businesses` несёт разрешённые контекстные snapshots (до 20), а `published_assessments` — Core proofs (до 600). `as_known` ограничивает документы временем, когда они уже были известны.
 
 При первой компании DataWorkflow создаёт отдельную безопасную analyst-конфигурацию на базе активной настройки или baseline. Генератор заполняет только ограниченные предпочтения; права, источники, факты компании и модельный бюджет остаются отдельными. Core получает `configurations`/ref в результате; таблицы Python не заменяют бизнес-профиль Symfony.
 
@@ -189,6 +189,14 @@ python -m intelligence arena review-pack --run-id review-1 --output /tmp/review-
 3. При необходимости ставит `operation=optimize` с картой `expected_config_revisions`, теми же tenant/company scope и явным model budget. Первый анализ ждать не должен. По ошибке показывает сохранённую базовую настройку.
 4. Ставит `collect` для получения разрешённых источников, `analyze` для существующего корпуса, `reassess` после уточнения/новых данных, `period` для интервала. Передаёт `published_assessments` из своих подтверждённых публикаций.
 5. При приёме проверяет все `versions.company_contexts`, source policy и актуальную конфигурацию, затем применяет revisions идемпотентно. Для отката стратегии ставит `rollback_config` с ожидаемой ревизией; профиль не откатывается.
+
+### Подготовка описания и автоматический follow-up
+
+Для прямой анкеты используйте `POST /internal/v1/company-context/from-description` или CLI `prepare-description`: оба пути возвращают только детерминированное предложение. Если нужны разрешённые модельные предложения, Core может отправить обычную задачу `operation=prepare_description`; ответ всё равно не записывает профиль. Core проверяет предложения и создаёт собственную версию только после принятия.
+
+После создания baseline Python может приложить `follow_up_intents` к результату `onboard`, `analyze`, `collect` или `reassess`. Core сначала принимает родительский результат, проверяет свежесть context/fingerprint/config revision и идемпотентность, затем применяет отдельную конечную `AutoOptimizationPolicy`. Без выделенной политики intent фиксируется как `skipped_budget`; с разрешённой квотой Core создаёт обычный `operation=optimize` job без внешних новостей и без отдельной очереди. Повтор не обходит лимит и не повторяет автоматически неуспешную платную генерацию. Автоматический PHP hook при сохранении компании пока не реализован.
+
+См. полную схему потока, ограничения и команды в [документации персонализации](personalization.md), типы intent/policy в [контракте](../contracts/intelligence/README.md).
 
 Frontend передаёт изменения и действия в Core. Показывает состояние фоновой задачи отдельно от `ready/partial/unknown`, источники и цитаты отдельно от гипотез и банковской позиции; уточнения — как поля, способные изменить вывод. В текущем статическом UI этот путь ещё не подключён; `sectorFor()` относится к демонстрационным экранам и не ограничивает Python-контракт.
 

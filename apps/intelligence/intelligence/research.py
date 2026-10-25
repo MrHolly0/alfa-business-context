@@ -366,11 +366,21 @@ def _event_terms(package):
         "открыта", "после", "перед", "который", "которая", "которые", "были", "будет",
         "дата", "срок", "сроки", "может", "могут", "другом", "другая", "другой"}
     for claim in (_get(package,"claims",[]) or [])[:32]:
-        words=_match_tokens(str(_get(claim,"quote","") or "")[:1200])
+        quote=str(_get(claim,"quote","") or "")[:1200]
+        # Keep literal named service/company identifiers even when the cheap
+        # extractor wraps them in a descriptor (e.g. "Supplier SomeCloud").
+        # These remain search leads, never an inferred business relationship.
+        terms.extend(token for token in re.findall(r"\b[A-Z][A-Za-z0-9-]{3,}\b",quote)
+            if token.casefold() not in {"source","supplier","company","operator","according","report"})
+        # Store original tokens. Feeding already-stemmed tokens back through
+        # _match_tokens during matching can strip a second suffix (станции →
+        # станци → станц), losing legitimate matches for unseen descriptions.
+        words=[word for word in re.findall(r"[\w]+",quote,flags=re.UNICODE)
+               if _match_tokens(word)]
         for size in (2,3):
             for start in range(max(0,len(words)-size+1)):
                 phrase=words[start:start+size]
-                if len(phrase)==size and not any(word in phrase_stop for word in phrase):
+                if len(phrase)==size and not any(word.casefold() in phrase_stop for word in phrase):
                     terms.append(" ".join(phrase))
     # Deduplicate by normalized phrase while retaining the literal source spelling.
     unique={}

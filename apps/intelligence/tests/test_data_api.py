@@ -77,6 +77,10 @@ def test_schedule_rejects_model_cap_then_executes_local_work_through_worker(tmp_
     request['budget']['max_model_calls']=0
     stand.add_schedule('poll-news',request,60)
     assert len(stand.enqueue_due_schedules())==1
+    with stand._connect() as db:
+        context_head=db.execute("SELECT context_version FROM company_versions WHERE tenant_scope='tenant-a' AND company_id=?",
+            (request['company_id'],)).fetchone()
+    assert context_head and context_head[0]==request['context_version']
     with TestClient(app,client=('127.0.0.1',1234)) as http:
         core=CoreClient('http://testserver','schedule-test',client=http)
         worker=Worker(core,AnalysisPipeline(data.store),ArtifactStore(tmp_path/'schedule-artifacts.db'),data_workflow=data,tenant_ids={'tenant-a'})

@@ -21,6 +21,8 @@ from .multi_agent import MultiAgentPipeline
 from .watches import WatchCondition, WatchObservation, WatchEvaluation, evaluate_conditions
 from .periods import PeriodPublication, analyze_period_research
 from .artifacts import canonical_json, payload_hash
+from .personalization import FollowUpIntent
+from .description_context import DescriptionPrepareRequest, DescriptionProposal, prepare_description
 
 class WorkflowNotStarted(ValueError):
     """Capacity/lock refusal before analysis begins; safe to retry this owner."""
@@ -79,7 +81,7 @@ class DataTask(StrictModel):
     company_id: str = Field(min_length=1,max_length=256)
     context_version: int = Field(ge=1)
     source_policy_version: int = Field(ge=1)
-    operation: Literal['collect','analyze','reassess','period','onboard','optimize','rollback_config'] = 'analyze'
+    operation: Literal['collect','analyze','reassess','period','onboard','optimize','rollback_config','prepare_description'] = 'analyze'
     trigger: Literal['scheduled','manual','context_changed','policy_changed','evidence_changed','watch_due'] = 'manual'
     knowledge_mode: Literal['as_of','latest'] = 'as_of'
     as_of: datetime
@@ -95,6 +97,8 @@ class DataTask(StrictModel):
     synthetic: bool = False
     max_events: int = Field(default=10,ge=1,le=30)
     max_exploratory_analyses: int = Field(default=1,ge=0,le=3)
+    auto_optimize: bool = True
+    description_input: DescriptionPrepareRequest | None = None
     expected_config_revisions: dict[str, int] = Field(default_factory=dict, max_length=20)
     @model_validator(mode='after')
     def snapshot(self):
@@ -108,7 +112,15 @@ class DataTask(StrictModel):
         if self.operation=='period' and self.period is None: raise ValueError('period_required')
         if self.operation=='period' and self.knowledge_mode!='as_of': raise ValueError('period_requires_as_of_knowledge_mode')
         if self.synthetic and self.data_classification!='synthetic': raise ValueError('synthetic_classification_mismatch')
+        if self.operation=='prepare_description':
+            if self.description_input is None:raise ValueError('description_input_required')
+            if (self.description_input.tenant_id!=self.tenant_id or self.description_input.company_id!=self.company_id
+                or self.description_input.as_of!=self.as_of or self.description_input.data_classification!=self.data_classification):
+                raise ValueError('description_scope_mismatch')
+            if self.businesses:raise ValueError('description_proposal_does_not_replace_business_snapshot')
+        elif self.description_input is not None:raise ValueError('description_input_only_for_prepare_description')
         if self.operation in {'optimize', 'rollback_config'}:
+
             if not ids or set(self.expected_config_revisions) != set(ids):
                 raise ValueError('expected_config_revisions_required')
             if any(type(value) is not int or value < 1 for value in self.expected_config_revisions.values()):
@@ -133,6 +145,8 @@ class DataResult(StrictModel):
     candidates: list[CandidateAssessment] = Field(default_factory=list)
     revisions: list[dict] = Field(default_factory=list)
     configurations: list[dict] = Field(default_factory=list)
+    context_proposals: list[DescriptionProposal] = Field(default_factory=list, max_length=1)
+    follow_up_intents: list[FollowUpIntent] = Field(default_factory=list, max_length=20)
     period_report: dict | None = None
     watch_results: list[WatchEvaluation] = Field(default_factory=list)
     coverage: dict = Field(default_factory=dict)
@@ -346,6 +360,15 @@ class DataWorkflow:
         model=_TaskLLM(self.llm,task.budget,check,self.role_services) if model_allowed and (self.llm or self.role_services) else None
         if (self.llm or self.role_services) and not model_allowed:
             result.coverage['model_limitation']='confidential_external_model_disabled'
+        if task.operation=='prepare_description':
+            proposal=prepare_description(task.description_input,llm=model.for_role('generator') if model else None)
+            result.context_proposals.append(proposal)
+            if proposal.extraction_mode=='deterministic_fallback' or proposal.limitations:result.status='partial'
+            result.coverage.update(model_calls=model.calls if model else 0,model_attempts=model.attempts if model else [],
+                context_saved=False,requires_core_profile_acceptance=True)
+            stage('description_prepared',{'extraction_mode':proposal.extraction_mode,'claims_proposed':len(proposal.context.facts)+len(proposal.context.dependencies)+len(proposal.context.activities)+len(proposal.context.assertions)})
+            check('before_result_cache');self.state.save_result(task,result)
+            return result
         if task.operation=='collect':
             stage('before_collection',{'source_count':len(allowed)})
             result.collection=self.collector.collect(policy,now=self.clock(),checkpoint=check)
@@ -443,6 +466,13 @@ class DataWorkflow:
                     check('after_config_rollback')
                 if task.operation != 'period':
                     config_fences[business.company_id]=(configs,record['config_ref'])
+                if (task.auto_optimize and task.operation in {'onboard','analyze','collect','reassess'}
+                    and record.get('generation_status') in {'registry_fallback','registry_fallback_after_raw_context_check','context_rebased','registry_context_rebased'}):
+                    intent=FollowUpIntent.from_configuration(parent_request_id=task.request_id,
+                        tenant_id=task.tenant_id,company_id=business.company_id,context_version=business.context_version,
+                        company=business.company,configuration=record,
+                        reason='onboard' if task.operation=='onboard' else 'context_changed')
+                    if intent is not None:result.follow_up_intents.append(intent)
                 personal[business.company_id]=(registry,record)
                 result.configurations.append({**record,
                     'runtime_override_ref':self.analyst_config.ref if self.analyst_config else None,

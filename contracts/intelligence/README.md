@@ -13,6 +13,7 @@
 | `POST /internal/v1/rank` | [`RankRequest`](rank-request.schema.json) → [`RankResult`](rank-result.schema.json): объяснимый предварительный порядок событий |
 | `POST /internal/v1/analyze` | Legacy [`AnalysisRequest`](analysis-request.schema.json) → [`CandidateAssessment`](candidate-assessment.schema.json), либо [`DataTask`](ai-data-task.schema.json) → [`DataResult`](ai-data-result.schema.json) |
 | `POST /internal/v1/company-context/prepare` | [`CompanyContextPrepareRequest`](company-context-prepare.schema.json) → [`CompanyContextPrepareResult`](company-context-proposal.schema.json); только предложение, не запись Core-профиля |
+| `POST /internal/v1/company-context/from-description` | [`DescriptionPrepareRequest`](description-prepare.schema.json) → [`DescriptionProposal`](description-proposal.schema.json); deterministic-only, не обновляет канонический профиль |
 | `POST /internal/v1/sources/probe` | [`SourceProbeRequest`](source-probe-request.schema.json) → [`SourceProbeResult`](source-probe-result.schema.json); разовая URL-проверка по Core grant, без подписки |
 | `POST /internal/v1/originals` | [`OriginalInput`](original-request.schema.json): разрешённое чтение оригинала по tenant, revision и текущей policy |
 | `GET /internal/v1/executions/{request_id}?tenant_id=...` | Диагностические этапы локального workflow; не бизнес-статус job и не пользовательский progress API |
@@ -23,9 +24,9 @@
 
 ## DataTask и результат
 
-`ai-data-task-v1` содержит tenant/company/request IDs, `context_version`, `source_policy_version`, `as_of`, operation (`collect`, `analyze`, `reassess`, `period`, `onboard`, `optimize`, `rollback_config`), immutable `SourcePolicySnapshot`, до 20 бизнес-контекстов, `published_assessments` Core, бюджет и ограничения. `source_policy.tenant_id/revision` обязаны совпасть с task. Классификация источника берётся из Core-owned `SourceGrant`, а не из текста материала или task label.
+`ai-data-task-v1` содержит tenant/company/request IDs, `context_version`, `source_policy_version`, `as_of`, operation (`collect`, `analyze`, `reassess`, `period`, `onboard`, `optimize`, `rollback_config`, `prepare_description`), immutable `SourcePolicySnapshot`, до 20 бизнес-контекстов, `published_assessments` Core, бюджет и ограничения. `prepare_description` возвращает proposal; Core сам принимает и сохраняет профиль. Модельный вызов возможен только в обычной задаче при разрешённых классификации и бюджете. `source_policy.tenant_id/revision` обязаны совпасть с task. Классификация источника берётся из Core-owned `SourceGrant`, а не из текста материала или task label.
 
-`ai-data-result-v1` содержит collection report, event/package refs, selections/invalidations, candidates по компаниям, revisions, analyst configurations, period/watch результаты, coverage и trace. Кандидат не равен опубликованной ситуации. Core проверяет актуальность versions, lease/generation, cancellation и policy перед публикацией.
+`ai-data-result-v1` содержит collection report, event/package refs, selections/invalidations, candidates по компаниям, revisions, analyst configurations, context proposals, `follow_up_intents`, period/watch результаты, coverage и trace. Кандидат не равен опубликованной ситуации. Core проверяет актуальность versions, lease/generation, cancellation и policy перед публикацией.
 
 Core прикладывает `published_assessments` с точной input signature и assessment revision. Локальный кеш Python не доказывает, что Core принял прошлый ответ. При наличии точного proof workflow может вернуть `no_change`; без proof он возвращает candidate с `publication_revision_required=true`, чтобы Core не потерял первую публикацию после неопределённого ACK. Core отдельно дедуплицирует signature.
 
@@ -53,6 +54,8 @@ Fixture stand (`python -m intelligence core-stand --fixture-mode`) исполн�
 | [`ImpactPackage`](impact-package.schema.json), [`PeriodResearchReport`](period-research.schema.json) | Переиспользуемый разбор события, временной ряд/coverage |
 | [`WatchCondition`](watch-condition.schema.json), [`WatchEvaluation`](watch-evaluation.schema.json) | Условия наблюдения и оценка наблюдений |
 | [`CompanyContextPrepareRequest`](company-context-prepare.schema.json), [`CompanyContextPrepareResult`](company-context-proposal.schema.json) | CSV нормализация обезличенных данных без CRUD Core |
+| [`DescriptionPrepareRequest`](description-prepare.schema.json), [`DescriptionProposal`](description-proposal.schema.json) | Цитатные предложения из описания; Core владеет решением о записи профиля |
+| [`FollowUpIntent`](follow-up-intent.schema.json), [`AutoOptimizationPolicy`](auto-optimization-policy.schema.json) | Идемпотентный intent и ограниченное Core-распределение для фоновой оптимизации |
 | [`AnalystConfig`](analyst-config.schema.json) | Закрытые настраиваемые предпочтения поверх фиксированных правил |
 | [`ModelAnswer`](model-answer.schema.json) | Узкий формат вывода модели, проверяемый Python |
 
@@ -76,6 +79,8 @@ Fixture stand (`python -m intelligence core-stand --fixture-mode`) исполн�
 `businesses[].company` поддерживает [company-context-v2](company-context.schema.json): `activities[]`, `assertions[]`, прежние `facts[]`/`dependencies[]`. Все ID уникальны в профиле. Подтверждённость, provenance и даты относятся к каждому утверждению. `observed_at > as_of` не разрешает использовать сведение в историческом выводе. Поля `industry` и `role` сохранены для совместимости; пользовательские предпочтения передавайте отдельно в `businesses[].preferences` (`role`, `answer_style`, `horizon`).
 
 `onboard` возвращает `configurations[].revision/config_ref` без LLM. Для фоновых `optimize` и `rollback_config` обязательна карта `expected_config_revisions` ровно по всем компаниям задания, например `{"sensorworks": 1}`. Это прежний `ai-job-v1`, не отдельная очередь. При генерации используется разрешённый маршрут `generator` и прежние task/provider лимиты. `optimization_unavailable`, `optimization_failed`, `revision_conflict`, `stale_context` сохраняют рабочую настройку и видны в результате; такой результат не означает успешную оптимизацию.
+
+`follow_up_intents` — предложение Python для Core, не команда к исполнению. `ai-follow-up-intent-v1` привязывает intent к версии и fingerprint профиля и ожидаемой ревизии настройки. После приёма результата Core валидирует intent, проверяет актуальность и идемпотентность, затем может применить отдельную конечную `AutoOptimizationPolicy`: лимиты jobs, вызовов, токенов, шагов и положительный резерв в RUB или USD. При отсутствии allocation intent получает `skipped_budget`; иначе Core ставит обычную задачу `operation=optimize`. PHP hook на сохранение компании пока не подключён; fixture stand проверяет только контрактный процесс. Подробнее: [персонализация](../../docs/personalization.md).
 
 `DataResult.versions.company_contexts` перечисляет версии всех компаний. Core проверяет каждую перед публикацией всего batch, а также источник/политику, lease и актуальность выбранной конфигурации. Контрактный стенд отвергает смену вторичной компании и публикацию компании вне task scope до записи outbox. Локальные monotonic fences Python предотвращают перезапись уже наблюдённого нового профиля старой задачей, но не заменяют транзакционную проверку прав и версий в настоящем Core.
 

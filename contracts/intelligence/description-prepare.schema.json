@@ -1,0 +1,70 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "tenant_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Tenant Id",
+      "type": "string"
+    },
+    "company_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Company Id",
+      "type": "string"
+    },
+    "name": {
+      "maxLength": 8000,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "description": {
+      "maxLength": 4000,
+      "minLength": 1,
+      "title": "Description",
+      "type": "string"
+    },
+    "provenance": {
+      "maxLength": 1000,
+      "minLength": 1,
+      "title": "Provenance",
+      "type": "string"
+    },
+    "as_of": {
+      "format": "date-time",
+      "title": "As Of",
+      "type": "string"
+    },
+    "data_classification": {
+      "enum": [
+        "public",
+        "synthetic",
+        "confidential"
+      ],
+      "title": "Data Classification",
+      "type": "string"
+    },
+    "statement_status": {
+      "default": "unconfirmed",
+      "enum": [
+        "unconfirmed",
+        "core_confirmed"
+      ],
+      "title": "Statement Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "tenant_id",
+    "company_id",
+    "name",
+    "description",
+    "provenance",
+    "as_of",
+    "data_classification"
+  ],
+  "title": "DescriptionPrepareRequest",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

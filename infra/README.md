@@ -15,12 +15,13 @@ React demo доступен на http://localhost:4173, порт опублик�
 ```sh
 docker compose run --build --rm intelligence demo
 docker compose run --build --rm intelligence demo-data
+docker compose run --build --rm intelligence demo-personalization
 docker compose run --build --rm intelligence evaluate --mode baseline
 docker compose run --build --rm intelligence-test
 docker compose run --build --rm web-test
 ```
 
-`demo-data` выполняет отдельный полный локальный Python поток на синтетической RSS-фикстуре, без HTTP и внешнего LLM. Он не подменяет действия в React UI. `evaluate` проверяет функциональные cases, а не реальную точность модели. Test containers запускаются с `network_mode: none`.
+`demo-data` выполняет отдельный полный локальный Python поток на синтетической RSS-фикстуре, без HTTP и внешнего LLM. `demo-personalization` сравнивает три синтетические компании на одном наборе событий и выводит полный JSON в терминал; его сигналы — эвристики, не вероятности. Эти команды не подменяют действия в React UI. `evaluate` проверяет функциональные cases, а не реальную точность модели. Test containers запускаются с `network_mode: none`.
 
 Хостовый эквивалент, из каталога `apps/intelligence`:
 
@@ -76,4 +77,4 @@ uv export --frozen --only-group dev --no-emit-project -o requirements-dev.lock
 После этого выполните Docker test и schema check, прежде чем считать сборку воспроизводимой. Составная архитектура и внешние зависимости описаны в [architecture](../docs/architecture.md), [contracts](../contracts/intelligence/README.md) и [readiness matrix](../docs/ai-scope-and-readiness.md).
 
 
-Новый профиль с несколькими направлениями и локальными источниками проверяется командой `docker compose run --build --rm intelligence demo-business`. По умолчанию она не вызывает модель. Для модели нужен явный `--mode model`, проверенный provider config и прежний общий ledger в named volume; новый state path не даёт нового разрешения на расходы.
+Профиль с несколькими направлениями и локальными источниками проверяется командой `docker compose run --build --rm intelligence demo-business`. Сравнение одинаковых событий по зависимостям: `docker compose run --build --rm intelligence demo-personalization` (JSON выводится в терминал). На хосте из `apps/intelligence` используйте `uv run --frozen python -m intelligence demo-personalization --output /tmp/personalization-comparison.json`. По умолчанию эти команды не вызывают модель. Для модели нужен явный `--mode model`, проверенный provider config и прежний общий ledger в named volume; новый state path не даёт нового разрешения на расходы. Описание и границы персонализации: [docs/personalization.md](../docs/personalization.md).

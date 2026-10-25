@@ -125,7 +125,7 @@ class AnalysisPipeline:
                               "external_evidence": sum(e["source_role"] == "external" for e in evidence),
                               "bank_evidence": sum(e["source_role"] == "bank" for e in evidence)})
             if self.llm is None:
-                candidate = self._baseline(request, evidence, trace, usage)
+                candidate = self._baseline(request, evidence, trace, usage, package=package)
             else:
                 candidate = self._model_candidate(request, evidence, trace, usage, step, config, package=package, data_classification=data_classification)
             candidate = self._validate_candidate(candidate, request, evidence, usage, trace, event_ingest, config, package=package)
@@ -563,7 +563,7 @@ class AnalysisPipeline:
         code = str(exc) if isinstance(exc, ValueError) and str(exc) in _REPAIR_DIAGNOSTIC_CODES else "invalid_model_output"
         return [{"type": code, "loc": []}]
 
-    def _baseline(self, request, evidence, trace, usage):
+    def _baseline(self, request, evidence, trace, usage, *, package=None):
         trace.append({"stage": "baseline"})
         external = [e for e in evidence if e["source_role"] == "external"]
         bank = [e for e in evidence if e["source_role"] == "bank"]
@@ -583,11 +583,43 @@ class AnalysisPipeline:
                            "text": "Среди использованных материалов не подтверждена позиция банка по этому событию.",
                            "evidence_refs": [], "context_refs": [], "assumptions": [],
                            "alternatives": [], "falsifiers": [], "origin": "bank"})
-        supported = self._has_active_company_context(request)
-        status = "partial" if not external or not supported else "ready"
-        return {"summary": "Детерминированный baseline: автоматическая причинная оценка не выполнялась.",
-                "claims": claims, "influence_chain": [],
-                "clarifications": [] if supported else ["Подтвердите зависимости или факты компании, связанные с событием."]}, status
+        from .research import select_affected_businesses
+        selection=select_affected_businesses(package or {
+            "event_id":request.event.event_id,"revision":request.event.revision,
+            "entities":[],"territories":[],"resources":[],
+            "claims":[{"quote":request.event.title+" "+request.event.text[:4000]}]},
+            [{"company_id":request.company_id,"company":request.company,"dependency_graph":[]}],as_of=request.as_of)[0]
+        projection=project_company_context(request.company,as_of=request.as_of)
+        current={item.dependency_id:item for item in projection.dependencies}
+        matched=list(dict.fromkeys(ref for path in selection.paths for ref in path.edge_ids
+            if ref in current and current[ref].status=="confirmed"))[:3]
+        questions=[]
+        if matched:
+            labels="; ".join(current[ref].label[:250] for ref in matched)
+            summary="Событие сопоставлено с указанной в профиле зависимостью: "+labels+". Масштаб влияния не установлен."
+            claims.append({"claim_id":"company-applicability","kind":"unknown",
+                "text":"Применимость требует проверки по зависимости профиля: "+labels,
+                "evidence_refs":[],"context_refs":matched,"assumptions":[],"alternatives":[],"falsifiers":[]})
+            questions.append("Какие заказы, договорные сроки и резервы могут изменить значимость этой зависимости: "+labels+"?")
+            profile_facts=projection.facts[:2]
+            if profile_facts:
+                statements="; ".join(fact.text[:250] for fact in profile_facts)
+                summary+=" В анкете указано: «"+statements+"»."
+                claims.append({"claim_id":"declared-company-conditions","kind":"unknown",
+                    "text":"Сведения анкеты для проверки применимости: "+statements+". Они не доказывают размер воздействия.",
+                    "evidence_refs":[],"context_refs":[fact.fact_id for fact in profile_facts],
+                    "assumptions":[],"alternatives":[],"falsifiers":[]})
+        elif selection.score>0:
+            summary="Найден тематический сигнал: "+", ".join(selection.matched_nodes[:5])+". Подтверждённая зависимость и масштаб влияния не установлены."
+            questions.append("Какая конкретная зависимость связывает компанию с этим событием? Тематического совпадения недостаточно.")
+        else:
+            summary="В переданном профиле не найдена подтверждённая связь с событием. Это не доказывает отсутствия влияния."
+            questions.append("Есть ли неуказанный поставщик, ресурс, клиент или маршрут, связывающий компанию с этим событием?")
+        trace.append({"stage":"baseline_personalization","priority":selection.score,
+            "priority_type":"heuristic_signal","context_refs":matched,"matched_terms":selection.matched_nodes,
+            "reasons":selection.reasons})
+        return {"summary":summary+" Причинная оценка baseline не выполнялась.",
+                "claims":claims,"influence_chain":[],"clarifications":questions},"partial"
 
     def _validate_candidate(self, payload, request, evidence, usage, trace, event_ingest, config=None, *, package=None):
         status = "partial"

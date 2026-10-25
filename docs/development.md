@@ -10,12 +10,17 @@
 uv sync --frozen
 uv run --frozen python -m intelligence --help
 uv run --frozen python -m intelligence demo-data --state-dir /tmp/alfa-demo-data
+uv run --frozen python -m intelligence demo-personalization --output /tmp/personalization-comparison.json
+uv run --frozen python -m intelligence prepare-description --input examples/description-context.json \
+  --output /tmp/description-proposal.json
 uv run --frozen python -m intelligence run-task --mode baseline \
   --input examples/data-task.json --state-dir /tmp/alfa-data-task
 uv run --frozen python -m pytest -q -p no:cacheprovider tests
 ```
 
 `demo-data` запускает локальную синтетическую фикстуру без HTTP и LLM. `run-task` выполняет разрешённый `ai-data-task-v1` напрямую и не проверяет Core queue/lease/publication lifecycle. Baseline не делает внешние model calls. Результат оценивает структуру/сценарий; качество на неизвестных реальных банковских данных этим не подтверждается.
+
+`prepare-description` возвращает детерминированное предложение, не меняя канонический профиль Core. `demo-personalization` сравнивает три синтетические компании на одинаковых событиях. Его приоритеты — поисковые эвристики, не вероятности. Ограничения и способы читать результаты описаны в [персонализации](personalization.md).
 
 ### Fixture job stand
 
@@ -25,6 +30,8 @@ uv run --frozen python -m pytest -q -p no:cacheprovider tests
 uv run --frozen python -m intelligence core-stand --fixture-mode \
   --state-dir /tmp/alfa-core-stand --seed examples/core-stand-ai-job.json
 ```
+
+Для проверки автоматической постановки можно добавить `--auto-optimization-policy examples/auto-optimization-policy.json`. Пример разрешает только одну optimize-задачу с отдельным резервом $0.01; исполнение модели требует явно настроенного worker в модельном режиме. По умолчанию политики нет, intent остаётся `skipped_budget`.
 
 Это явный SQLite-backed stand на loopback, не PHP Core и не production job owner. Он создаёт локальный тестовый service token для fixture; пользовательские права, UI, SSE, публикация и PHP бизнес-таблицы здесь не реализованы.
 
@@ -90,4 +97,4 @@ uv run --frozen python scripts/export_contracts.py --check
 Основная ветка — `main`. Рабочую ветку создавайте под одну задачу: `feat/<задача>`, `fix/<задача>` или `docs/<задача>`. После включения в `main` удаляйте её. Коммиты оформляйте как `type: описание на русском`, сохраняя своё обычное авторство. Инструкция для нового участника: [передача проекта](handoff.md).
 
 
-Проверка смешанного бизнеса без сети и модели: `docker compose run --build --rm intelligence demo-business`. На хосте из `apps/intelligence`: `.venv/bin/python -m intelligence demo-business --state-dir /tmp/alfa-business-demo`. Отдельный набор регрессий: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/test_company_context.py tests/test_workflow_extension.py tests/test_business_scenario.py`. Полный набор и экспорт контрактов проверяются перед завершением изменений.
+Проверки без сети и модели: `docker compose run --build --rm intelligence demo-business` и `docker compose run --build --rm intelligence demo-personalization`. На хосте из `apps/intelligence`: `.venv/bin/python -m intelligence demo-personalization --output /tmp/personalization-comparison.json`. Контекстные регрессии: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/test_company_context.py tests/test_description_context.py tests/test_workflow_extension.py tests/test_business_scenario.py tests/test_personalization_comparison.py tests/test_auto_personalization.py`. Полный набор и экспорт контрактов проверяются перед завершением изменений.

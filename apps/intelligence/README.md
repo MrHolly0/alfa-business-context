@@ -11,6 +11,9 @@ Python получает из Core разрешённый snapshot: source policy
 .venv/bin/python -m intelligence demo
 .venv/bin/python -m intelligence demo-data --state-dir /tmp/alfa-data-demo
 .venv/bin/python -m intelligence demo-business --state-dir /tmp/alfa-business-demo
+.venv/bin/python -m intelligence demo-personalization --output /tmp/personalization-comparison.json
+.venv/bin/python -m intelligence prepare-description --input examples/description-context.json \
+  --output /tmp/description-proposal.json
 .venv/bin/python -m intelligence evaluate --mode baseline
 .venv/bin/python -m pytest -q -p no:cacheprovider tests
 ```
@@ -79,3 +82,5 @@ Scheduler создаёт обычные fixture jobs. Реальную очер�
 Успешные schema/tests не доказывают точность выводов. В репозитории нет реальных 9 банковских PDF и CSV кейса, PHP интеграции, лицензированных production источников или независимой оценки на 200–300 примерах.
 
 `demo-business` проверяет новый смешанный профиль, два сообщения о терминале и слабую аналогию на локальных RSS. `optimize`/`rollback_config` — отдельные операции DataTask; обычный анализ использует выбранную конфигурацию без нового турнира. Профиль `company-context-v2`, предпочтения, версии и порядок подключения описаны в [процессе](../../docs/ai-process.md) и [контракте](../../contracts/intelligence/README.md).
+
+`prepare-description` — детерминированный CLI для proposal из `DescriptionPrepareRequest`; команда не обновляет канонический Core-профиль. Операция DataTask `prepare_description` может использовать разрешённый LLM-маршрут, но тоже возвращает только предложение; workflow сохраняет результат обычным способом в result cache. `demo-personalization` сравнивает три синтетических профиля на общих событиях без сети/моделей по умолчанию. Сигналы — эвристический приоритет, не вероятность или оценка убытка. Подробно: [персонализация](../../docs/personalization.md), [сравнительный отчёт](../../docs/checks/personalization-comparison-2026-10-25.json).

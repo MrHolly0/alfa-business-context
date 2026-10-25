@@ -7,6 +7,8 @@ from pathlib import Path
 
 from intelligence.api import create_app,DocumentInput,SearchInput,OriginalInput
 from intelligence.workflow import DataTask, DataResult
+from intelligence.description_context import DescriptionPrepareRequest, DescriptionProposal
+from intelligence.personalization import FollowUpIntent,AutoOptimizationPolicy
 from intelligence.events import ImpactPackage
 from intelligence.watches import WatchCondition, WatchEvaluation
 from intelligence.periods import PeriodResearchReport
@@ -25,7 +27,7 @@ DEST=REPO/'contracts/intelligence'
 
 def contracts():
     output={name: model.model_json_schema() for name,model in [
-        ('company-context.schema.json',CompanyContext),('analyst-config.schema.json',AnalystConfig),('impact-package.schema.json',ImpactPackage),('watch-condition.schema.json',WatchCondition),('watch-evaluation.schema.json',WatchEvaluation),('period-research.schema.json',PeriodResearchReport),('company-context-prepare.schema.json',CompanyContextPrepareRequest),('company-context-proposal.schema.json',CompanyContextPrepareResult),('analysis-request.schema.json',AnalysisRequest),('candidate-assessment.schema.json',CandidateAssessment),
+        ('description-prepare.schema.json',DescriptionPrepareRequest),('description-proposal.schema.json',DescriptionProposal),('follow-up-intent.schema.json',FollowUpIntent),('auto-optimization-policy.schema.json',AutoOptimizationPolicy),('company-context.schema.json',CompanyContext),('analyst-config.schema.json',AnalystConfig),('impact-package.schema.json',ImpactPackage),('watch-condition.schema.json',WatchCondition),('watch-evaluation.schema.json',WatchEvaluation),('period-research.schema.json',PeriodResearchReport),('company-context-prepare.schema.json',CompanyContextPrepareRequest),('company-context-proposal.schema.json',CompanyContextPrepareResult),('analysis-request.schema.json',AnalysisRequest),('candidate-assessment.schema.json',CandidateAssessment),
         ('model-answer.schema.json',ModelAnswer),('document.schema.json',DocumentInput),
         ('search.schema.json',SearchInput),('source-policy.schema.json',SourcePolicySnapshot),('source-probe-request.schema.json',SourceProbeRequest),('source-probe-result.schema.json',SourceProbeResult),('original-request.schema.json',OriginalInput),('ai-data-task.schema.json',DataTask),('ai-data-result.schema.json',DataResult),('rank-request.schema.json',RankRequest),('rank-result.schema.json',RankResult)]}
     identifier={'type':'string','minLength':1,'maxLength':256}

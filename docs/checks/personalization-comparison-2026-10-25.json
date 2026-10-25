@@ -1,0 +1,4981 @@
+{
+  "schema_version": "personalization-comparison-result-v1",
+  "classification": "synthetic_fixture",
+  "sources_network_access": false,
+  "model_requested": false,
+  "inputs": {
+    "schema_version": "personalization-comparison-input-v1",
+    "as_of": "2026-10-25T10:00:00Z",
+    "tenant_id": "personalization-example",
+    "data_classification": "synthetic",
+    "companies": [
+      {
+        "company_id": "instrument-port",
+        "name": "Мера-Север (учебная компания)",
+        "industry_hint": "производство промышленных датчиков",
+        "description": "Компания производит промышленные датчики.\nЗависит от: поставок через Северный порт.\nФакты: складской запас разъёмов на 4 дня; основной покупатель — машиностроительные заводы."
+      },
+      {
+        "company_id": "instrument-grid",
+        "name": "Мера-Восток (учебная компания)",
+        "industry_hint": "производство промышленных датчиков",
+        "description": "Компания производит промышленные датчики.\nЗависит от: работы Восточной электроподстанции.\nФакты: сырьё приобретается у местных поставщиков; резервного электропитания нет."
+      },
+      {
+        "company_id": "mixed-business",
+        "name": "Прибор и платформа (учебная компания)",
+        "industry_hint": "производство, программное обеспечение и импорт",
+        "description": "Компания производит промышленные датчики. Разрабатывает платформу мониторинга. Импортирует разъёмы.\nЗависит от: поставок через Северный порт; доступности OrionCloud.\nФакты: запас импортных разъёмов на 7 дней.\nВозможно зависит от поставок микросхем Sirius."
+      }
+    ],
+    "events": [
+      {
+        "key": "port",
+        "title": "Северный порт временно остановил приём контейнеров",
+        "text": "Оператор сообщает: Северный порт временно приостановил приём контейнеров с разъёмами. Дата возобновления не указана."
+      },
+      {
+        "key": "power",
+        "title": "Восточная электроподстанция: план отключения",
+        "text": "Сетевая компания сообщает: Восточная электроподстанция не подаст энергию промышленным потребителям в течение суток. Сведения о резервном питании потребителей отсутствуют."
+      },
+      {
+        "key": "cloud",
+        "title": "OrionCloud планирует ограничение интеграций API",
+        "text": "Поставщик OrionCloud опубликовал план ограничения интеграций API с 1 ноября. Точные условия перехода для клиентов пока не раскрыты."
+      }
+    ],
+    "expected": {
+      "same_industry": [
+        "instrument-port",
+        "instrument-grid"
+      ],
+      "dependency_signals": {
+        "port": [
+          "instrument-port",
+          "mixed-business"
+        ],
+        "power": [
+          "instrument-grid"
+        ],
+        "cloud": [
+          "mixed-business"
+        ]
+      },
+      "forbidden": [
+        "Утверждать отсутствие воздействия при нулевом лексическом сигнале.",
+        "Выдумывать позицию банка, размер убытка или долю выручки.",
+        "Подтверждать предположение о Sirius как установленную зависимость."
+      ]
+    }
+  },
+  "profiles": [
+    {
+      "input": {
+        "tenant_id": "personalization-example",
+        "company_id": "instrument-port",
+        "name": "Мера-Север (учебная компания)",
+        "description": "Компания производит промышленные датчики.\nЗависит от: поставок через Северный порт.\nФакты: складской запас разъёмов на 4 дня; основной покупатель — машиностроительные заводы.",
+        "provenance": "synthetic user questionnaire",
+        "as_of": "2026-10-25T10:00:00Z",
+        "data_classification": "synthetic",
+        "statement_status": "core_confirmed"
+      },
+      "proposal": {
+        "schema_version": "company-description-proposal-v1",
+        "tenant_id": "personalization-example",
+        "company_id": "instrument-port",
+        "context": {
+          "schema_version": "company-context-v2",
+          "name": "Мера-Север (учебная компания)",
+          "industry": "",
+          "description": "Компания производит промышленные датчики.\nЗависит от: поставок через Северный порт.\nФакты: складской запас разъёмов на 4 дня; основной покупатель — машиностроительные заводы.",
+          "role": "",
+          "dependencies": [
+            {
+              "dependency_id": "dependency-1b68ea86dd23",
+              "label": "поставок через Северный порт",
+              "kind": "dependency",
+              "status": "confirmed",
+              "provenance": "Core-confirmed user statement, not independent verification",
+              "source_node": "company",
+              "target_node": null,
+              "evidence_refs": [
+                "description:54:82",
+                "description:42:83"
+              ],
+              "observed_at": "2026-10-25T10:00:00Z",
+              "valid_from": null,
+              "valid_until": null
+            }
+          ],
+          "facts": [
+            {
+              "fact_id": "fact-6467342121d4",
+              "text": "складской запас разъёмов на 4 дня; основной покупатель — машиностроительные заводы.",
+              "provenance": "Core-confirmed user statement, not independent verification",
+              "status": "confirmed",
+              "evidence_refs": [
+                "description:91:174"
+              ],
+              "observed_at": "2026-10-25T10:00:00Z",
+              "valid_from": null,
+              "valid_until": null
+            }
+          ],
+          "activities": [
+            {
+              "activity_id": "activity-aaa2ab22fbe4",
+              "label": "Компания производит промышленные датчики",
+              "normalized_class": "manufacturing",
+              "status": "confirmed",
+              "provenance": "Core-confirmed user statement, not independent verification",
+              "evidence_refs": [
+                "description:0:40"
+              ],
+              "observed_at": "2026-10-25T10:00:00Z",
+              "valid_from": null,
+              "valid_until": null
+            }
+          ],
+          "assertions": []
+        },
+        "hypotheses": [],
+        "questions": [],
+        "significance": [
+          {
+            "item_id": "dependency-1b68ea86dd23",
+            "rule": "confirmed_dependency_match",
+            "priority": "high",
+            "reason": "select_affected_businesses: если _matching_terms находит совпадение слов этой подтверждённой зависимости с явным термином события, добавляет текстовый путь с сигналом 0.80; применимость требует проверки.",
+            "confidence": 0.8
+          },
+          {
+            "item_id": "activity-aaa2ab22fbe4",
+            "rule": "activity_lead",
+            "priority": "normal",
+            "reason": "select_affected_businesses сопоставляет слова направления с явными терминами события и даёт сигнал 0.55; направление должно быть подтверждено, чтобы попасть в активную проекцию.",
+            "confidence": 0.55
+          }
+        ],
+        "search_directions": [
+          {
+            "direction": "Сопоставить сообщения о зависимостях с явными терминами событий: «поставок через Северный порт».",
+            "rule": "confirmed_dependency_match",
+            "priority": "high",
+            "basis_item_ids": [
+              "dependency-1b68ea86dd23"
+            ],
+            "confidence": 0.8
+          },
+          {
+            "direction": "Проверить сообщения по направлению «Компания производит промышленные датчики»; сигнал появляется при совпадении слов.",
+            "rule": "activity_lead",
+            "priority": "normal",
+            "basis_item_ids": [
+              "activity-aaa2ab22fbe4"
+            ],
+            "confidence": 0.55
+          }
+        ],
+        "extraction_mode": "deterministic",
+        "limitations": [
+          "proposal_only_core_owns_profile",
+          "confidence_is_not_truth",
+          "no_external_search_performed",
+          "unparsed_free_prose_is_preserved_without_claims"
+        ]
+      },
+      "core_supplied_industry_hint": "производство промышленных датчиков"
+    },
+    {
+      "input": {
+        "tenant_id": "personalization-example",
+        "company_id": "instrument-grid",
+        "name": "Мера-Восток (учебная компания)",
+        "description": "Компания производит промышленные датчики.\nЗависит от: работы Восточной электроподстанции.\nФакты: сырьё приобретается у местных поставщиков; резервного электропитания нет.",
+        "provenance": "synthetic user questionnaire",
+        "as_of": "2026-10-25T10:00:00Z",
+        "data_classification": "synthetic",
+        "statement_status": "core_confirmed"
+      },
+      "proposal": {
+        "schema_version": "company-description-proposal-v1",
+        "tenant_id": "personalization-example",
+        "company_id": "instrument-grid",
+        "context": {
+          "schema_version": "company-context-v2",
+          "name": "Мера-Восток (учебная компания)",
+          "industry": "",
+          "description": "Компания производит промышленные датчики.\nЗависит от: работы Восточной электроподстанции.\nФакты: сырьё приобретается у местных поставщиков; резервного электропитания нет.",
+          "role": "",
+          "dependencies": [
+            {
+              "dependency_id": "dependency-947e333b6c0e",
+              "label": "работы Восточной электроподстанции",
+              "kind": "dependency",
+              "status": "confirmed",
+              "provenance": "Core-confirmed user statement, not independent verification",
+              "source_node": "company",
+              "target_node": null,
+              "evidence_refs": [
+                "description:54:88",
+                "description:42:89"
+              ],
+              "observed_at": "2026-10-25T10:00:00Z",
+              "valid_from": null,
+              "valid_until": null
+            }
+          ],
+          "facts": [
+            {
+              "fact_id": "fact-5bf70bb07c17",
+              "text": "сырьё приобретается у местных поставщиков; резервного электропитания нет.",
+              "provenance": "Core-confirmed user statement, not independent verification",
+              "status": "confirmed",
+              "evidence_refs": [
+                "description:97:170"
+              ],
+              "observed_at": "2026-10-25T10:00:00Z",
+              "valid_from": null,
+              "valid_until": null
+            }
+          ],
+          "activities": [
+            {
+              "activity_id": "activity-aaa2ab22fbe4",
+              "label": "Компания производит промышленные датчики",
+              "normalized_class": "manufacturing",
+              "status": "confirmed",
+              "provenance": "Core-confirmed user statement, not independent verification",
+              "evidence_refs": [
+                "description:0:40"
+              ],
+              "observed_at": "2026-10-25T10:00:00Z",
+              "valid_from": null,
+              "valid_until": null
+            }
+          ],
+          "assertions": []
+        },
+        "hypotheses": [],
+        "questions": [],
+        "significance": [
+          {
+            "item_id": "dependency-947e333b6c0e",
+            "rule": "confirmed_dependency_match",
+            "priority": "high",
+            "reason": "select_affected_businesses: если _matching_terms находит совпадение слов этой подтверждённой зависимости с явным термином события, добавляет текстовый путь с сигналом 0.80; применимость требует проверки.",
+            "confidence": 0.8
+          },
+          {
+            "item_id": "activity-aaa2ab22fbe4",
+            "rule": "activity_lead",
+            "priority": "normal",
+            "reason": "select_affected_businesses сопоставляет слова направления с явными терминами события и даёт сигнал 0.55; направление должно быть подтверждено, чтобы попасть в активную проекцию.",
+            "confidence": 0.55
+          }
+        ],
+        "search_directions": [
+          {
+            "direction": "Сопоставить сообщения о зависимостях с явными терминами событий: «работы Восточной электроподстанции».",
+            "rule": "confirmed_dependency_match",
+            "priority": "high",
+            "basis_item_ids": [
+              "dependency-947e333b6c0e"
+            ],
+            "confidence": 0.8
+          },
+          {
+            "direction": "Проверить сообщения по направлению «Компания производит промышленные датчики»; сигнал появляется при совпадении слов.",
+            "rule": "activity_lead",
+            "priority": "normal",
+            "basis_item_ids": [
+              "activity-aaa2ab22fbe4"
+            ],
+            "confidence": 0.55
+          }
+        ],
+        "extraction_mode": "deterministic",
+        "limitations": [
+          "proposal_only_core_owns_profile",
+          "confidence_is_not_truth",
+          "no_external_search_performed",
+          "unparsed_free_prose_is_preserved_without_claims"
+        ]
+      },
+      "core_supplied_industry_hint": "производство промышленных датчиков"
+    },
+    {
+      "input": {
+        "tenant_id": "personalization-example",
+        "company_id": "mixed-business",
+        "name": "Прибор и платформа (учебная компания)",
+        "description": "Компания производит промышленные датчики. Разрабатывает платформу мониторинга. Импортирует разъёмы.\nЗависит от: поставок через Северный порт; доступности OrionCloud.\nФакты: запас импортных разъёмов на 7 дней.\nВозможно зависит от поставок микросхем Sirius.",
+        "provenance": "synthetic user questionnaire",
+        "as_of": "2026-10-25T10:00:00Z",
+        "data_classification": "synthetic",
+        "statement_status": "core_confirmed"
+      },
+      "proposal": {
+        "schema_version": "company-description-proposal-v1",
+        "tenant_id": "personalization-example",
+        "company_id": "mixed-business",
+        "context": {
+          "schema_version": "company-context-v2",
+          "name": "Прибор и платформа (учебная компания)",
+          "industry": "",
+          "description": "Компания производит промышленные датчики. Разрабатывает платформу мониторинга. Импортирует разъёмы.\nЗависит от: поставок через Северный порт; доступности OrionCloud.\nФакты: запас импортных разъёмов на 7 дней.\nВозможно зависит от поставок микросхем Sirius.",
+          "role": "",
+          "dependencies": [
+            {
+              "dependency_id": "dependency-f5c21bcf26bd",
+              "label": "поставок через Северный порт",
+              "kind": "dependency",
+              "status": "confirmed",
+              "provenance": "Core-confirmed user statement, not independent verification",
+              "source_node": "company",
+              "target_node": null,
+              "evidence_refs": [
+                "description:112:140",
+                "description:100:165"
+              ],
+              "observed_at": "2026-10-25T10:00:00Z",
+              "valid_from": null,
+              "valid_until": null
+            },
+            {
+              "dependency_id": "dependency-e39626831fec",
+              "label": "доступности OrionCloud",
+              "kind": "dependency",
+              "status": "confirmed",
+              "provenance": "Core-confirmed user statement, not independent verification",
+              "source_node": "company",
+              "target_node": null,
+              "evidence_refs": [
+                "description:142:164",
+                "description:100:165"
+              ],
+              "observed_at": "2026-10-25T10:00:00Z",
+              "valid_from": null,
+              "valid_until": null
+            }
+          ],
+          "facts": [
+            {
+              "fact_id": "fact-0f6a5edf6045",
+              "text": "запас импортных разъёмов на 7 дней.",
+              "provenance": "Core-confirmed user statement, not independent verification",
+              "status": "confirmed",
+              "evidence_refs": [
+                "description:173:208"
+              ],
+              "observed_at": "2026-10-25T10:00:00Z",
+              "valid_from": null,
+              "valid_until": null
+            }
+          ],
+          "activities": [
+            {
+              "activity_id": "activity-aaa2ab22fbe4",
+              "label": "Компания производит промышленные датчики",
+              "normalized_class": "manufacturing",
+              "status": "confirmed",
+              "provenance": "Core-confirmed user statement, not independent verification",
+              "evidence_refs": [
+                "description:0:40"
+              ],
+              "observed_at": "2026-10-25T10:00:00Z",
+              "valid_from": null,
+              "valid_until": null
+            },
+            {
+              "activity_id": "activity-842a78edef90",
+              "label": "Разрабатывает платформу мониторинга",
+              "normalized_class": "software",
+              "status": "confirmed",
+              "provenance": "Core-confirmed user statement, not independent verification",
+              "evidence_refs": [
+                "description:42:77"
+              ],
+              "observed_at": "2026-10-25T10:00:00Z",
+              "valid_from": null,
+              "valid_until": null
+            },
+            {
+              "activity_id": "activity-428c629a729b",
+              "label": "Импортирует разъёмы",
+              "normalized_class": "import",
+              "status": "confirmed",
+              "provenance": "Core-confirmed user statement, not independent verification",
+              "evidence_refs": [
+                "description:79:98"
+              ],
+              "observed_at": "2026-10-25T10:00:00Z",
+              "valid_from": null,
+              "valid_until": null
+            }
+          ],
+          "assertions": [
+            {
+              "assertion_id": "assertion-d2b4ae2ee993",
+              "kind": "dependency",
+              "label": "Возможно зависит от поставок микросхем Sirius",
+              "status": "assumption",
+              "provenance": "synthetic user questionnaire",
+              "evidence_refs": [
+                "description:209:254"
+              ],
+              "observed_at": "2026-10-25T10:00:00Z",
+              "valid_from": null,
+              "valid_until": null
+            }
+          ]
+        },
+        "hypotheses": [
+          {
+            "hypothesis_id": "hypothesis-3e7b206f2664",
+            "text": "Возможно зависит от поставок микросхем Sirius",
+            "basis": [
+              {
+                "start": 209,
+                "end": 254,
+                "quote": "Возможно зависит от поставок микросхем Sirius"
+              }
+            ],
+            "confidence": 0.45,
+            "status": "assumption"
+          }
+        ],
+        "questions": [
+          "Подтверждается ли зависимость «Возможно зависит от поставок микросхем Sirius»? Укажите основание и срок актуальности."
+        ],
+        "significance": [
+          {
+            "item_id": "dependency-f5c21bcf26bd",
+            "rule": "confirmed_dependency_match",
+            "priority": "high",
+            "reason": "select_affected_businesses: если _matching_terms находит совпадение слов этой подтверждённой зависимости с явным термином события, добавляет текстовый путь с сигналом 0.80; применимость требует проверки.",
+            "confidence": 0.8
+          },
+          {
+            "item_id": "dependency-e39626831fec",
+            "rule": "confirmed_dependency_match",
+            "priority": "high",
+            "reason": "select_affected_businesses: если _matching_terms находит совпадение слов этой подтверждённой зависимости с явным термином события, добавляет текстовый путь с сигналом 0.80; применимость требует проверки.",
+            "confidence": 0.8
+          },
+          {
+            "item_id": "activity-aaa2ab22fbe4",
+            "rule": "activity_lead",
+            "priority": "normal",
+            "reason": "select_affected_businesses сопоставляет слова направления с явными терминами события и даёт сигнал 0.55; направление должно быть подтверждено, чтобы попасть в активную проекцию.",
+            "confidence": 0.55
+          },
+          {
+            "item_id": "activity-842a78edef90",
+            "rule": "activity_lead",
+            "priority": "normal",
+            "reason": "select_affected_businesses сопоставляет слова направления с явными терминами события и даёт сигнал 0.55; направление должно быть подтверждено, чтобы попасть в активную проекцию.",
+            "confidence": 0.55
+          },
+          {
+            "item_id": "activity-428c629a729b",
+            "rule": "activity_lead",
+            "priority": "normal",
+            "reason": "select_affected_businesses сопоставляет слова направления с явными терминами события и даёт сигнал 0.55; направление должно быть подтверждено, чтобы попасть в активную проекцию.",
+            "confidence": 0.55
+          },
+          {
+            "item_id": "assertion-d2b4ae2ee993",
+            "rule": "assumptions",
+            "priority": "explore",
+            "reason": "Это предположение; активная проекция select_affected_businesses его исключает, нужна проверка.",
+            "confidence": 0.45
+          }
+        ],
+        "search_directions": [
+          {
+            "direction": "Сопоставить сообщения о зависимостях с явными терминами событий: «поставок через Северный порт».",
+            "rule": "confirmed_dependency_match",
+            "priority": "high",
+            "basis_item_ids": [
+              "dependency-f5c21bcf26bd"
+            ],
+            "confidence": 0.8
+          },
+          {
+            "direction": "Сопоставить сообщения о зависимостях с явными терминами событий: «доступности OrionCloud».",
+            "rule": "confirmed_dependency_match",
+            "priority": "high",
+            "basis_item_ids": [
+              "dependency-e39626831fec"
+            ],
+            "confidence": 0.8
+          },
+          {
+            "direction": "Проверить сообщения по направлению «Компания производит промышленные датчики»; сигнал появляется при совпадении слов.",
+            "rule": "activity_lead",
+            "priority": "normal",
+            "basis_item_ids": [
+              "activity-aaa2ab22fbe4"
+            ],
+            "confidence": 0.55
+          }
+        ],
+        "extraction_mode": "deterministic",
+        "limitations": [
+          "proposal_only_core_owns_profile",
+          "confidence_is_not_truth",
+          "no_external_search_performed",
+          "unparsed_free_prose_is_preserved_without_claims"
+        ]
+      },
+      "core_supplied_industry_hint": "производство, программное обеспечение и импорт"
+    }
+  ],
+  "configurations": [
+    {
+      "tenant_id": "personalization-example",
+      "company_id": "instrument-port",
+      "revision": 1,
+      "context_version": 1,
+      "context_hash": "58030ce078a6e23509db45415caa29261c873c61fc0c24950d66c1ed1d8183ae",
+      "config_ref": "company-2d32dddbf8fe79ab01672e39@1",
+      "config": {
+        "config_id": "company-2d32dddbf8fe79ab01672e39",
+        "revision": 1,
+        "template_version": "analysis-v2",
+        "focus": [],
+        "retrieval_strategy": "balanced",
+        "answer_style": "balanced",
+        "horizon": "quarter",
+        "role_scope": "any",
+        "industry_scope": [],
+        "evidence_limit": 16,
+        "max_depth": 2,
+        "retrieval_expansions": [],
+        "examples": []
+      },
+      "generation_status": "stored",
+      "history": [
+        {
+          "config_ref": "company-2d32dddbf8fe79ab01672e39@1",
+          "context_version": 1,
+          "stable": true,
+          "source_config_ref": "baseline@1",
+          "created_at": "2026-10-25T11:51:25.362327+00:00"
+        }
+      ],
+      "runtime_override_ref": null,
+      "source_config_ref": "baseline@1"
+    },
+    {
+      "tenant_id": "personalization-example",
+      "company_id": "instrument-grid",
+      "revision": 1,
+      "context_version": 1,
+      "context_hash": "1cf2fdf790dbb020b576867cf06e30c65853b82bdd688fdc655440ff2b6a14b3",
+      "config_ref": "company-d3234575641132a2650bea95@1",
+      "config": {
+        "config_id": "company-d3234575641132a2650bea95",
+        "revision": 1,
+        "template_version": "analysis-v2",
+        "focus": [],
+        "retrieval_strategy": "balanced",
+        "answer_style": "balanced",
+        "horizon": "quarter",
+        "role_scope": "any",
+        "industry_scope": [],
+        "evidence_limit": 16,
+        "max_depth": 2,
+        "retrieval_expansions": [],
+        "examples": []
+      },
+      "generation_status": "stored",
+      "history": [
+        {
+          "config_ref": "company-d3234575641132a2650bea95@1",
+          "context_version": 1,
+          "stable": true,
+          "source_config_ref": "baseline@1",
+          "created_at": "2026-10-25T11:51:25.394862+00:00"
+        }
+      ],
+      "runtime_override_ref": null,
+      "source_config_ref": "baseline@1"
+    },
+    {
+      "tenant_id": "personalization-example",
+      "company_id": "mixed-business",
+      "revision": 1,
+      "context_version": 1,
+      "context_hash": "a134ca4f2eaddc48c3b8fc520b32b3ec617a10cec9c657f20fc98d23991cecb7",
+      "config_ref": "company-087b1d9d46ffebf42f8ff336@1",
+      "config": {
+        "config_id": "company-087b1d9d46ffebf42f8ff336",
+        "revision": 1,
+        "template_version": "analysis-v2",
+        "focus": [],
+        "retrieval_strategy": "balanced",
+        "answer_style": "balanced",
+        "horizon": "quarter",
+        "role_scope": "any",
+        "industry_scope": [],
+        "evidence_limit": 16,
+        "max_depth": 2,
+        "retrieval_expansions": [],
+        "examples": []
+      },
+      "generation_status": "stored",
+      "history": [
+        {
+          "config_ref": "company-087b1d9d46ffebf42f8ff336@1",
+          "context_version": 1,
+          "stable": true,
+          "source_config_ref": "baseline@1",
+          "created_at": "2026-10-25T11:51:25.426541+00:00"
+        }
+      ],
+      "runtime_override_ref": null,
+      "source_config_ref": "baseline@1"
+    }
+  ],
+  "automatic_optimization_intents": [
+    {
+      "schema_version": "ai-follow-up-intent-v1",
+      "kind": "optimize_company_analyst",
+      "parent_request_id": "comparison-case-fa6a3a948030495896a61821c2088ce3",
+      "tenant_id": "personalization-example",
+      "company_id": "instrument-port",
+      "context_version": 1,
+      "profile_fingerprint": "58030ce078a6e23509db45415caa29261c873c61fc0c24950d66c1ed1d8183ae",
+      "expected_config_revision": 1,
+      "idempotency_key": "76b93738269fda2564a7c2c3c860e15217fa8b89f63a1076ab6ffeaaa541b3e3",
+      "reason": "context_changed"
+    },
+    {
+      "schema_version": "ai-follow-up-intent-v1",
+      "kind": "optimize_company_analyst",
+      "parent_request_id": "comparison-case-1841e6b35aea477c9ff653c14359cdec",
+      "tenant_id": "personalization-example",
+      "company_id": "instrument-grid",
+      "context_version": 1,
+      "profile_fingerprint": "1cf2fdf790dbb020b576867cf06e30c65853b82bdd688fdc655440ff2b6a14b3",
+      "expected_config_revision": 1,
+      "idempotency_key": "d1b1bce8373d57b5364a50134c36623684c118df892c42a1c3337eaac726359f",
+      "reason": "context_changed"
+    },
+    {
+      "schema_version": "ai-follow-up-intent-v1",
+      "kind": "optimize_company_analyst",
+      "parent_request_id": "comparison-case-dcdc8478b8be49ab8925c9618fd07644",
+      "tenant_id": "personalization-example",
+      "company_id": "mixed-business",
+      "context_version": 1,
+      "profile_fingerprint": "a134ca4f2eaddc48c3b8fc520b32b3ec617a10cec9c657f20fc98d23991cecb7",
+      "expected_config_revision": 1,
+      "idempotency_key": "d6dc22910242fa59bd84161e7436edd3e496bb46838dd83b7363aa95d79efff0",
+      "reason": "context_changed"
+    }
+  ],
+  "results": [
+    {
+      "company_id": "instrument-port",
+      "event_key": "port",
+      "priority": 0.8,
+      "selection": {
+        "company_id": "instrument-port",
+        "status": "signal_found",
+        "score_type": "heuristic_priority",
+        "score": 0.8,
+        "reasons": [
+          "company_dependency_text_matches_event_term"
+        ],
+        "roots": [
+          "instrument port",
+          "мера север учебная компания"
+        ],
+        "matched_nodes": [
+          "Северный",
+          "Северный порт"
+        ],
+        "paths": [
+          {
+            "company_id": "instrument-port",
+            "event_id": "evt_2896a8f3c14c4017a184dfaeb97dfc94",
+            "event_revision": 1,
+            "target": "Северный",
+            "path": [
+              "instrument-port",
+              "Северный"
+            ],
+            "edge_ids": [
+              "dependency-1b68ea86dd23"
+            ],
+            "evidence_refs": [
+              "description:54:82",
+              "description:42:83"
+            ],
+            "statuses": [
+              "confirmed"
+            ],
+            "hop_count": 1,
+            "interpretation": "Textual company dependency matches an explicit event term; applicability needs review.",
+            "causal_claim": false
+          }
+        ],
+        "coverage": {
+          "package_id": "pkg_c508b425c7871f5438c23a1ddcbe8f41",
+          "package_source_count": 1,
+          "package_independent_origins": 1,
+          "package_limitations": [],
+          "event_term_count": 10,
+          "dependency_graph_edges": 0,
+          "active_declared_graph_edges": 0,
+          "active_relationship_edges": 0,
+          "invalid_graph_edges": 0,
+          "inactive_graph_edges": 0,
+          "payment_graph_edges_excluded": 0,
+          "company_dependencies": 1,
+          "active_company_dependencies": 1,
+          "confirmed_company_dependencies": 1,
+          "assumed_company_dependencies": 0,
+          "inactive_company_dependencies": 0,
+          "payment_company_dependencies_excluded": 0,
+          "company_facts": 1,
+          "company_activities": 1,
+          "company_assertions": 0,
+          "company_context_fingerprint": "18fb256cc258b83900c4ab674f4f352796ea858e4f5ccb65434f1be837f1e42f",
+          "matched_event_terms": 2,
+          "grounded_paths": 1,
+          "signal_basis": [
+            "company_dependency_text_matches_event_term"
+          ],
+          "as_of": "2026-10-25T10:00:00+00:00"
+        },
+        "uncertainty": [
+          "freshness_unknown:activities:activity-aaa2ab22fbe4",
+          "freshness_unknown:dependencies:dependency-1b68ea86dd23",
+          "freshness_unknown:facts:fact-6467342121d4",
+          "Follow-up: Действует ли направление деятельности «Компания производит промышленные датчики»?",
+          "Follow-up: Подтверждена ли сейчас зависимость «поставок через Северный порт»?",
+          "Follow-up: Актуально ли сейчас сведение «складской запас разъёмов на 4 дня; основной покупатель — машиностроительные заводы.»?"
+        ]
+      },
+      "actual_searches": [
+        {
+          "query": "Оператор сообщает: Северный порт временно приостановил приём контейнеров с разъёмами. Дата возобновления не указана.",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1"
+          ]
+        },
+        {
+          "query": "Северный порт временно остановил приём контейнеров",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Мера-Север (учебная компания) поставок через Северный порт складской запас разъёмов на 4 дня; основной покупатель — машиностроительные заводы. Компания производит промышленные датчики Северный порт временно остановил приём контейнеров поставок через Северный порт складской запас разъёмов на 4 дня; основной покупатель —",
+          "role": "bank",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Северный порт временно остановил приём контейнеров Северный порт временно остановил приём контейнеров",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Мера-Север (учебная компания) поставок через Северный порт складской запас разъёмов на 4 дня; основной покупатель — машиностроительные заводы. Компания производит промышленные датчики Северный порт временно остановил приём контейнеров поставок через Северный порт складской запас разъёмов на 4 дня; основной покупатель —",
+          "role": "bank",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        }
+      ],
+      "candidate": {
+        "schema_version": "candidate-assessment-v1",
+        "request_id": "ff000743d0c62164a2cb56b7a418f20ad21fbf615632daab32b32010e6dea76f",
+        "tenant_id": "personalization-example",
+        "company_id": "instrument-port",
+        "status": "partial",
+        "execution_mode": "baseline",
+        "summary": "Событие сопоставлено с указанной в профиле зависимостью: поставок через Северный порт. Масштаб влияния не установлен. В анкете указано: «складской запас разъёмов на 4 дня; основной покупатель — машиностроительные заводы.». Причинная оценка baseline не выполнялась.",
+        "claims": [
+          {
+            "claim_id": "event-evidence",
+            "kind": "external_fact",
+            "text": "Внешний материал описывает событие: Оператор сообщает: Северный порт временно приостановил приём контейнеров с разъёмами. Дата возобновления не указана.",
+            "evidence_refs": [
+              "ev_e93e00b426faf687a64a67412c8c943dc04b9ba7"
+            ],
+            "context_refs": [],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": null,
+            "horizon": null,
+            "confirmation_conditions": []
+          },
+          {
+            "claim_id": "bank-unknown",
+            "kind": "unknown",
+            "text": "Среди использованных материалов не подтверждена позиция банка по этому событию.",
+            "evidence_refs": [],
+            "context_refs": [],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": "bank",
+            "horizon": null,
+            "confirmation_conditions": []
+          },
+          {
+            "claim_id": "company-applicability",
+            "kind": "unknown",
+            "text": "Применимость требует проверки по зависимости профиля: поставок через Северный порт",
+            "evidence_refs": [],
+            "context_refs": [
+              "dependency-1b68ea86dd23"
+            ],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": null,
+            "horizon": null,
+            "confirmation_conditions": []
+          },
+          {
+            "claim_id": "declared-company-conditions",
+            "kind": "unknown",
+            "text": "Сведения анкеты для проверки применимости: складской запас разъёмов на 4 дня; основной покупатель — машиностроительные заводы.. Они не доказывают размер воздействия.",
+            "evidence_refs": [],
+            "context_refs": [
+              "fact-6467342121d4"
+            ],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": null,
+            "horizon": null,
+            "confirmation_conditions": []
+          }
+        ],
+        "evidence": [
+          {
+            "data_classification": "synthetic",
+            "author": "",
+            "event_time": null,
+            "received_at": "2026-10-25T10:00:00Z",
+            "raw_sha256": "d9a2c6493f26eed3e93b3fae4ae2e9b6ed6d845211cf0aede734f441deb7c60d",
+            "evidence_id": "ev_e93e00b426faf687a64a67412c8c943dc04b9ba7",
+            "document_id": "doc_aa4b8b893f06f65d927a5e8f8efa2209",
+            "document_revision_ref": "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "source_id": "comparison-source",
+            "source_role": "external",
+            "title": "Северный порт временно остановил приём контейнеров",
+            "canonical_uri": "https://comparison.example/port",
+            "published_at": "2026-10-25T09:00:00Z",
+            "fetched_at": "2026-10-25T10:00:00Z",
+            "locator": "chars:0-116",
+            "quote": "Оператор сообщает: Северный порт временно приостановил приём контейнеров с разъёмами. Дата возобновления не указана.",
+            "content_hash": "af8f531418db58b046db14efb800a1c4ab3b6508777b9a7e5549352651478e3c",
+            "synthetic": true,
+            "score": 0.8583333333333334
+          }
+        ],
+        "influence_chain": [],
+        "clarifications": [
+          "Какие заказы, договорные сроки и резервы могут изменить значимость этой зависимости: поставок через Северный порт?",
+          "Действует ли направление деятельности «Компания производит промышленные датчики»?",
+          "Подтверждена ли сейчас зависимость «поставок через Северный порт»?",
+          "Актуально ли сейчас сведение «складской запас разъёмов на 4 дня; основной покупатель — машиностроительные заводы.»?"
+        ],
+        "coverage": {
+          "external": 1,
+          "bank": 0,
+          "confirmed_dependencies": 1,
+          "company_facts": 1,
+          "limitations": [
+            "freshness_unknown:activities:activity-aaa2ab22fbe4",
+            "freshness_unknown:dependencies:dependency-1b68ea86dd23",
+            "freshness_unknown:facts:fact-6467342121d4",
+            "external_web_search_unavailable",
+            "independent_origin_count_unavailable",
+            "semantic_critic_not_run"
+          ],
+          "checked_at": "2026-10-25T11:51:25.368106Z",
+          "independent_origins": 1,
+          "origin_groups": 1,
+          "independence_status": "unknown"
+        },
+        "versions": {
+          "prompt": "analysis-v2",
+          "analyst_config": "company-2d32dddbf8fe79ab01672e39@1",
+          "pipeline": "bounded-pipeline-v2",
+          "model": null,
+          "context": 1,
+          "source_policy": 1,
+          "as_of": "2026-10-25T10:00:00Z",
+          "event_id": "evt_2896a8f3c14c4017a184dfaeb97dfc94",
+          "event_revision": 1,
+          "event_document_revision_ref": "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+          "synthetic": true
+        },
+        "usage": {
+          "model_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "accounting_basis": "reserved_estimate",
+          "attempts": [],
+          "errors": [],
+          "shared_package_ref": "pkg_c508b425c7871f5438c23a1ddcbe8f41",
+          "workflow": "research-analysis-critic-v1",
+          "reserved_tokens": 0,
+          "budget_overrun": false,
+          "research_missing_context": [],
+          "critic_review": {
+            "mode": "structural_only",
+            "decision": "not_evaluated",
+            "issues": [],
+            "clarifications": []
+          }
+        },
+        "trace": [
+          {
+            "stage": "workflow_started",
+            "workflow": "research-analysis-critic-v1"
+          },
+          {
+            "stage": "shared_package_loaded",
+            "package_id": "pkg_c508b425c7871f5438c23a1ddcbe8f41",
+            "revision": 1
+          },
+          {
+            "stage": "research_plan",
+            "planner": "deterministic",
+            "search_roles": [
+              "bank",
+              "external"
+            ],
+            "query_lengths": {
+              "external": 50,
+              "bank": 234
+            }
+          },
+          {
+            "stage": "plan",
+            "step": 1
+          },
+          {
+            "stage": "event_ingested",
+            "revision": "doc_aa4b8b893f06f65d927a5e8f8efa2209:1"
+          },
+          {
+            "stage": "plan_created",
+            "tools": [
+              "search_external",
+              "search_bank"
+            ],
+            "max_steps": 12,
+            "shared_package_ref": "pkg_c508b425c7871f5438c23a1ddcbe8f41"
+          },
+          {
+            "stage": "tool_search_external",
+            "step": 2
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "external",
+            "result_count": 2,
+            "evidence_ids": [
+              "ev_e93e00b426faf687a64a67412c8c943dc04b9ba7",
+              "ev_e93e00b426faf687a64a67412c8c943dc04b9ba7"
+            ]
+          },
+          {
+            "stage": "tool_search_bank",
+            "step": 3
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "bank",
+            "result_count": 0,
+            "evidence_ids": []
+          },
+          {
+            "stage": "check",
+            "step": 4
+          },
+          {
+            "stage": "check_result",
+            "external_evidence": true,
+            "bank_evidence": false,
+            "confirmed_company_context": true
+          },
+          {
+            "stage": "adapt",
+            "step": 5
+          },
+          {
+            "stage": "adapt_plan",
+            "reason": "missing_bank_material",
+            "strategy": "broaden_bank_context_query"
+          },
+          {
+            "stage": "tool_search_external",
+            "step": 6
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "external",
+            "result_count": 1,
+            "evidence_ids": [
+              "ev_e93e00b426faf687a64a67412c8c943dc04b9ba7"
+            ]
+          },
+          {
+            "stage": "tool_search_bank",
+            "step": 7
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "bank",
+            "result_count": 0,
+            "evidence_ids": []
+          },
+          {
+            "stage": "adapt_result",
+            "primary_count": 1,
+            "additional_count": 1,
+            "evidence_count": 1,
+            "external_evidence": 1,
+            "bank_evidence": 0
+          },
+          {
+            "stage": "baseline"
+          },
+          {
+            "stage": "baseline_personalization",
+            "priority": 0.8,
+            "priority_type": "heuristic_signal",
+            "context_refs": [
+              "dependency-1b68ea86dd23"
+            ],
+            "matched_terms": [
+              "Северный",
+              "Северный порт"
+            ],
+            "reasons": [
+              "company_dependency_text_matches_event_term"
+            ]
+          },
+          {
+            "stage": "analyst_handoff",
+            "status": "partial",
+            "evidence_count": 1,
+            "candidate_claim_count": 4
+          },
+          {
+            "stage": "critic_unavailable",
+            "reason": "role_or_budget_unavailable",
+            "structural_checks_completed": true
+          },
+          {
+            "stage": "dependency_paths",
+            "paths": []
+          }
+        ],
+        "created_at": "2026-10-25T11:51:25.368039Z",
+        "watch_conditions": [],
+        "changes": {
+          "status": "changed",
+          "publication_revision_required": true,
+          "reason": "first_assessment",
+          "changed_inputs": [
+            "event_id",
+            "event_semantics",
+            "context_projection",
+            "context_version",
+            "company_snapshot",
+            "analysis_context",
+            "dependency_graph",
+            "active_context_ids",
+            "active_fact_ids",
+            "policy",
+            "relevant_bank_refs",
+            "config_ref",
+            "config",
+            "execution_budget",
+            "model_selected",
+            "model",
+            "runtime",
+            "data_classification",
+            "knowledge_mode",
+            "workflow"
+          ],
+          "input_signature": "48b75b580cf61975b8e74f9942701d3ef0b61df41657bcc7e6ec0c1a05b6a6c3"
+        },
+        "shared_package_ref": "pkg_c508b425c7871f5438c23a1ddcbe8f41"
+      }
+    },
+    {
+      "company_id": "instrument-port",
+      "event_key": "power",
+      "priority": 0.0,
+      "selection": {
+        "company_id": "instrument-port",
+        "status": "no_signal_found",
+        "score_type": "heuristic_priority",
+        "score": 0.0,
+        "reasons": [
+          "no_explicit_context_match_found"
+        ],
+        "roots": [
+          "instrument port",
+          "мера север учебная компания"
+        ],
+        "matched_nodes": [],
+        "paths": [],
+        "coverage": {
+          "package_id": "pkg_e7a992086b1d4314225eec804f665fd8",
+          "package_source_count": 1,
+          "package_independent_origins": 1,
+          "package_limitations": [],
+          "event_term_count": 23,
+          "dependency_graph_edges": 0,
+          "active_declared_graph_edges": 0,
+          "active_relationship_edges": 0,
+          "invalid_graph_edges": 0,
+          "inactive_graph_edges": 0,
+          "payment_graph_edges_excluded": 0,
+          "company_dependencies": 1,
+          "active_company_dependencies": 1,
+          "confirmed_company_dependencies": 1,
+          "assumed_company_dependencies": 0,
+          "inactive_company_dependencies": 0,
+          "payment_company_dependencies_excluded": 0,
+          "company_facts": 1,
+          "company_activities": 1,
+          "company_assertions": 0,
+          "company_context_fingerprint": "18fb256cc258b83900c4ab674f4f352796ea858e4f5ccb65434f1be837f1e42f",
+          "matched_event_terms": 0,
+          "grounded_paths": 0,
+          "signal_basis": [
+            "no_explicit_context_match_found"
+          ],
+          "as_of": "2026-10-25T10:00:00+00:00"
+        },
+        "uncertainty": [
+          "No literal match was found in the supplied snapshot; this does not establish absence of impact.",
+          "freshness_unknown:activities:activity-aaa2ab22fbe4",
+          "freshness_unknown:dependencies:dependency-1b68ea86dd23",
+          "freshness_unknown:facts:fact-6467342121d4",
+          "Follow-up: Действует ли направление деятельности «Компания производит промышленные датчики»?",
+          "Follow-up: Подтверждена ли сейчас зависимость «поставок через Северный порт»?",
+          "Follow-up: Актуально ли сейчас сведение «складской запас разъёмов на 4 дня; основной покупатель — машиностроительные заводы.»?"
+        ]
+      },
+      "actual_searches": [
+        {
+          "query": "Сетевая компания сообщает: Восточная электроподстанция не подаст энергию промышленным потребителям в течение суток. Сведения о резервном питании потребителей отсутствуют.",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Восточная электроподстанция: план отключения",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Мера-Север (учебная компания) поставок через Северный порт складской запас разъёмов на 4 дня; основной покупатель — машиностроительные заводы. Компания производит промышленные датчики Восточная электроподстанция: план отключения поставок через Северный порт складской запас разъёмов на 4 дня; основной покупатель — машин",
+          "role": "bank",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Восточная электроподстанция: план отключения Восточная электроподстанция: план отключения",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Мера-Север (учебная компания) поставок через Северный порт складской запас разъёмов на 4 дня; основной покупатель — машиностроительные заводы. Компания производит промышленные датчики Восточная электроподстанция: план отключения поставок через Северный порт складской запас разъёмов на 4 дня; основной покупатель — машин",
+          "role": "bank",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        }
+      ],
+      "candidate": {
+        "schema_version": "candidate-assessment-v1",
+        "request_id": "3e2335c29e887566cb00790aad74cf9b8e8b0e86e81d2cfaad9ab801d603bc92",
+        "tenant_id": "personalization-example",
+        "company_id": "instrument-port",
+        "status": "partial",
+        "execution_mode": "baseline",
+        "summary": "В переданном профиле не найдена подтверждённая связь с событием. Это не доказывает отсутствия влияния. Причинная оценка baseline не выполнялась.",
+        "claims": [
+          {
+            "claim_id": "event-evidence",
+            "kind": "external_fact",
+            "text": "Внешний материал описывает событие: Сетевая компания сообщает: Восточная электроподстанция не подаст энергию промышленным потребителям в течение суток. Сведения о резервном питании потребителей отсутствуют.",
+            "evidence_refs": [
+              "ev_9710bd820d323429e9b131a32cd50d57d52ed5b6"
+            ],
+            "context_refs": [],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": null,
+            "horizon": null,
+            "confirmation_conditions": []
+          },
+          {
+            "claim_id": "bank-unknown",
+            "kind": "unknown",
+            "text": "Среди использованных материалов не подтверждена позиция банка по этому событию.",
+            "evidence_refs": [],
+            "context_refs": [],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": "bank",
+            "horizon": null,
+            "confirmation_conditions": []
+          }
+        ],
+        "evidence": [
+          {
+            "data_classification": "synthetic",
+            "author": "",
+            "event_time": null,
+            "received_at": "2026-10-25T10:00:00Z",
+            "raw_sha256": "d9a2c6493f26eed3e93b3fae4ae2e9b6ed6d845211cf0aede734f441deb7c60d",
+            "evidence_id": "ev_9710bd820d323429e9b131a32cd50d57d52ed5b6",
+            "document_id": "doc_ac3acc29333cdc67f35da1f5c7224593",
+            "document_revision_ref": "doc_ac3acc29333cdc67f35da1f5c7224593:1",
+            "source_id": "comparison-source",
+            "source_role": "external",
+            "title": "Восточная электроподстанция: план отключения",
+            "canonical_uri": "https://comparison.example/power",
+            "published_at": "2026-10-25T09:00:00Z",
+            "fetched_at": "2026-10-25T10:00:00Z",
+            "locator": "chars:0-170",
+            "quote": "Сетевая компания сообщает: Восточная электроподстанция не подаст энергию промышленным потребителям в течение суток. Сведения о резервном питании потребителей отсутствуют.",
+            "content_hash": "6daf1aa1268a0095050c59020721c8aa83c6cbac5b1dea3d5d58261822b92955",
+            "synthetic": true,
+            "score": 0.51
+          },
+          {
+            "data_classification": "synthetic",
+            "author": "",
+            "event_time": null,
+            "received_at": "2026-10-25T10:00:00Z",
+            "raw_sha256": "d9a2c6493f26eed3e93b3fae4ae2e9b6ed6d845211cf0aede734f441deb7c60d",
+            "evidence_id": "ev_dd0679fda2eb241413a51751b1df0209bcfcd365",
+            "document_id": "doc_440f98c883127ed7e6d8baa8b9bd6644",
+            "document_revision_ref": "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "source_id": "comparison-source",
+            "source_role": "external",
+            "title": "OrionCloud планирует ограничение интеграций API",
+            "canonical_uri": "https://comparison.example/cloud",
+            "published_at": "2026-10-25T09:00:00Z",
+            "fetched_at": "2026-10-25T10:00:00Z",
+            "locator": "chars:0-131",
+            "quote": "Поставщик OrionCloud опубликовал план ограничения интеграций API с 1 ноября. Точные условия перехода для клиентов пока не раскрыты.",
+            "content_hash": "4bfe8f4f66ef991585eed1807f5ed62852cf20ab01f7d55044aa57529bd0ea91",
+            "synthetic": true,
+            "score": 0.255
+          }
+        ],
+        "influence_chain": [],
+        "clarifications": [
+          "Есть ли неуказанный поставщик, ресурс, клиент или маршрут, связывающий компанию с этим событием?",
+          "Действует ли направление деятельности «Компания производит промышленные датчики»?",
+          "Подтверждена ли сейчас зависимость «поставок через Северный порт»?",
+          "Актуально ли сейчас сведение «складской запас разъёмов на 4 дня; основной покупатель — машиностроительные заводы.»?",
+          "Какая подтверждённая зависимость компании связана с этим событием? В переданном контексте такая связь не найдена."
+        ],
+        "coverage": {
+          "external": 2,
+          "bank": 0,
+          "confirmed_dependencies": 1,
+          "company_facts": 1,
+          "limitations": [
+            "freshness_unknown:activities:activity-aaa2ab22fbe4",
+            "freshness_unknown:dependencies:dependency-1b68ea86dd23",
+            "freshness_unknown:facts:fact-6467342121d4",
+            "external_web_search_unavailable",
+            "independent_origin_count_unavailable",
+            "semantic_critic_not_run",
+            "business_relevance_not_established"
+          ],
+          "checked_at": "2026-10-25T11:51:25.378730Z",
+          "independent_origins": 1,
+          "origin_groups": 1,
+          "independence_status": "unknown"
+        },
+        "versions": {
+          "prompt": "analysis-v2",
+          "analyst_config": "company-2d32dddbf8fe79ab01672e39@1",
+          "pipeline": "bounded-pipeline-v2",
+          "model": null,
+          "context": 1,
+          "source_policy": 1,
+          "as_of": "2026-10-25T10:00:00Z",
+          "event_id": "evt_8f2ea248bff440529b0fa9888ec3d59c",
+          "event_revision": 1,
+          "event_document_revision_ref": "doc_ac3acc29333cdc67f35da1f5c7224593:1",
+          "synthetic": true
+        },
+        "usage": {
+          "model_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "accounting_basis": "reserved_estimate",
+          "attempts": [],
+          "errors": [],
+          "shared_package_ref": "pkg_e7a992086b1d4314225eec804f665fd8",
+          "workflow": "research-analysis-critic-v1",
+          "reserved_tokens": 0,
+          "budget_overrun": false,
+          "research_missing_context": [],
+          "critic_review": {
+            "mode": "structural_only",
+            "decision": "not_evaluated",
+            "issues": [],
+            "clarifications": []
+          }
+        },
+        "trace": [
+          {
+            "stage": "workflow_started",
+            "workflow": "research-analysis-critic-v1"
+          },
+          {
+            "stage": "shared_package_loaded",
+            "package_id": "pkg_e7a992086b1d4314225eec804f665fd8",
+            "revision": 1
+          },
+          {
+            "stage": "research_plan",
+            "planner": "deterministic",
+            "search_roles": [
+              "bank",
+              "external"
+            ],
+            "query_lengths": {
+              "external": 44,
+              "bank": 228
+            }
+          },
+          {
+            "stage": "plan",
+            "step": 1
+          },
+          {
+            "stage": "event_ingested",
+            "revision": "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          },
+          {
+            "stage": "plan_created",
+            "tools": [
+              "search_external",
+              "search_bank"
+            ],
+            "max_steps": 12,
+            "shared_package_ref": "pkg_e7a992086b1d4314225eec804f665fd8"
+          },
+          {
+            "stage": "tool_search_external",
+            "step": 2
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "external",
+            "result_count": 3,
+            "evidence_ids": [
+              "ev_9710bd820d323429e9b131a32cd50d57d52ed5b6",
+              "ev_9710bd820d323429e9b131a32cd50d57d52ed5b6",
+              "ev_dd0679fda2eb241413a51751b1df0209bcfcd365"
+            ]
+          },
+          {
+            "stage": "tool_search_bank",
+            "step": 3
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "bank",
+            "result_count": 0,
+            "evidence_ids": []
+          },
+          {
+            "stage": "check",
+            "step": 4
+          },
+          {
+            "stage": "check_result",
+            "external_evidence": true,
+            "bank_evidence": false,
+            "confirmed_company_context": true
+          },
+          {
+            "stage": "adapt",
+            "step": 5
+          },
+          {
+            "stage": "adapt_plan",
+            "reason": "missing_bank_material",
+            "strategy": "broaden_bank_context_query"
+          },
+          {
+            "stage": "tool_search_external",
+            "step": 6
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "external",
+            "result_count": 2,
+            "evidence_ids": [
+              "ev_9710bd820d323429e9b131a32cd50d57d52ed5b6",
+              "ev_dd0679fda2eb241413a51751b1df0209bcfcd365"
+            ]
+          },
+          {
+            "stage": "tool_search_bank",
+            "step": 7
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "bank",
+            "result_count": 0,
+            "evidence_ids": []
+          },
+          {
+            "stage": "adapt_result",
+            "primary_count": 2,
+            "additional_count": 2,
+            "evidence_count": 2,
+            "external_evidence": 2,
+            "bank_evidence": 0
+          },
+          {
+            "stage": "baseline"
+          },
+          {
+            "stage": "baseline_personalization",
+            "priority": 0.0,
+            "priority_type": "heuristic_signal",
+            "context_refs": [],
+            "matched_terms": [],
+            "reasons": [
+              "no_explicit_context_match_found"
+            ]
+          },
+          {
+            "stage": "analyst_handoff",
+            "status": "partial",
+            "evidence_count": 2,
+            "candidate_claim_count": 2
+          },
+          {
+            "stage": "critic_unavailable",
+            "reason": "role_or_budget_unavailable",
+            "structural_checks_completed": true
+          },
+          {
+            "stage": "dependency_paths",
+            "paths": []
+          }
+        ],
+        "created_at": "2026-10-25T11:51:25.378678Z",
+        "watch_conditions": [],
+        "changes": {
+          "status": "changed",
+          "publication_revision_required": true,
+          "reason": "first_assessment",
+          "changed_inputs": [
+            "event_id",
+            "event_semantics",
+            "context_projection",
+            "context_version",
+            "company_snapshot",
+            "analysis_context",
+            "dependency_graph",
+            "active_context_ids",
+            "active_fact_ids",
+            "policy",
+            "relevant_bank_refs",
+            "config_ref",
+            "config",
+            "execution_budget",
+            "model_selected",
+            "model",
+            "runtime",
+            "data_classification",
+            "knowledge_mode",
+            "workflow"
+          ],
+          "input_signature": "e8dfbc74177325f59ef0bd7263163dd45f4bedb7b14d18b342044d9b0c3959b4"
+        },
+        "shared_package_ref": "pkg_e7a992086b1d4314225eec804f665fd8"
+      }
+    },
+    {
+      "company_id": "instrument-port",
+      "event_key": "cloud",
+      "priority": 0.0,
+      "selection": {
+        "company_id": "instrument-port",
+        "status": "no_signal_found",
+        "score_type": "heuristic_priority",
+        "score": 0.0,
+        "reasons": [
+          "no_explicit_context_match_found"
+        ],
+        "roots": [
+          "instrument port",
+          "мера север учебная компания"
+        ],
+        "matched_nodes": [],
+        "paths": [],
+        "coverage": {
+          "package_id": "pkg_6f57b9f1bbb1582d3a60f6d9066a927a",
+          "package_source_count": 1,
+          "package_independent_origins": 1,
+          "package_limitations": [],
+          "event_term_count": 25,
+          "dependency_graph_edges": 0,
+          "active_declared_graph_edges": 0,
+          "active_relationship_edges": 0,
+          "invalid_graph_edges": 0,
+          "inactive_graph_edges": 0,
+          "payment_graph_edges_excluded": 0,
+          "company_dependencies": 1,
+          "active_company_dependencies": 1,
+          "confirmed_company_dependencies": 1,
+          "assumed_company_dependencies": 0,
+          "inactive_company_dependencies": 0,
+          "payment_company_dependencies_excluded": 0,
+          "company_facts": 1,
+          "company_activities": 1,
+          "company_assertions": 0,
+          "company_context_fingerprint": "18fb256cc258b83900c4ab674f4f352796ea858e4f5ccb65434f1be837f1e42f",
+          "matched_event_terms": 0,
+          "grounded_paths": 0,
+          "signal_basis": [
+            "no_explicit_context_match_found"
+          ],
+          "as_of": "2026-10-25T10:00:00+00:00"
+        },
+        "uncertainty": [
+          "No literal match was found in the supplied snapshot; this does not establish absence of impact.",
+          "freshness_unknown:activities:activity-aaa2ab22fbe4",
+          "freshness_unknown:dependencies:dependency-1b68ea86dd23",
+          "freshness_unknown:facts:fact-6467342121d4",
+          "Follow-up: Действует ли направление деятельности «Компания производит промышленные датчики»?",
+          "Follow-up: Подтверждена ли сейчас зависимость «поставок через Северный порт»?",
+          "Follow-up: Актуально ли сейчас сведение «складской запас разъёмов на 4 дня; основной покупатель — машиностроительные заводы.»?"
+        ]
+      },
+      "actual_searches": [
+        {
+          "query": "Поставщик OrionCloud опубликовал план ограничения интеграций API с 1 ноября. Точные условия перехода для клиентов пока не раскрыты.",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1"
+          ]
+        },
+        {
+          "query": "OrionCloud планирует ограничение интеграций API",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Мера-Север (учебная компания) поставок через Северный порт складской запас разъёмов на 4 дня; основной покупатель — машиностроительные заводы. Компания производит промышленные датчики OrionCloud планирует ограничение интеграций API поставок через Северный порт складской запас разъёмов на 4 дня; основной покупатель — ма",
+          "role": "bank",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "OrionCloud планирует ограничение интеграций API OrionCloud планирует ограничение интеграций API",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Мера-Север (учебная компания) поставок через Северный порт складской запас разъёмов на 4 дня; основной покупатель — машиностроительные заводы. Компания производит промышленные датчики OrionCloud планирует ограничение интеграций API поставок через Северный порт складской запас разъёмов на 4 дня; основной покупатель — ма",
+          "role": "bank",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        }
+      ],
+      "candidate": {
+        "schema_version": "candidate-assessment-v1",
+        "request_id": "8896da2819fae6e13edf049e3b615282f6758a9ced2cdb84247ef9a2d43f7107",
+        "tenant_id": "personalization-example",
+        "company_id": "instrument-port",
+        "status": "partial",
+        "execution_mode": "baseline",
+        "summary": "В переданном профиле не найдена подтверждённая связь с событием. Это не доказывает отсутствия влияния. Причинная оценка baseline не выполнялась.",
+        "claims": [
+          {
+            "claim_id": "event-evidence",
+            "kind": "external_fact",
+            "text": "Внешний материал описывает событие: Поставщик OrionCloud опубликовал план ограничения интеграций API с 1 ноября. Точные условия перехода для клиентов пока не раскрыты.",
+            "evidence_refs": [
+              "ev_dd0679fda2eb241413a51751b1df0209bcfcd365"
+            ],
+            "context_refs": [],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": null,
+            "horizon": null,
+            "confirmation_conditions": []
+          },
+          {
+            "claim_id": "bank-unknown",
+            "kind": "unknown",
+            "text": "Среди использованных материалов не подтверждена позиция банка по этому событию.",
+            "evidence_refs": [],
+            "context_refs": [],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": "bank",
+            "horizon": null,
+            "confirmation_conditions": []
+          }
+        ],
+        "evidence": [
+          {
+            "data_classification": "synthetic",
+            "author": "",
+            "event_time": null,
+            "received_at": "2026-10-25T10:00:00Z",
+            "raw_sha256": "d9a2c6493f26eed3e93b3fae4ae2e9b6ed6d845211cf0aede734f441deb7c60d",
+            "evidence_id": "ev_dd0679fda2eb241413a51751b1df0209bcfcd365",
+            "document_id": "doc_440f98c883127ed7e6d8baa8b9bd6644",
+            "document_revision_ref": "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "source_id": "comparison-source",
+            "source_role": "external",
+            "title": "OrionCloud планирует ограничение интеграций API",
+            "canonical_uri": "https://comparison.example/cloud",
+            "published_at": "2026-10-25T09:00:00Z",
+            "fetched_at": "2026-10-25T10:00:00Z",
+            "locator": "chars:0-131",
+            "quote": "Поставщик OrionCloud опубликовал план ограничения интеграций API с 1 ноября. Точные условия перехода для клиентов пока не раскрыты.",
+            "content_hash": "4bfe8f4f66ef991585eed1807f5ed62852cf20ab01f7d55044aa57529bd0ea91",
+            "synthetic": true,
+            "score": 0.615
+          }
+        ],
+        "influence_chain": [],
+        "clarifications": [
+          "Есть ли неуказанный поставщик, ресурс, клиент или маршрут, связывающий компанию с этим событием?",
+          "Действует ли направление деятельности «Компания производит промышленные датчики»?",
+          "Подтверждена ли сейчас зависимость «поставок через Северный порт»?",
+          "Актуально ли сейчас сведение «складской запас разъёмов на 4 дня; основной покупатель — машиностроительные заводы.»?",
+          "Какая подтверждённая зависимость компании связана с этим событием? В переданном контексте такая связь не найдена."
+        ],
+        "coverage": {
+          "external": 1,
+          "bank": 0,
+          "confirmed_dependencies": 1,
+          "company_facts": 1,
+          "limitations": [
+            "freshness_unknown:activities:activity-aaa2ab22fbe4",
+            "freshness_unknown:dependencies:dependency-1b68ea86dd23",
+            "freshness_unknown:facts:fact-6467342121d4",
+            "external_web_search_unavailable",
+            "independent_origin_count_unavailable",
+            "semantic_critic_not_run",
+            "business_relevance_not_established"
+          ],
+          "checked_at": "2026-10-25T11:51:25.389362Z",
+          "independent_origins": 1,
+          "origin_groups": 1,
+          "independence_status": "unknown"
+        },
+        "versions": {
+          "prompt": "analysis-v2",
+          "analyst_config": "company-2d32dddbf8fe79ab01672e39@1",
+          "pipeline": "bounded-pipeline-v2",
+          "model": null,
+          "context": 1,
+          "source_policy": 1,
+          "as_of": "2026-10-25T10:00:00Z",
+          "event_id": "evt_a27033aa58da4f7898340595131d4821",
+          "event_revision": 1,
+          "event_document_revision_ref": "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+          "synthetic": true
+        },
+        "usage": {
+          "model_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "accounting_basis": "reserved_estimate",
+          "attempts": [],
+          "errors": [],
+          "shared_package_ref": "pkg_6f57b9f1bbb1582d3a60f6d9066a927a",
+          "workflow": "research-analysis-critic-v1",
+          "reserved_tokens": 0,
+          "budget_overrun": false,
+          "research_missing_context": [],
+          "critic_review": {
+            "mode": "structural_only",
+            "decision": "not_evaluated",
+            "issues": [],
+            "clarifications": []
+          }
+        },
+        "trace": [
+          {
+            "stage": "workflow_started",
+            "workflow": "research-analysis-critic-v1"
+          },
+          {
+            "stage": "shared_package_loaded",
+            "package_id": "pkg_6f57b9f1bbb1582d3a60f6d9066a927a",
+            "revision": 1
+          },
+          {
+            "stage": "research_plan",
+            "planner": "deterministic",
+            "search_roles": [
+              "bank",
+              "external"
+            ],
+            "query_lengths": {
+              "external": 47,
+              "bank": 231
+            }
+          },
+          {
+            "stage": "plan",
+            "step": 1
+          },
+          {
+            "stage": "event_ingested",
+            "revision": "doc_440f98c883127ed7e6d8baa8b9bd6644:1"
+          },
+          {
+            "stage": "plan_created",
+            "tools": [
+              "search_external",
+              "search_bank"
+            ],
+            "max_steps": 12,
+            "shared_package_ref": "pkg_6f57b9f1bbb1582d3a60f6d9066a927a"
+          },
+          {
+            "stage": "tool_search_external",
+            "step": 2
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "external",
+            "result_count": 2,
+            "evidence_ids": [
+              "ev_dd0679fda2eb241413a51751b1df0209bcfcd365",
+              "ev_dd0679fda2eb241413a51751b1df0209bcfcd365"
+            ]
+          },
+          {
+            "stage": "tool_search_bank",
+            "step": 3
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "bank",
+            "result_count": 0,
+            "evidence_ids": []
+          },
+          {
+            "stage": "check",
+            "step": 4
+          },
+          {
+            "stage": "check_result",
+            "external_evidence": true,
+            "bank_evidence": false,
+            "confirmed_company_context": true
+          },
+          {
+            "stage": "adapt",
+            "step": 5
+          },
+          {
+            "stage": "adapt_plan",
+            "reason": "missing_bank_material",
+            "strategy": "broaden_bank_context_query"
+          },
+          {
+            "stage": "tool_search_external",
+            "step": 6
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "external",
+            "result_count": 1,
+            "evidence_ids": [
+              "ev_dd0679fda2eb241413a51751b1df0209bcfcd365"
+            ]
+          },
+          {
+            "stage": "tool_search_bank",
+            "step": 7
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "bank",
+            "result_count": 0,
+            "evidence_ids": []
+          },
+          {
+            "stage": "adapt_result",
+            "primary_count": 1,
+            "additional_count": 1,
+            "evidence_count": 1,
+            "external_evidence": 1,
+            "bank_evidence": 0
+          },
+          {
+            "stage": "baseline"
+          },
+          {
+            "stage": "baseline_personalization",
+            "priority": 0.0,
+            "priority_type": "heuristic_signal",
+            "context_refs": [],
+            "matched_terms": [],
+            "reasons": [
+              "no_explicit_context_match_found"
+            ]
+          },
+          {
+            "stage": "analyst_handoff",
+            "status": "partial",
+            "evidence_count": 1,
+            "candidate_claim_count": 2
+          },
+          {
+            "stage": "critic_unavailable",
+            "reason": "role_or_budget_unavailable",
+            "structural_checks_completed": true
+          },
+          {
+            "stage": "dependency_paths",
+            "paths": []
+          }
+        ],
+        "created_at": "2026-10-25T11:51:25.389325Z",
+        "watch_conditions": [],
+        "changes": {
+          "status": "changed",
+          "publication_revision_required": true,
+          "reason": "first_assessment",
+          "changed_inputs": [
+            "event_id",
+            "event_semantics",
+            "context_projection",
+            "context_version",
+            "company_snapshot",
+            "analysis_context",
+            "dependency_graph",
+            "active_context_ids",
+            "active_fact_ids",
+            "policy",
+            "relevant_bank_refs",
+            "config_ref",
+            "config",
+            "execution_budget",
+            "model_selected",
+            "model",
+            "runtime",
+            "data_classification",
+            "knowledge_mode",
+            "workflow"
+          ],
+          "input_signature": "be44005faae81df2f63ace19c5965e79235f79dd80ef9515973bd04d5dfab9c2"
+        },
+        "shared_package_ref": "pkg_6f57b9f1bbb1582d3a60f6d9066a927a"
+      }
+    },
+    {
+      "company_id": "instrument-grid",
+      "event_key": "port",
+      "priority": 0.0,
+      "selection": {
+        "company_id": "instrument-grid",
+        "status": "no_signal_found",
+        "score_type": "heuristic_priority",
+        "score": 0.0,
+        "reasons": [
+          "no_explicit_context_match_found"
+        ],
+        "roots": [
+          "instrument grid",
+          "мера восток учебная компания"
+        ],
+        "matched_nodes": [],
+        "paths": [],
+        "coverage": {
+          "package_id": "pkg_c508b425c7871f5438c23a1ddcbe8f41",
+          "package_source_count": 1,
+          "package_independent_origins": 1,
+          "package_limitations": [],
+          "event_term_count": 10,
+          "dependency_graph_edges": 0,
+          "active_declared_graph_edges": 0,
+          "active_relationship_edges": 0,
+          "invalid_graph_edges": 0,
+          "inactive_graph_edges": 0,
+          "payment_graph_edges_excluded": 0,
+          "company_dependencies": 1,
+          "active_company_dependencies": 1,
+          "confirmed_company_dependencies": 1,
+          "assumed_company_dependencies": 0,
+          "inactive_company_dependencies": 0,
+          "payment_company_dependencies_excluded": 0,
+          "company_facts": 1,
+          "company_activities": 1,
+          "company_assertions": 0,
+          "company_context_fingerprint": "740efd5f00621d31b2789f6ea373a6ece21e92608affcf72cbca8d3160d61d80",
+          "matched_event_terms": 0,
+          "grounded_paths": 0,
+          "signal_basis": [
+            "no_explicit_context_match_found"
+          ],
+          "as_of": "2026-10-25T10:00:00+00:00"
+        },
+        "uncertainty": [
+          "No literal match was found in the supplied snapshot; this does not establish absence of impact.",
+          "freshness_unknown:activities:activity-aaa2ab22fbe4",
+          "freshness_unknown:dependencies:dependency-947e333b6c0e",
+          "freshness_unknown:facts:fact-5bf70bb07c17",
+          "Follow-up: Действует ли направление деятельности «Компания производит промышленные датчики»?",
+          "Follow-up: Подтверждена ли сейчас зависимость «работы Восточной электроподстанции»?",
+          "Follow-up: Актуально ли сейчас сведение «сырьё приобретается у местных поставщиков; резервного электропитания нет.»?"
+        ]
+      },
+      "actual_searches": [
+        {
+          "query": "Оператор сообщает: Северный порт временно приостановил приём контейнеров с разъёмами. Дата возобновления не указана.",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1"
+          ]
+        },
+        {
+          "query": "Северный порт временно остановил приём контейнеров",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Мера-Восток (учебная компания) работы Восточной электроподстанции сырьё приобретается у местных поставщиков; резервного электропитания нет. Компания производит промышленные датчики Северный порт временно остановил приём контейнеров работы Восточной электроподстанции сырьё приобретается у местных поставщиков; резервного",
+          "role": "bank",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Северный порт временно остановил приём контейнеров Северный порт временно остановил приём контейнеров",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Мера-Восток (учебная компания) работы Восточной электроподстанции сырьё приобретается у местных поставщиков; резервного электропитания нет. Компания производит промышленные датчики Северный порт временно остановил приём контейнеров работы Восточной электроподстанции сырьё приобретается у местных поставщиков; резервного",
+          "role": "bank",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        }
+      ],
+      "candidate": {
+        "schema_version": "candidate-assessment-v1",
+        "request_id": "1576bbb4a5b61e632017e6d60aad4a7644c7fb9d6868e5fdd94e0b4d093af1aa",
+        "tenant_id": "personalization-example",
+        "company_id": "instrument-grid",
+        "status": "partial",
+        "execution_mode": "baseline",
+        "summary": "В переданном профиле не найдена подтверждённая связь с событием. Это не доказывает отсутствия влияния. Причинная оценка baseline не выполнялась.",
+        "claims": [
+          {
+            "claim_id": "event-evidence",
+            "kind": "external_fact",
+            "text": "Внешний материал описывает событие: Оператор сообщает: Северный порт временно приостановил приём контейнеров с разъёмами. Дата возобновления не указана.",
+            "evidence_refs": [
+              "ev_e93e00b426faf687a64a67412c8c943dc04b9ba7"
+            ],
+            "context_refs": [],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": null,
+            "horizon": null,
+            "confirmation_conditions": []
+          },
+          {
+            "claim_id": "bank-unknown",
+            "kind": "unknown",
+            "text": "Среди использованных материалов не подтверждена позиция банка по этому событию.",
+            "evidence_refs": [],
+            "context_refs": [],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": "bank",
+            "horizon": null,
+            "confirmation_conditions": []
+          }
+        ],
+        "evidence": [
+          {
+            "data_classification": "synthetic",
+            "author": "",
+            "event_time": null,
+            "received_at": "2026-10-25T10:00:00Z",
+            "raw_sha256": "d9a2c6493f26eed3e93b3fae4ae2e9b6ed6d845211cf0aede734f441deb7c60d",
+            "evidence_id": "ev_e93e00b426faf687a64a67412c8c943dc04b9ba7",
+            "document_id": "doc_aa4b8b893f06f65d927a5e8f8efa2209",
+            "document_revision_ref": "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "source_id": "comparison-source",
+            "source_role": "external",
+            "title": "Северный порт временно остановил приём контейнеров",
+            "canonical_uri": "https://comparison.example/port",
+            "published_at": "2026-10-25T09:00:00Z",
+            "fetched_at": "2026-10-25T10:00:00Z",
+            "locator": "chars:0-116",
+            "quote": "Оператор сообщает: Северный порт временно приостановил приём контейнеров с разъёмами. Дата возобновления не указана.",
+            "content_hash": "af8f531418db58b046db14efb800a1c4ab3b6508777b9a7e5549352651478e3c",
+            "synthetic": true,
+            "score": 0.8583333333333334
+          }
+        ],
+        "influence_chain": [],
+        "clarifications": [
+          "Есть ли неуказанный поставщик, ресурс, клиент или маршрут, связывающий компанию с этим событием?",
+          "Действует ли направление деятельности «Компания производит промышленные датчики»?",
+          "Подтверждена ли сейчас зависимость «работы Восточной электроподстанции»?",
+          "Актуально ли сейчас сведение «сырьё приобретается у местных поставщиков; резервного электропитания нет.»?",
+          "Какая подтверждённая зависимость компании связана с этим событием? В переданном контексте такая связь не найдена."
+        ],
+        "coverage": {
+          "external": 1,
+          "bank": 0,
+          "confirmed_dependencies": 1,
+          "company_facts": 1,
+          "limitations": [
+            "freshness_unknown:activities:activity-aaa2ab22fbe4",
+            "freshness_unknown:dependencies:dependency-947e333b6c0e",
+            "freshness_unknown:facts:fact-5bf70bb07c17",
+            "external_web_search_unavailable",
+            "independent_origin_count_unavailable",
+            "semantic_critic_not_run",
+            "business_relevance_not_established"
+          ],
+          "checked_at": "2026-10-25T11:51:25.399959Z",
+          "independent_origins": 1,
+          "origin_groups": 1,
+          "independence_status": "unknown"
+        },
+        "versions": {
+          "prompt": "analysis-v2",
+          "analyst_config": "company-d3234575641132a2650bea95@1",
+          "pipeline": "bounded-pipeline-v2",
+          "model": null,
+          "context": 1,
+          "source_policy": 1,
+          "as_of": "2026-10-25T10:00:00Z",
+          "event_id": "evt_2896a8f3c14c4017a184dfaeb97dfc94",
+          "event_revision": 1,
+          "event_document_revision_ref": "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+          "synthetic": true
+        },
+        "usage": {
+          "model_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "accounting_basis": "reserved_estimate",
+          "attempts": [],
+          "errors": [],
+          "shared_package_ref": "pkg_c508b425c7871f5438c23a1ddcbe8f41",
+          "workflow": "research-analysis-critic-v1",
+          "reserved_tokens": 0,
+          "budget_overrun": false,
+          "research_missing_context": [],
+          "critic_review": {
+            "mode": "structural_only",
+            "decision": "not_evaluated",
+            "issues": [],
+            "clarifications": []
+          }
+        },
+        "trace": [
+          {
+            "stage": "workflow_started",
+            "workflow": "research-analysis-critic-v1"
+          },
+          {
+            "stage": "shared_package_loaded",
+            "package_id": "pkg_c508b425c7871f5438c23a1ddcbe8f41",
+            "revision": 1
+          },
+          {
+            "stage": "research_plan",
+            "planner": "deterministic",
+            "search_roles": [
+              "bank",
+              "external"
+            ],
+            "query_lengths": {
+              "external": 50,
+              "bank": 231
+            }
+          },
+          {
+            "stage": "plan",
+            "step": 1
+          },
+          {
+            "stage": "event_ingested",
+            "revision": "doc_aa4b8b893f06f65d927a5e8f8efa2209:1"
+          },
+          {
+            "stage": "plan_created",
+            "tools": [
+              "search_external",
+              "search_bank"
+            ],
+            "max_steps": 12,
+            "shared_package_ref": "pkg_c508b425c7871f5438c23a1ddcbe8f41"
+          },
+          {
+            "stage": "tool_search_external",
+            "step": 2
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "external",
+            "result_count": 2,
+            "evidence_ids": [
+              "ev_e93e00b426faf687a64a67412c8c943dc04b9ba7",
+              "ev_e93e00b426faf687a64a67412c8c943dc04b9ba7"
+            ]
+          },
+          {
+            "stage": "tool_search_bank",
+            "step": 3
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "bank",
+            "result_count": 0,
+            "evidence_ids": []
+          },
+          {
+            "stage": "check",
+            "step": 4
+          },
+          {
+            "stage": "check_result",
+            "external_evidence": true,
+            "bank_evidence": false,
+            "confirmed_company_context": true
+          },
+          {
+            "stage": "adapt",
+            "step": 5
+          },
+          {
+            "stage": "adapt_plan",
+            "reason": "missing_bank_material",
+            "strategy": "broaden_bank_context_query"
+          },
+          {
+            "stage": "tool_search_external",
+            "step": 6
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "external",
+            "result_count": 1,
+            "evidence_ids": [
+              "ev_e93e00b426faf687a64a67412c8c943dc04b9ba7"
+            ]
+          },
+          {
+            "stage": "tool_search_bank",
+            "step": 7
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "bank",
+            "result_count": 0,
+            "evidence_ids": []
+          },
+          {
+            "stage": "adapt_result",
+            "primary_count": 1,
+            "additional_count": 1,
+            "evidence_count": 1,
+            "external_evidence": 1,
+            "bank_evidence": 0
+          },
+          {
+            "stage": "baseline"
+          },
+          {
+            "stage": "baseline_personalization",
+            "priority": 0.0,
+            "priority_type": "heuristic_signal",
+            "context_refs": [],
+            "matched_terms": [],
+            "reasons": [
+              "no_explicit_context_match_found"
+            ]
+          },
+          {
+            "stage": "analyst_handoff",
+            "status": "partial",
+            "evidence_count": 1,
+            "candidate_claim_count": 2
+          },
+          {
+            "stage": "critic_unavailable",
+            "reason": "role_or_budget_unavailable",
+            "structural_checks_completed": true
+          },
+          {
+            "stage": "dependency_paths",
+            "paths": []
+          }
+        ],
+        "created_at": "2026-10-25T11:51:25.399912Z",
+        "watch_conditions": [],
+        "changes": {
+          "status": "changed",
+          "publication_revision_required": true,
+          "reason": "first_assessment",
+          "changed_inputs": [
+            "event_id",
+            "event_semantics",
+            "context_projection",
+            "context_version",
+            "company_snapshot",
+            "analysis_context",
+            "dependency_graph",
+            "active_context_ids",
+            "active_fact_ids",
+            "policy",
+            "relevant_bank_refs",
+            "config_ref",
+            "config",
+            "execution_budget",
+            "model_selected",
+            "model",
+            "runtime",
+            "data_classification",
+            "knowledge_mode",
+            "workflow"
+          ],
+          "input_signature": "912724cb14d2023994b56166faa78937db81aefbd1f82e211d72664efabc2b31"
+        },
+        "shared_package_ref": "pkg_c508b425c7871f5438c23a1ddcbe8f41"
+      }
+    },
+    {
+      "company_id": "instrument-grid",
+      "event_key": "power",
+      "priority": 0.8,
+      "selection": {
+        "company_id": "instrument-grid",
+        "status": "signal_found",
+        "score_type": "heuristic_priority",
+        "score": 0.8,
+        "reasons": [
+          "company_dependency_text_matches_event_term"
+        ],
+        "roots": [
+          "instrument grid",
+          "мера восток учебная компания"
+        ],
+        "matched_nodes": [
+          "Восточная",
+          "Восточная электроподстанция"
+        ],
+        "paths": [
+          {
+            "company_id": "instrument-grid",
+            "event_id": "evt_8f2ea248bff440529b0fa9888ec3d59c",
+            "event_revision": 1,
+            "target": "Восточная",
+            "path": [
+              "instrument-grid",
+              "Восточная"
+            ],
+            "edge_ids": [
+              "dependency-947e333b6c0e"
+            ],
+            "evidence_refs": [
+              "description:54:88",
+              "description:42:89"
+            ],
+            "statuses": [
+              "confirmed"
+            ],
+            "hop_count": 1,
+            "interpretation": "Textual company dependency matches an explicit event term; applicability needs review.",
+            "causal_claim": false
+          }
+        ],
+        "coverage": {
+          "package_id": "pkg_e7a992086b1d4314225eec804f665fd8",
+          "package_source_count": 1,
+          "package_independent_origins": 1,
+          "package_limitations": [],
+          "event_term_count": 23,
+          "dependency_graph_edges": 0,
+          "active_declared_graph_edges": 0,
+          "active_relationship_edges": 0,
+          "invalid_graph_edges": 0,
+          "inactive_graph_edges": 0,
+          "payment_graph_edges_excluded": 0,
+          "company_dependencies": 1,
+          "active_company_dependencies": 1,
+          "confirmed_company_dependencies": 1,
+          "assumed_company_dependencies": 0,
+          "inactive_company_dependencies": 0,
+          "payment_company_dependencies_excluded": 0,
+          "company_facts": 1,
+          "company_activities": 1,
+          "company_assertions": 0,
+          "company_context_fingerprint": "740efd5f00621d31b2789f6ea373a6ece21e92608affcf72cbca8d3160d61d80",
+          "matched_event_terms": 2,
+          "grounded_paths": 1,
+          "signal_basis": [
+            "company_dependency_text_matches_event_term"
+          ],
+          "as_of": "2026-10-25T10:00:00+00:00"
+        },
+        "uncertainty": [
+          "freshness_unknown:activities:activity-aaa2ab22fbe4",
+          "freshness_unknown:dependencies:dependency-947e333b6c0e",
+          "freshness_unknown:facts:fact-5bf70bb07c17",
+          "Follow-up: Действует ли направление деятельности «Компания производит промышленные датчики»?",
+          "Follow-up: Подтверждена ли сейчас зависимость «работы Восточной электроподстанции»?",
+          "Follow-up: Актуально ли сейчас сведение «сырьё приобретается у местных поставщиков; резервного электропитания нет.»?"
+        ]
+      },
+      "actual_searches": [
+        {
+          "query": "Сетевая компания сообщает: Восточная электроподстанция не подаст энергию промышленным потребителям в течение суток. Сведения о резервном питании потребителей отсутствуют.",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Восточная электроподстанция: план отключения",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Мера-Восток (учебная компания) работы Восточной электроподстанции сырьё приобретается у местных поставщиков; резервного электропитания нет. Компания производит промышленные датчики Восточная электроподстанция: план отключения работы Восточной электроподстанции сырьё приобретается у местных поставщиков; резервного элект",
+          "role": "bank",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Восточная электроподстанция: план отключения Восточная электроподстанция: план отключения",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Мера-Восток (учебная компания) работы Восточной электроподстанции сырьё приобретается у местных поставщиков; резервного электропитания нет. Компания производит промышленные датчики Восточная электроподстанция: план отключения работы Восточной электроподстанции сырьё приобретается у местных поставщиков; резервного элект",
+          "role": "bank",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        }
+      ],
+      "candidate": {
+        "schema_version": "candidate-assessment-v1",
+        "request_id": "ab5f1d0dbed10a0dc3d7eb834ac1ae7ea07d9fd8c0d6fb1103d80f5caeeb5354",
+        "tenant_id": "personalization-example",
+        "company_id": "instrument-grid",
+        "status": "partial",
+        "execution_mode": "baseline",
+        "summary": "Событие сопоставлено с указанной в профиле зависимостью: работы Восточной электроподстанции. Масштаб влияния не установлен. В анкете указано: «сырьё приобретается у местных поставщиков; резервного электропитания нет.». Причинная оценка baseline не выполнялась.",
+        "claims": [
+          {
+            "claim_id": "event-evidence",
+            "kind": "external_fact",
+            "text": "Внешний материал описывает событие: Сетевая компания сообщает: Восточная электроподстанция не подаст энергию промышленным потребителям в течение суток. Сведения о резервном питании потребителей отсутствуют.",
+            "evidence_refs": [
+              "ev_9710bd820d323429e9b131a32cd50d57d52ed5b6"
+            ],
+            "context_refs": [],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": null,
+            "horizon": null,
+            "confirmation_conditions": []
+          },
+          {
+            "claim_id": "bank-unknown",
+            "kind": "unknown",
+            "text": "Среди использованных материалов не подтверждена позиция банка по этому событию.",
+            "evidence_refs": [],
+            "context_refs": [],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": "bank",
+            "horizon": null,
+            "confirmation_conditions": []
+          },
+          {
+            "claim_id": "company-applicability",
+            "kind": "unknown",
+            "text": "Применимость требует проверки по зависимости профиля: работы Восточной электроподстанции",
+            "evidence_refs": [],
+            "context_refs": [
+              "dependency-947e333b6c0e"
+            ],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": null,
+            "horizon": null,
+            "confirmation_conditions": []
+          },
+          {
+            "claim_id": "declared-company-conditions",
+            "kind": "unknown",
+            "text": "Сведения анкеты для проверки применимости: сырьё приобретается у местных поставщиков; резервного электропитания нет.. Они не доказывают размер воздействия.",
+            "evidence_refs": [],
+            "context_refs": [
+              "fact-5bf70bb07c17"
+            ],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": null,
+            "horizon": null,
+            "confirmation_conditions": []
+          }
+        ],
+        "evidence": [
+          {
+            "data_classification": "synthetic",
+            "author": "",
+            "event_time": null,
+            "received_at": "2026-10-25T10:00:00Z",
+            "raw_sha256": "d9a2c6493f26eed3e93b3fae4ae2e9b6ed6d845211cf0aede734f441deb7c60d",
+            "evidence_id": "ev_9710bd820d323429e9b131a32cd50d57d52ed5b6",
+            "document_id": "doc_ac3acc29333cdc67f35da1f5c7224593",
+            "document_revision_ref": "doc_ac3acc29333cdc67f35da1f5c7224593:1",
+            "source_id": "comparison-source",
+            "source_role": "external",
+            "title": "Восточная электроподстанция: план отключения",
+            "canonical_uri": "https://comparison.example/power",
+            "published_at": "2026-10-25T09:00:00Z",
+            "fetched_at": "2026-10-25T10:00:00Z",
+            "locator": "chars:0-170",
+            "quote": "Сетевая компания сообщает: Восточная электроподстанция не подаст энергию промышленным потребителям в течение суток. Сведения о резервном питании потребителей отсутствуют.",
+            "content_hash": "6daf1aa1268a0095050c59020721c8aa83c6cbac5b1dea3d5d58261822b92955",
+            "synthetic": true,
+            "score": 0.51
+          },
+          {
+            "data_classification": "synthetic",
+            "author": "",
+            "event_time": null,
+            "received_at": "2026-10-25T10:00:00Z",
+            "raw_sha256": "d9a2c6493f26eed3e93b3fae4ae2e9b6ed6d845211cf0aede734f441deb7c60d",
+            "evidence_id": "ev_dd0679fda2eb241413a51751b1df0209bcfcd365",
+            "document_id": "doc_440f98c883127ed7e6d8baa8b9bd6644",
+            "document_revision_ref": "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "source_id": "comparison-source",
+            "source_role": "external",
+            "title": "OrionCloud планирует ограничение интеграций API",
+            "canonical_uri": "https://comparison.example/cloud",
+            "published_at": "2026-10-25T09:00:00Z",
+            "fetched_at": "2026-10-25T10:00:00Z",
+            "locator": "chars:0-131",
+            "quote": "Поставщик OrionCloud опубликовал план ограничения интеграций API с 1 ноября. Точные условия перехода для клиентов пока не раскрыты.",
+            "content_hash": "4bfe8f4f66ef991585eed1807f5ed62852cf20ab01f7d55044aa57529bd0ea91",
+            "synthetic": true,
+            "score": 0.255
+          }
+        ],
+        "influence_chain": [],
+        "clarifications": [
+          "Какие заказы, договорные сроки и резервы могут изменить значимость этой зависимости: работы Восточной электроподстанции?",
+          "Действует ли направление деятельности «Компания производит промышленные датчики»?",
+          "Подтверждена ли сейчас зависимость «работы Восточной электроподстанции»?",
+          "Актуально ли сейчас сведение «сырьё приобретается у местных поставщиков; резервного электропитания нет.»?"
+        ],
+        "coverage": {
+          "external": 2,
+          "bank": 0,
+          "confirmed_dependencies": 1,
+          "company_facts": 1,
+          "limitations": [
+            "freshness_unknown:activities:activity-aaa2ab22fbe4",
+            "freshness_unknown:dependencies:dependency-947e333b6c0e",
+            "freshness_unknown:facts:fact-5bf70bb07c17",
+            "external_web_search_unavailable",
+            "independent_origin_count_unavailable",
+            "semantic_critic_not_run"
+          ],
+          "checked_at": "2026-10-25T11:51:25.410232Z",
+          "independent_origins": 1,
+          "origin_groups": 1,
+          "independence_status": "unknown"
+        },
+        "versions": {
+          "prompt": "analysis-v2",
+          "analyst_config": "company-d3234575641132a2650bea95@1",
+          "pipeline": "bounded-pipeline-v2",
+          "model": null,
+          "context": 1,
+          "source_policy": 1,
+          "as_of": "2026-10-25T10:00:00Z",
+          "event_id": "evt_8f2ea248bff440529b0fa9888ec3d59c",
+          "event_revision": 1,
+          "event_document_revision_ref": "doc_ac3acc29333cdc67f35da1f5c7224593:1",
+          "synthetic": true
+        },
+        "usage": {
+          "model_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "accounting_basis": "reserved_estimate",
+          "attempts": [],
+          "errors": [],
+          "shared_package_ref": "pkg_e7a992086b1d4314225eec804f665fd8",
+          "workflow": "research-analysis-critic-v1",
+          "reserved_tokens": 0,
+          "budget_overrun": false,
+          "research_missing_context": [],
+          "critic_review": {
+            "mode": "structural_only",
+            "decision": "not_evaluated",
+            "issues": [],
+            "clarifications": []
+          }
+        },
+        "trace": [
+          {
+            "stage": "workflow_started",
+            "workflow": "research-analysis-critic-v1"
+          },
+          {
+            "stage": "shared_package_loaded",
+            "package_id": "pkg_e7a992086b1d4314225eec804f665fd8",
+            "revision": 1
+          },
+          {
+            "stage": "research_plan",
+            "planner": "deterministic",
+            "search_roles": [
+              "bank",
+              "external"
+            ],
+            "query_lengths": {
+              "external": 44,
+              "bank": 225
+            }
+          },
+          {
+            "stage": "plan",
+            "step": 1
+          },
+          {
+            "stage": "event_ingested",
+            "revision": "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          },
+          {
+            "stage": "plan_created",
+            "tools": [
+              "search_external",
+              "search_bank"
+            ],
+            "max_steps": 12,
+            "shared_package_ref": "pkg_e7a992086b1d4314225eec804f665fd8"
+          },
+          {
+            "stage": "tool_search_external",
+            "step": 2
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "external",
+            "result_count": 3,
+            "evidence_ids": [
+              "ev_9710bd820d323429e9b131a32cd50d57d52ed5b6",
+              "ev_9710bd820d323429e9b131a32cd50d57d52ed5b6",
+              "ev_dd0679fda2eb241413a51751b1df0209bcfcd365"
+            ]
+          },
+          {
+            "stage": "tool_search_bank",
+            "step": 3
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "bank",
+            "result_count": 0,
+            "evidence_ids": []
+          },
+          {
+            "stage": "check",
+            "step": 4
+          },
+          {
+            "stage": "check_result",
+            "external_evidence": true,
+            "bank_evidence": false,
+            "confirmed_company_context": true
+          },
+          {
+            "stage": "adapt",
+            "step": 5
+          },
+          {
+            "stage": "adapt_plan",
+            "reason": "missing_bank_material",
+            "strategy": "broaden_bank_context_query"
+          },
+          {
+            "stage": "tool_search_external",
+            "step": 6
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "external",
+            "result_count": 2,
+            "evidence_ids": [
+              "ev_9710bd820d323429e9b131a32cd50d57d52ed5b6",
+              "ev_dd0679fda2eb241413a51751b1df0209bcfcd365"
+            ]
+          },
+          {
+            "stage": "tool_search_bank",
+            "step": 7
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "bank",
+            "result_count": 0,
+            "evidence_ids": []
+          },
+          {
+            "stage": "adapt_result",
+            "primary_count": 2,
+            "additional_count": 2,
+            "evidence_count": 2,
+            "external_evidence": 2,
+            "bank_evidence": 0
+          },
+          {
+            "stage": "baseline"
+          },
+          {
+            "stage": "baseline_personalization",
+            "priority": 0.8,
+            "priority_type": "heuristic_signal",
+            "context_refs": [
+              "dependency-947e333b6c0e"
+            ],
+            "matched_terms": [
+              "Восточная",
+              "Восточная электроподстанция"
+            ],
+            "reasons": [
+              "company_dependency_text_matches_event_term"
+            ]
+          },
+          {
+            "stage": "analyst_handoff",
+            "status": "partial",
+            "evidence_count": 2,
+            "candidate_claim_count": 4
+          },
+          {
+            "stage": "critic_unavailable",
+            "reason": "role_or_budget_unavailable",
+            "structural_checks_completed": true
+          },
+          {
+            "stage": "dependency_paths",
+            "paths": []
+          }
+        ],
+        "created_at": "2026-10-25T11:51:25.410181Z",
+        "watch_conditions": [],
+        "changes": {
+          "status": "changed",
+          "publication_revision_required": true,
+          "reason": "first_assessment",
+          "changed_inputs": [
+            "event_id",
+            "event_semantics",
+            "context_projection",
+            "context_version",
+            "company_snapshot",
+            "analysis_context",
+            "dependency_graph",
+            "active_context_ids",
+            "active_fact_ids",
+            "policy",
+            "relevant_bank_refs",
+            "config_ref",
+            "config",
+            "execution_budget",
+            "model_selected",
+            "model",
+            "runtime",
+            "data_classification",
+            "knowledge_mode",
+            "workflow"
+          ],
+          "input_signature": "f029d04cd707dd55067ff91d4c519d225d69936b630c64034eb070c62c1198a1"
+        },
+        "shared_package_ref": "pkg_e7a992086b1d4314225eec804f665fd8"
+      }
+    },
+    {
+      "company_id": "instrument-grid",
+      "event_key": "cloud",
+      "priority": 0.0,
+      "selection": {
+        "company_id": "instrument-grid",
+        "status": "no_signal_found",
+        "score_type": "heuristic_priority",
+        "score": 0.0,
+        "reasons": [
+          "no_explicit_context_match_found"
+        ],
+        "roots": [
+          "instrument grid",
+          "мера восток учебная компания"
+        ],
+        "matched_nodes": [],
+        "paths": [],
+        "coverage": {
+          "package_id": "pkg_6f57b9f1bbb1582d3a60f6d9066a927a",
+          "package_source_count": 1,
+          "package_independent_origins": 1,
+          "package_limitations": [],
+          "event_term_count": 25,
+          "dependency_graph_edges": 0,
+          "active_declared_graph_edges": 0,
+          "active_relationship_edges": 0,
+          "invalid_graph_edges": 0,
+          "inactive_graph_edges": 0,
+          "payment_graph_edges_excluded": 0,
+          "company_dependencies": 1,
+          "active_company_dependencies": 1,
+          "confirmed_company_dependencies": 1,
+          "assumed_company_dependencies": 0,
+          "inactive_company_dependencies": 0,
+          "payment_company_dependencies_excluded": 0,
+          "company_facts": 1,
+          "company_activities": 1,
+          "company_assertions": 0,
+          "company_context_fingerprint": "740efd5f00621d31b2789f6ea373a6ece21e92608affcf72cbca8d3160d61d80",
+          "matched_event_terms": 0,
+          "grounded_paths": 0,
+          "signal_basis": [
+            "no_explicit_context_match_found"
+          ],
+          "as_of": "2026-10-25T10:00:00+00:00"
+        },
+        "uncertainty": [
+          "No literal match was found in the supplied snapshot; this does not establish absence of impact.",
+          "freshness_unknown:activities:activity-aaa2ab22fbe4",
+          "freshness_unknown:dependencies:dependency-947e333b6c0e",
+          "freshness_unknown:facts:fact-5bf70bb07c17",
+          "Follow-up: Действует ли направление деятельности «Компания производит промышленные датчики»?",
+          "Follow-up: Подтверждена ли сейчас зависимость «работы Восточной электроподстанции»?",
+          "Follow-up: Актуально ли сейчас сведение «сырьё приобретается у местных поставщиков; резервного электропитания нет.»?"
+        ]
+      },
+      "actual_searches": [
+        {
+          "query": "Поставщик OrionCloud опубликовал план ограничения интеграций API с 1 ноября. Точные условия перехода для клиентов пока не раскрыты.",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1"
+          ]
+        },
+        {
+          "query": "OrionCloud планирует ограничение интеграций API",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Мера-Восток (учебная компания) работы Восточной электроподстанции сырьё приобретается у местных поставщиков; резервного электропитания нет. Компания производит промышленные датчики OrionCloud планирует ограничение интеграций API работы Восточной электроподстанции сырьё приобретается у местных поставщиков; резервного эл",
+          "role": "bank",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "OrionCloud планирует ограничение интеграций API OrionCloud планирует ограничение интеграций API",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Мера-Восток (учебная компания) работы Восточной электроподстанции сырьё приобретается у местных поставщиков; резервного электропитания нет. Компания производит промышленные датчики OrionCloud планирует ограничение интеграций API работы Восточной электроподстанции сырьё приобретается у местных поставщиков; резервного эл",
+          "role": "bank",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        }
+      ],
+      "candidate": {
+        "schema_version": "candidate-assessment-v1",
+        "request_id": "7e4f4d577248ce1498bf425c8d16fc23ea6530a469903f0311035bf836db9833",
+        "tenant_id": "personalization-example",
+        "company_id": "instrument-grid",
+        "status": "partial",
+        "execution_mode": "baseline",
+        "summary": "В переданном профиле не найдена подтверждённая связь с событием. Это не доказывает отсутствия влияния. Причинная оценка baseline не выполнялась.",
+        "claims": [
+          {
+            "claim_id": "event-evidence",
+            "kind": "external_fact",
+            "text": "Внешний материал описывает событие: Поставщик OrionCloud опубликовал план ограничения интеграций API с 1 ноября. Точные условия перехода для клиентов пока не раскрыты.",
+            "evidence_refs": [
+              "ev_dd0679fda2eb241413a51751b1df0209bcfcd365"
+            ],
+            "context_refs": [],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": null,
+            "horizon": null,
+            "confirmation_conditions": []
+          },
+          {
+            "claim_id": "bank-unknown",
+            "kind": "unknown",
+            "text": "Среди использованных материалов не подтверждена позиция банка по этому событию.",
+            "evidence_refs": [],
+            "context_refs": [],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": "bank",
+            "horizon": null,
+            "confirmation_conditions": []
+          }
+        ],
+        "evidence": [
+          {
+            "data_classification": "synthetic",
+            "author": "",
+            "event_time": null,
+            "received_at": "2026-10-25T10:00:00Z",
+            "raw_sha256": "d9a2c6493f26eed3e93b3fae4ae2e9b6ed6d845211cf0aede734f441deb7c60d",
+            "evidence_id": "ev_dd0679fda2eb241413a51751b1df0209bcfcd365",
+            "document_id": "doc_440f98c883127ed7e6d8baa8b9bd6644",
+            "document_revision_ref": "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "source_id": "comparison-source",
+            "source_role": "external",
+            "title": "OrionCloud планирует ограничение интеграций API",
+            "canonical_uri": "https://comparison.example/cloud",
+            "published_at": "2026-10-25T09:00:00Z",
+            "fetched_at": "2026-10-25T10:00:00Z",
+            "locator": "chars:0-131",
+            "quote": "Поставщик OrionCloud опубликовал план ограничения интеграций API с 1 ноября. Точные условия перехода для клиентов пока не раскрыты.",
+            "content_hash": "4bfe8f4f66ef991585eed1807f5ed62852cf20ab01f7d55044aa57529bd0ea91",
+            "synthetic": true,
+            "score": 0.615
+          }
+        ],
+        "influence_chain": [],
+        "clarifications": [
+          "Есть ли неуказанный поставщик, ресурс, клиент или маршрут, связывающий компанию с этим событием?",
+          "Действует ли направление деятельности «Компания производит промышленные датчики»?",
+          "Подтверждена ли сейчас зависимость «работы Восточной электроподстанции»?",
+          "Актуально ли сейчас сведение «сырьё приобретается у местных поставщиков; резервного электропитания нет.»?",
+          "Какая подтверждённая зависимость компании связана с этим событием? В переданном контексте такая связь не найдена."
+        ],
+        "coverage": {
+          "external": 1,
+          "bank": 0,
+          "confirmed_dependencies": 1,
+          "company_facts": 1,
+          "limitations": [
+            "freshness_unknown:activities:activity-aaa2ab22fbe4",
+            "freshness_unknown:dependencies:dependency-947e333b6c0e",
+            "freshness_unknown:facts:fact-5bf70bb07c17",
+            "external_web_search_unavailable",
+            "independent_origin_count_unavailable",
+            "semantic_critic_not_run",
+            "business_relevance_not_established"
+          ],
+          "checked_at": "2026-10-25T11:51:25.420588Z",
+          "independent_origins": 1,
+          "origin_groups": 1,
+          "independence_status": "unknown"
+        },
+        "versions": {
+          "prompt": "analysis-v2",
+          "analyst_config": "company-d3234575641132a2650bea95@1",
+          "pipeline": "bounded-pipeline-v2",
+          "model": null,
+          "context": 1,
+          "source_policy": 1,
+          "as_of": "2026-10-25T10:00:00Z",
+          "event_id": "evt_a27033aa58da4f7898340595131d4821",
+          "event_revision": 1,
+          "event_document_revision_ref": "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+          "synthetic": true
+        },
+        "usage": {
+          "model_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "accounting_basis": "reserved_estimate",
+          "attempts": [],
+          "errors": [],
+          "shared_package_ref": "pkg_6f57b9f1bbb1582d3a60f6d9066a927a",
+          "workflow": "research-analysis-critic-v1",
+          "reserved_tokens": 0,
+          "budget_overrun": false,
+          "research_missing_context": [],
+          "critic_review": {
+            "mode": "structural_only",
+            "decision": "not_evaluated",
+            "issues": [],
+            "clarifications": []
+          }
+        },
+        "trace": [
+          {
+            "stage": "workflow_started",
+            "workflow": "research-analysis-critic-v1"
+          },
+          {
+            "stage": "shared_package_loaded",
+            "package_id": "pkg_6f57b9f1bbb1582d3a60f6d9066a927a",
+            "revision": 1
+          },
+          {
+            "stage": "research_plan",
+            "planner": "deterministic",
+            "search_roles": [
+              "bank",
+              "external"
+            ],
+            "query_lengths": {
+              "external": 47,
+              "bank": 228
+            }
+          },
+          {
+            "stage": "plan",
+            "step": 1
+          },
+          {
+            "stage": "event_ingested",
+            "revision": "doc_440f98c883127ed7e6d8baa8b9bd6644:1"
+          },
+          {
+            "stage": "plan_created",
+            "tools": [
+              "search_external",
+              "search_bank"
+            ],
+            "max_steps": 12,
+            "shared_package_ref": "pkg_6f57b9f1bbb1582d3a60f6d9066a927a"
+          },
+          {
+            "stage": "tool_search_external",
+            "step": 2
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "external",
+            "result_count": 2,
+            "evidence_ids": [
+              "ev_dd0679fda2eb241413a51751b1df0209bcfcd365",
+              "ev_dd0679fda2eb241413a51751b1df0209bcfcd365"
+            ]
+          },
+          {
+            "stage": "tool_search_bank",
+            "step": 3
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "bank",
+            "result_count": 0,
+            "evidence_ids": []
+          },
+          {
+            "stage": "check",
+            "step": 4
+          },
+          {
+            "stage": "check_result",
+            "external_evidence": true,
+            "bank_evidence": false,
+            "confirmed_company_context": true
+          },
+          {
+            "stage": "adapt",
+            "step": 5
+          },
+          {
+            "stage": "adapt_plan",
+            "reason": "missing_bank_material",
+            "strategy": "broaden_bank_context_query"
+          },
+          {
+            "stage": "tool_search_external",
+            "step": 6
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "external",
+            "result_count": 1,
+            "evidence_ids": [
+              "ev_dd0679fda2eb241413a51751b1df0209bcfcd365"
+            ]
+          },
+          {
+            "stage": "tool_search_bank",
+            "step": 7
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "bank",
+            "result_count": 0,
+            "evidence_ids": []
+          },
+          {
+            "stage": "adapt_result",
+            "primary_count": 1,
+            "additional_count": 1,
+            "evidence_count": 1,
+            "external_evidence": 1,
+            "bank_evidence": 0
+          },
+          {
+            "stage": "baseline"
+          },
+          {
+            "stage": "baseline_personalization",
+            "priority": 0.0,
+            "priority_type": "heuristic_signal",
+            "context_refs": [],
+            "matched_terms": [],
+            "reasons": [
+              "no_explicit_context_match_found"
+            ]
+          },
+          {
+            "stage": "analyst_handoff",
+            "status": "partial",
+            "evidence_count": 1,
+            "candidate_claim_count": 2
+          },
+          {
+            "stage": "critic_unavailable",
+            "reason": "role_or_budget_unavailable",
+            "structural_checks_completed": true
+          },
+          {
+            "stage": "dependency_paths",
+            "paths": []
+          }
+        ],
+        "created_at": "2026-10-25T11:51:25.420545Z",
+        "watch_conditions": [],
+        "changes": {
+          "status": "changed",
+          "publication_revision_required": true,
+          "reason": "first_assessment",
+          "changed_inputs": [
+            "event_id",
+            "event_semantics",
+            "context_projection",
+            "context_version",
+            "company_snapshot",
+            "analysis_context",
+            "dependency_graph",
+            "active_context_ids",
+            "active_fact_ids",
+            "policy",
+            "relevant_bank_refs",
+            "config_ref",
+            "config",
+            "execution_budget",
+            "model_selected",
+            "model",
+            "runtime",
+            "data_classification",
+            "knowledge_mode",
+            "workflow"
+          ],
+          "input_signature": "f47924225716658e65d194b989eda3c7c68ce644e9b282f602281918d63fdc92"
+        },
+        "shared_package_ref": "pkg_6f57b9f1bbb1582d3a60f6d9066a927a"
+      }
+    },
+    {
+      "company_id": "mixed-business",
+      "event_key": "port",
+      "priority": 0.8,
+      "selection": {
+        "company_id": "mixed-business",
+        "status": "signal_found",
+        "score_type": "heuristic_priority",
+        "score": 0.8,
+        "reasons": [
+          "company_dependency_text_matches_event_term"
+        ],
+        "roots": [
+          "mixed business",
+          "прибор и платформа учебная компания"
+        ],
+        "matched_nodes": [
+          "Северный",
+          "Северный порт"
+        ],
+        "paths": [
+          {
+            "company_id": "mixed-business",
+            "event_id": "evt_2896a8f3c14c4017a184dfaeb97dfc94",
+            "event_revision": 1,
+            "target": "Северный",
+            "path": [
+              "mixed-business",
+              "Северный"
+            ],
+            "edge_ids": [
+              "dependency-f5c21bcf26bd"
+            ],
+            "evidence_refs": [
+              "description:112:140",
+              "description:100:165"
+            ],
+            "statuses": [
+              "confirmed"
+            ],
+            "hop_count": 1,
+            "interpretation": "Textual company dependency matches an explicit event term; applicability needs review.",
+            "causal_claim": false
+          }
+        ],
+        "coverage": {
+          "package_id": "pkg_c508b425c7871f5438c23a1ddcbe8f41",
+          "package_source_count": 1,
+          "package_independent_origins": 1,
+          "package_limitations": [],
+          "event_term_count": 10,
+          "dependency_graph_edges": 0,
+          "active_declared_graph_edges": 0,
+          "active_relationship_edges": 0,
+          "invalid_graph_edges": 0,
+          "inactive_graph_edges": 0,
+          "payment_graph_edges_excluded": 0,
+          "company_dependencies": 2,
+          "active_company_dependencies": 2,
+          "confirmed_company_dependencies": 2,
+          "assumed_company_dependencies": 0,
+          "inactive_company_dependencies": 0,
+          "payment_company_dependencies_excluded": 0,
+          "company_facts": 1,
+          "company_activities": 3,
+          "company_assertions": 0,
+          "company_context_fingerprint": "0d0e27ad4d94fc5fc6344ad744ebd5a4e9e5256eafd3a0c1c1576564acd87ad0",
+          "matched_event_terms": 2,
+          "grounded_paths": 1,
+          "signal_basis": [
+            "company_dependency_text_matches_event_term"
+          ],
+          "as_of": "2026-10-25T10:00:00+00:00"
+        },
+        "uncertainty": [
+          "freshness_unknown:activities:activity-aaa2ab22fbe4",
+          "freshness_unknown:activities:activity-842a78edef90",
+          "freshness_unknown:activities:activity-428c629a729b",
+          "unresolved:assertions:assertion-d2b4ae2ee993",
+          "freshness_unknown:dependencies:dependency-f5c21bcf26bd",
+          "freshness_unknown:dependencies:dependency-e39626831fec",
+          "freshness_unknown:facts:fact-0f6a5edf6045",
+          "Follow-up: Действует ли направление деятельности «Компания производит промышленные датчики»?",
+          "Follow-up: Действует ли направление деятельности «Разрабатывает платформу мониторинга»?",
+          "Follow-up: Действует ли направление деятельности «Импортирует разъёмы»?",
+          "Follow-up: Уточните, неизвестен статус/актуальность: «Возможно зависит от поставок микросхем Sirius».",
+          "Follow-up: Подтверждена ли сейчас зависимость «поставок через Северный порт»?",
+          "Follow-up: Подтверждена ли сейчас зависимость «доступности OrionCloud»?",
+          "Follow-up: Актуально ли сейчас сведение «запас импортных разъёмов на 7 дней.»?"
+        ]
+      },
+      "actual_searches": [
+        {
+          "query": "Оператор сообщает: Северный порт временно приостановил приём контейнеров с разъёмами. Дата возобновления не указана.",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1"
+          ]
+        },
+        {
+          "query": "Северный порт временно остановил приём контейнеров",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Прибор и платформа (учебная компания) поставок через Северный порт доступности OrionCloud запас импортных разъёмов на 7 дней. Компания производит промышленные датчики Разрабатывает платформу мониторинга Импортирует разъёмы Северный порт временно остановил приём контейнеров поставок через Северный порт доступности Orion",
+          "role": "bank",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Северный порт временно остановил приём контейнеров Северный порт временно остановил приём контейнеров",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Прибор и платформа (учебная компания) поставок через Северный порт доступности OrionCloud запас импортных разъёмов на 7 дней. Компания производит промышленные датчики Разрабатывает платформу мониторинга Импортирует разъёмы Северный порт временно остановил приём контейнеров поставок через Северный порт доступности Orion",
+          "role": "bank",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        }
+      ],
+      "candidate": {
+        "schema_version": "candidate-assessment-v1",
+        "request_id": "745c83f10c6dc75cd8bd1718e7cc07b1055767ae8a76b54b9f2214e12e5bb493",
+        "tenant_id": "personalization-example",
+        "company_id": "mixed-business",
+        "status": "partial",
+        "execution_mode": "baseline",
+        "summary": "Событие сопоставлено с указанной в профиле зависимостью: поставок через Северный порт. Масштаб влияния не установлен. В анкете указано: «запас импортных разъёмов на 7 дней.». Причинная оценка baseline не выполнялась.",
+        "claims": [
+          {
+            "claim_id": "event-evidence",
+            "kind": "external_fact",
+            "text": "Внешний материал описывает событие: Оператор сообщает: Северный порт временно приостановил приём контейнеров с разъёмами. Дата возобновления не указана.",
+            "evidence_refs": [
+              "ev_e93e00b426faf687a64a67412c8c943dc04b9ba7"
+            ],
+            "context_refs": [],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": null,
+            "horizon": null,
+            "confirmation_conditions": []
+          },
+          {
+            "claim_id": "bank-unknown",
+            "kind": "unknown",
+            "text": "Среди использованных материалов не подтверждена позиция банка по этому событию.",
+            "evidence_refs": [],
+            "context_refs": [],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": "bank",
+            "horizon": null,
+            "confirmation_conditions": []
+          },
+          {
+            "claim_id": "company-applicability",
+            "kind": "unknown",
+            "text": "Применимость требует проверки по зависимости профиля: поставок через Северный порт",
+            "evidence_refs": [],
+            "context_refs": [
+              "dependency-f5c21bcf26bd"
+            ],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": null,
+            "horizon": null,
+            "confirmation_conditions": []
+          },
+          {
+            "claim_id": "declared-company-conditions",
+            "kind": "unknown",
+            "text": "Сведения анкеты для проверки применимости: запас импортных разъёмов на 7 дней.. Они не доказывают размер воздействия.",
+            "evidence_refs": [],
+            "context_refs": [
+              "fact-0f6a5edf6045"
+            ],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": null,
+            "horizon": null,
+            "confirmation_conditions": []
+          }
+        ],
+        "evidence": [
+          {
+            "data_classification": "synthetic",
+            "author": "",
+            "event_time": null,
+            "received_at": "2026-10-25T10:00:00Z",
+            "raw_sha256": "d9a2c6493f26eed3e93b3fae4ae2e9b6ed6d845211cf0aede734f441deb7c60d",
+            "evidence_id": "ev_e93e00b426faf687a64a67412c8c943dc04b9ba7",
+            "document_id": "doc_aa4b8b893f06f65d927a5e8f8efa2209",
+            "document_revision_ref": "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "source_id": "comparison-source",
+            "source_role": "external",
+            "title": "Северный порт временно остановил приём контейнеров",
+            "canonical_uri": "https://comparison.example/port",
+            "published_at": "2026-10-25T09:00:00Z",
+            "fetched_at": "2026-10-25T10:00:00Z",
+            "locator": "chars:0-116",
+            "quote": "Оператор сообщает: Северный порт временно приостановил приём контейнеров с разъёмами. Дата возобновления не указана.",
+            "content_hash": "af8f531418db58b046db14efb800a1c4ab3b6508777b9a7e5549352651478e3c",
+            "synthetic": true,
+            "score": 0.8583333333333334
+          }
+        ],
+        "influence_chain": [],
+        "clarifications": [
+          "Какие заказы, договорные сроки и резервы могут изменить значимость этой зависимости: поставок через Северный порт?",
+          "Действует ли направление деятельности «Компания производит промышленные датчики»?",
+          "Действует ли направление деятельности «Разрабатывает платформу мониторинга»?",
+          "Действует ли направление деятельности «Импортирует разъёмы»?",
+          "Уточните, неизвестен статус/актуальность: «Возможно зависит от поставок микросхем Sirius».",
+          "Подтверждена ли сейчас зависимость «поставок через Северный порт»?",
+          "Подтверждена ли сейчас зависимость «доступности OrionCloud»?",
+          "Актуально ли сейчас сведение «запас импортных разъёмов на 7 дней.»?"
+        ],
+        "coverage": {
+          "external": 1,
+          "bank": 0,
+          "confirmed_dependencies": 2,
+          "company_facts": 1,
+          "limitations": [
+            "freshness_unknown:activities:activity-aaa2ab22fbe4",
+            "freshness_unknown:activities:activity-842a78edef90",
+            "freshness_unknown:activities:activity-428c629a729b",
+            "unresolved:assertions:assertion-d2b4ae2ee993",
+            "freshness_unknown:dependencies:dependency-f5c21bcf26bd",
+            "freshness_unknown:dependencies:dependency-e39626831fec",
+            "freshness_unknown:facts:fact-0f6a5edf6045",
+            "external_web_search_unavailable",
+            "independent_origin_count_unavailable",
+            "semantic_critic_not_run"
+          ],
+          "checked_at": "2026-10-25T11:51:25.432693Z",
+          "independent_origins": 1,
+          "origin_groups": 1,
+          "independence_status": "unknown"
+        },
+        "versions": {
+          "prompt": "analysis-v2",
+          "analyst_config": "company-087b1d9d46ffebf42f8ff336@1",
+          "pipeline": "bounded-pipeline-v2",
+          "model": null,
+          "context": 1,
+          "source_policy": 1,
+          "as_of": "2026-10-25T10:00:00Z",
+          "event_id": "evt_2896a8f3c14c4017a184dfaeb97dfc94",
+          "event_revision": 1,
+          "event_document_revision_ref": "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+          "synthetic": true
+        },
+        "usage": {
+          "model_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "accounting_basis": "reserved_estimate",
+          "attempts": [],
+          "errors": [],
+          "shared_package_ref": "pkg_c508b425c7871f5438c23a1ddcbe8f41",
+          "workflow": "research-analysis-critic-v1",
+          "reserved_tokens": 0,
+          "budget_overrun": false,
+          "research_missing_context": [],
+          "critic_review": {
+            "mode": "structural_only",
+            "decision": "not_evaluated",
+            "issues": [],
+            "clarifications": []
+          }
+        },
+        "trace": [
+          {
+            "stage": "workflow_started",
+            "workflow": "research-analysis-critic-v1"
+          },
+          {
+            "stage": "shared_package_loaded",
+            "package_id": "pkg_c508b425c7871f5438c23a1ddcbe8f41",
+            "revision": 1
+          },
+          {
+            "stage": "research_plan",
+            "planner": "deterministic",
+            "search_roles": [
+              "bank",
+              "external"
+            ],
+            "query_lengths": {
+              "external": 50,
+              "bank": 273
+            }
+          },
+          {
+            "stage": "plan",
+            "step": 1
+          },
+          {
+            "stage": "event_ingested",
+            "revision": "doc_aa4b8b893f06f65d927a5e8f8efa2209:1"
+          },
+          {
+            "stage": "plan_created",
+            "tools": [
+              "search_external",
+              "search_bank"
+            ],
+            "max_steps": 12,
+            "shared_package_ref": "pkg_c508b425c7871f5438c23a1ddcbe8f41"
+          },
+          {
+            "stage": "tool_search_external",
+            "step": 2
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "external",
+            "result_count": 2,
+            "evidence_ids": [
+              "ev_e93e00b426faf687a64a67412c8c943dc04b9ba7",
+              "ev_e93e00b426faf687a64a67412c8c943dc04b9ba7"
+            ]
+          },
+          {
+            "stage": "tool_search_bank",
+            "step": 3
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "bank",
+            "result_count": 0,
+            "evidence_ids": []
+          },
+          {
+            "stage": "check",
+            "step": 4
+          },
+          {
+            "stage": "check_result",
+            "external_evidence": true,
+            "bank_evidence": false,
+            "confirmed_company_context": true
+          },
+          {
+            "stage": "adapt",
+            "step": 5
+          },
+          {
+            "stage": "adapt_plan",
+            "reason": "missing_bank_material",
+            "strategy": "broaden_bank_context_query"
+          },
+          {
+            "stage": "tool_search_external",
+            "step": 6
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "external",
+            "result_count": 1,
+            "evidence_ids": [
+              "ev_e93e00b426faf687a64a67412c8c943dc04b9ba7"
+            ]
+          },
+          {
+            "stage": "tool_search_bank",
+            "step": 7
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "bank",
+            "result_count": 0,
+            "evidence_ids": []
+          },
+          {
+            "stage": "adapt_result",
+            "primary_count": 1,
+            "additional_count": 1,
+            "evidence_count": 1,
+            "external_evidence": 1,
+            "bank_evidence": 0
+          },
+          {
+            "stage": "baseline"
+          },
+          {
+            "stage": "baseline_personalization",
+            "priority": 0.8,
+            "priority_type": "heuristic_signal",
+            "context_refs": [
+              "dependency-f5c21bcf26bd"
+            ],
+            "matched_terms": [
+              "Северный",
+              "Северный порт"
+            ],
+            "reasons": [
+              "company_dependency_text_matches_event_term"
+            ]
+          },
+          {
+            "stage": "analyst_handoff",
+            "status": "partial",
+            "evidence_count": 1,
+            "candidate_claim_count": 4
+          },
+          {
+            "stage": "critic_unavailable",
+            "reason": "role_or_budget_unavailable",
+            "structural_checks_completed": true
+          },
+          {
+            "stage": "dependency_paths",
+            "paths": []
+          }
+        ],
+        "created_at": "2026-10-25T11:51:25.432652Z",
+        "watch_conditions": [],
+        "changes": {
+          "status": "changed",
+          "publication_revision_required": true,
+          "reason": "first_assessment",
+          "changed_inputs": [
+            "event_id",
+            "event_semantics",
+            "context_projection",
+            "context_version",
+            "company_snapshot",
+            "analysis_context",
+            "dependency_graph",
+            "active_context_ids",
+            "active_fact_ids",
+            "policy",
+            "relevant_bank_refs",
+            "config_ref",
+            "config",
+            "execution_budget",
+            "model_selected",
+            "model",
+            "runtime",
+            "data_classification",
+            "knowledge_mode",
+            "workflow"
+          ],
+          "input_signature": "b982ca7ea7426d3ec3e09bdbdc32e0f800dd2952052c6509f7db049d1468aa93"
+        },
+        "shared_package_ref": "pkg_c508b425c7871f5438c23a1ddcbe8f41"
+      }
+    },
+    {
+      "company_id": "mixed-business",
+      "event_key": "power",
+      "priority": 0.0,
+      "selection": {
+        "company_id": "mixed-business",
+        "status": "no_signal_found",
+        "score_type": "heuristic_priority",
+        "score": 0.0,
+        "reasons": [
+          "no_explicit_context_match_found"
+        ],
+        "roots": [
+          "mixed business",
+          "прибор и платформа учебная компания"
+        ],
+        "matched_nodes": [],
+        "paths": [],
+        "coverage": {
+          "package_id": "pkg_e7a992086b1d4314225eec804f665fd8",
+          "package_source_count": 1,
+          "package_independent_origins": 1,
+          "package_limitations": [],
+          "event_term_count": 23,
+          "dependency_graph_edges": 0,
+          "active_declared_graph_edges": 0,
+          "active_relationship_edges": 0,
+          "invalid_graph_edges": 0,
+          "inactive_graph_edges": 0,
+          "payment_graph_edges_excluded": 0,
+          "company_dependencies": 2,
+          "active_company_dependencies": 2,
+          "confirmed_company_dependencies": 2,
+          "assumed_company_dependencies": 0,
+          "inactive_company_dependencies": 0,
+          "payment_company_dependencies_excluded": 0,
+          "company_facts": 1,
+          "company_activities": 3,
+          "company_assertions": 0,
+          "company_context_fingerprint": "0d0e27ad4d94fc5fc6344ad744ebd5a4e9e5256eafd3a0c1c1576564acd87ad0",
+          "matched_event_terms": 0,
+          "grounded_paths": 0,
+          "signal_basis": [
+            "no_explicit_context_match_found"
+          ],
+          "as_of": "2026-10-25T10:00:00+00:00"
+        },
+        "uncertainty": [
+          "No literal match was found in the supplied snapshot; this does not establish absence of impact.",
+          "freshness_unknown:activities:activity-aaa2ab22fbe4",
+          "freshness_unknown:activities:activity-842a78edef90",
+          "freshness_unknown:activities:activity-428c629a729b",
+          "unresolved:assertions:assertion-d2b4ae2ee993",
+          "freshness_unknown:dependencies:dependency-f5c21bcf26bd",
+          "freshness_unknown:dependencies:dependency-e39626831fec",
+          "freshness_unknown:facts:fact-0f6a5edf6045",
+          "Follow-up: Действует ли направление деятельности «Компания производит промышленные датчики»?",
+          "Follow-up: Действует ли направление деятельности «Разрабатывает платформу мониторинга»?",
+          "Follow-up: Действует ли направление деятельности «Импортирует разъёмы»?",
+          "Follow-up: Уточните, неизвестен статус/актуальность: «Возможно зависит от поставок микросхем Sirius».",
+          "Follow-up: Подтверждена ли сейчас зависимость «поставок через Северный порт»?",
+          "Follow-up: Подтверждена ли сейчас зависимость «доступности OrionCloud»?",
+          "Follow-up: Актуально ли сейчас сведение «запас импортных разъёмов на 7 дней.»?"
+        ]
+      },
+      "actual_searches": [
+        {
+          "query": "Сетевая компания сообщает: Восточная электроподстанция не подаст энергию промышленным потребителям в течение суток. Сведения о резервном питании потребителей отсутствуют.",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Восточная электроподстанция: план отключения",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Прибор и платформа (учебная компания) поставок через Северный порт доступности OrionCloud запас импортных разъёмов на 7 дней. Компания производит промышленные датчики Разрабатывает платформу мониторинга Импортирует разъёмы Восточная электроподстанция: план отключения поставок через Северный порт доступности OrionCloud ",
+          "role": "bank",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Восточная электроподстанция: план отключения Восточная электроподстанция: план отключения",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Прибор и платформа (учебная компания) поставок через Северный порт доступности OrionCloud запас импортных разъёмов на 7 дней. Компания производит промышленные датчики Разрабатывает платформу мониторинга Импортирует разъёмы Восточная электроподстанция: план отключения поставок через Северный порт доступности OrionCloud ",
+          "role": "bank",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        }
+      ],
+      "candidate": {
+        "schema_version": "candidate-assessment-v1",
+        "request_id": "83fb633ea23956006554a13dae87fd5faf2a584517ed943c7834e828fa0fb3e6",
+        "tenant_id": "personalization-example",
+        "company_id": "mixed-business",
+        "status": "partial",
+        "execution_mode": "baseline",
+        "summary": "В переданном профиле не найдена подтверждённая связь с событием. Это не доказывает отсутствия влияния. Причинная оценка baseline не выполнялась.",
+        "claims": [
+          {
+            "claim_id": "event-evidence",
+            "kind": "external_fact",
+            "text": "Внешний материал описывает событие: Сетевая компания сообщает: Восточная электроподстанция не подаст энергию промышленным потребителям в течение суток. Сведения о резервном питании потребителей отсутствуют.",
+            "evidence_refs": [
+              "ev_9710bd820d323429e9b131a32cd50d57d52ed5b6"
+            ],
+            "context_refs": [],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": null,
+            "horizon": null,
+            "confirmation_conditions": []
+          },
+          {
+            "claim_id": "bank-unknown",
+            "kind": "unknown",
+            "text": "Среди использованных материалов не подтверждена позиция банка по этому событию.",
+            "evidence_refs": [],
+            "context_refs": [],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": "bank",
+            "horizon": null,
+            "confirmation_conditions": []
+          }
+        ],
+        "evidence": [
+          {
+            "data_classification": "synthetic",
+            "author": "",
+            "event_time": null,
+            "received_at": "2026-10-25T10:00:00Z",
+            "raw_sha256": "d9a2c6493f26eed3e93b3fae4ae2e9b6ed6d845211cf0aede734f441deb7c60d",
+            "evidence_id": "ev_9710bd820d323429e9b131a32cd50d57d52ed5b6",
+            "document_id": "doc_ac3acc29333cdc67f35da1f5c7224593",
+            "document_revision_ref": "doc_ac3acc29333cdc67f35da1f5c7224593:1",
+            "source_id": "comparison-source",
+            "source_role": "external",
+            "title": "Восточная электроподстанция: план отключения",
+            "canonical_uri": "https://comparison.example/power",
+            "published_at": "2026-10-25T09:00:00Z",
+            "fetched_at": "2026-10-25T10:00:00Z",
+            "locator": "chars:0-170",
+            "quote": "Сетевая компания сообщает: Восточная электроподстанция не подаст энергию промышленным потребителям в течение суток. Сведения о резервном питании потребителей отсутствуют.",
+            "content_hash": "6daf1aa1268a0095050c59020721c8aa83c6cbac5b1dea3d5d58261822b92955",
+            "synthetic": true,
+            "score": 0.51
+          },
+          {
+            "data_classification": "synthetic",
+            "author": "",
+            "event_time": null,
+            "received_at": "2026-10-25T10:00:00Z",
+            "raw_sha256": "d9a2c6493f26eed3e93b3fae4ae2e9b6ed6d845211cf0aede734f441deb7c60d",
+            "evidence_id": "ev_dd0679fda2eb241413a51751b1df0209bcfcd365",
+            "document_id": "doc_440f98c883127ed7e6d8baa8b9bd6644",
+            "document_revision_ref": "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "source_id": "comparison-source",
+            "source_role": "external",
+            "title": "OrionCloud планирует ограничение интеграций API",
+            "canonical_uri": "https://comparison.example/cloud",
+            "published_at": "2026-10-25T09:00:00Z",
+            "fetched_at": "2026-10-25T10:00:00Z",
+            "locator": "chars:0-131",
+            "quote": "Поставщик OrionCloud опубликовал план ограничения интеграций API с 1 ноября. Точные условия перехода для клиентов пока не раскрыты.",
+            "content_hash": "4bfe8f4f66ef991585eed1807f5ed62852cf20ab01f7d55044aa57529bd0ea91",
+            "synthetic": true,
+            "score": 0.255
+          }
+        ],
+        "influence_chain": [],
+        "clarifications": [
+          "Есть ли неуказанный поставщик, ресурс, клиент или маршрут, связывающий компанию с этим событием?",
+          "Действует ли направление деятельности «Компания производит промышленные датчики»?",
+          "Действует ли направление деятельности «Разрабатывает платформу мониторинга»?",
+          "Действует ли направление деятельности «Импортирует разъёмы»?",
+          "Уточните, неизвестен статус/актуальность: «Возможно зависит от поставок микросхем Sirius».",
+          "Подтверждена ли сейчас зависимость «поставок через Северный порт»?",
+          "Подтверждена ли сейчас зависимость «доступности OrionCloud»?",
+          "Актуально ли сейчас сведение «запас импортных разъёмов на 7 дней.»?",
+          "Какая подтверждённая зависимость компании связана с этим событием? В переданном контексте такая связь не найдена."
+        ],
+        "coverage": {
+          "external": 2,
+          "bank": 0,
+          "confirmed_dependencies": 2,
+          "company_facts": 1,
+          "limitations": [
+            "freshness_unknown:activities:activity-aaa2ab22fbe4",
+            "freshness_unknown:activities:activity-842a78edef90",
+            "freshness_unknown:activities:activity-428c629a729b",
+            "unresolved:assertions:assertion-d2b4ae2ee993",
+            "freshness_unknown:dependencies:dependency-f5c21bcf26bd",
+            "freshness_unknown:dependencies:dependency-e39626831fec",
+            "freshness_unknown:facts:fact-0f6a5edf6045",
+            "external_web_search_unavailable",
+            "independent_origin_count_unavailable",
+            "semantic_critic_not_run",
+            "business_relevance_not_established"
+          ],
+          "checked_at": "2026-10-25T11:51:25.444414Z",
+          "independent_origins": 1,
+          "origin_groups": 1,
+          "independence_status": "unknown"
+        },
+        "versions": {
+          "prompt": "analysis-v2",
+          "analyst_config": "company-087b1d9d46ffebf42f8ff336@1",
+          "pipeline": "bounded-pipeline-v2",
+          "model": null,
+          "context": 1,
+          "source_policy": 1,
+          "as_of": "2026-10-25T10:00:00Z",
+          "event_id": "evt_8f2ea248bff440529b0fa9888ec3d59c",
+          "event_revision": 1,
+          "event_document_revision_ref": "doc_ac3acc29333cdc67f35da1f5c7224593:1",
+          "synthetic": true
+        },
+        "usage": {
+          "model_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "accounting_basis": "reserved_estimate",
+          "attempts": [],
+          "errors": [],
+          "shared_package_ref": "pkg_e7a992086b1d4314225eec804f665fd8",
+          "workflow": "research-analysis-critic-v1",
+          "reserved_tokens": 0,
+          "budget_overrun": false,
+          "research_missing_context": [],
+          "critic_review": {
+            "mode": "structural_only",
+            "decision": "not_evaluated",
+            "issues": [],
+            "clarifications": []
+          }
+        },
+        "trace": [
+          {
+            "stage": "workflow_started",
+            "workflow": "research-analysis-critic-v1"
+          },
+          {
+            "stage": "shared_package_loaded",
+            "package_id": "pkg_e7a992086b1d4314225eec804f665fd8",
+            "revision": 1
+          },
+          {
+            "stage": "research_plan",
+            "planner": "deterministic",
+            "search_roles": [
+              "bank",
+              "external"
+            ],
+            "query_lengths": {
+              "external": 44,
+              "bank": 267
+            }
+          },
+          {
+            "stage": "plan",
+            "step": 1
+          },
+          {
+            "stage": "event_ingested",
+            "revision": "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          },
+          {
+            "stage": "plan_created",
+            "tools": [
+              "search_external",
+              "search_bank"
+            ],
+            "max_steps": 12,
+            "shared_package_ref": "pkg_e7a992086b1d4314225eec804f665fd8"
+          },
+          {
+            "stage": "tool_search_external",
+            "step": 2
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "external",
+            "result_count": 3,
+            "evidence_ids": [
+              "ev_9710bd820d323429e9b131a32cd50d57d52ed5b6",
+              "ev_9710bd820d323429e9b131a32cd50d57d52ed5b6",
+              "ev_dd0679fda2eb241413a51751b1df0209bcfcd365"
+            ]
+          },
+          {
+            "stage": "tool_search_bank",
+            "step": 3
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "bank",
+            "result_count": 0,
+            "evidence_ids": []
+          },
+          {
+            "stage": "check",
+            "step": 4
+          },
+          {
+            "stage": "check_result",
+            "external_evidence": true,
+            "bank_evidence": false,
+            "confirmed_company_context": true
+          },
+          {
+            "stage": "adapt",
+            "step": 5
+          },
+          {
+            "stage": "adapt_plan",
+            "reason": "missing_bank_material",
+            "strategy": "broaden_bank_context_query"
+          },
+          {
+            "stage": "tool_search_external",
+            "step": 6
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "external",
+            "result_count": 2,
+            "evidence_ids": [
+              "ev_9710bd820d323429e9b131a32cd50d57d52ed5b6",
+              "ev_dd0679fda2eb241413a51751b1df0209bcfcd365"
+            ]
+          },
+          {
+            "stage": "tool_search_bank",
+            "step": 7
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "bank",
+            "result_count": 0,
+            "evidence_ids": []
+          },
+          {
+            "stage": "adapt_result",
+            "primary_count": 2,
+            "additional_count": 2,
+            "evidence_count": 2,
+            "external_evidence": 2,
+            "bank_evidence": 0
+          },
+          {
+            "stage": "baseline"
+          },
+          {
+            "stage": "baseline_personalization",
+            "priority": 0.0,
+            "priority_type": "heuristic_signal",
+            "context_refs": [],
+            "matched_terms": [],
+            "reasons": [
+              "no_explicit_context_match_found"
+            ]
+          },
+          {
+            "stage": "analyst_handoff",
+            "status": "partial",
+            "evidence_count": 2,
+            "candidate_claim_count": 2
+          },
+          {
+            "stage": "critic_unavailable",
+            "reason": "role_or_budget_unavailable",
+            "structural_checks_completed": true
+          },
+          {
+            "stage": "dependency_paths",
+            "paths": []
+          }
+        ],
+        "created_at": "2026-10-25T11:51:25.444367Z",
+        "watch_conditions": [],
+        "changes": {
+          "status": "changed",
+          "publication_revision_required": true,
+          "reason": "first_assessment",
+          "changed_inputs": [
+            "event_id",
+            "event_semantics",
+            "context_projection",
+            "context_version",
+            "company_snapshot",
+            "analysis_context",
+            "dependency_graph",
+            "active_context_ids",
+            "active_fact_ids",
+            "policy",
+            "relevant_bank_refs",
+            "config_ref",
+            "config",
+            "execution_budget",
+            "model_selected",
+            "model",
+            "runtime",
+            "data_classification",
+            "knowledge_mode",
+            "workflow"
+          ],
+          "input_signature": "c9889d028ddb7d2b4547e6583c364944227ea194c34c4eea24961fac75cc7de8"
+        },
+        "shared_package_ref": "pkg_e7a992086b1d4314225eec804f665fd8"
+      }
+    },
+    {
+      "company_id": "mixed-business",
+      "event_key": "cloud",
+      "priority": 0.8,
+      "selection": {
+        "company_id": "mixed-business",
+        "status": "signal_found",
+        "score_type": "heuristic_priority",
+        "score": 0.8,
+        "reasons": [
+          "company_dependency_text_matches_event_term"
+        ],
+        "roots": [
+          "mixed business",
+          "прибор и платформа учебная компания"
+        ],
+        "matched_nodes": [
+          "OrionCloud"
+        ],
+        "paths": [
+          {
+            "company_id": "mixed-business",
+            "event_id": "evt_a27033aa58da4f7898340595131d4821",
+            "event_revision": 1,
+            "target": "OrionCloud",
+            "path": [
+              "mixed-business",
+              "OrionCloud"
+            ],
+            "edge_ids": [
+              "dependency-e39626831fec"
+            ],
+            "evidence_refs": [
+              "description:142:164",
+              "description:100:165"
+            ],
+            "statuses": [
+              "confirmed"
+            ],
+            "hop_count": 1,
+            "interpretation": "Textual company dependency matches an explicit event term; applicability needs review.",
+            "causal_claim": false
+          }
+        ],
+        "coverage": {
+          "package_id": "pkg_6f57b9f1bbb1582d3a60f6d9066a927a",
+          "package_source_count": 1,
+          "package_independent_origins": 1,
+          "package_limitations": [],
+          "event_term_count": 25,
+          "dependency_graph_edges": 0,
+          "active_declared_graph_edges": 0,
+          "active_relationship_edges": 0,
+          "invalid_graph_edges": 0,
+          "inactive_graph_edges": 0,
+          "payment_graph_edges_excluded": 0,
+          "company_dependencies": 2,
+          "active_company_dependencies": 2,
+          "confirmed_company_dependencies": 2,
+          "assumed_company_dependencies": 0,
+          "inactive_company_dependencies": 0,
+          "payment_company_dependencies_excluded": 0,
+          "company_facts": 1,
+          "company_activities": 3,
+          "company_assertions": 0,
+          "company_context_fingerprint": "0d0e27ad4d94fc5fc6344ad744ebd5a4e9e5256eafd3a0c1c1576564acd87ad0",
+          "matched_event_terms": 1,
+          "grounded_paths": 1,
+          "signal_basis": [
+            "company_dependency_text_matches_event_term"
+          ],
+          "as_of": "2026-10-25T10:00:00+00:00"
+        },
+        "uncertainty": [
+          "freshness_unknown:activities:activity-aaa2ab22fbe4",
+          "freshness_unknown:activities:activity-842a78edef90",
+          "freshness_unknown:activities:activity-428c629a729b",
+          "unresolved:assertions:assertion-d2b4ae2ee993",
+          "freshness_unknown:dependencies:dependency-f5c21bcf26bd",
+          "freshness_unknown:dependencies:dependency-e39626831fec",
+          "freshness_unknown:facts:fact-0f6a5edf6045",
+          "Follow-up: Действует ли направление деятельности «Компания производит промышленные датчики»?",
+          "Follow-up: Действует ли направление деятельности «Разрабатывает платформу мониторинга»?",
+          "Follow-up: Действует ли направление деятельности «Импортирует разъёмы»?",
+          "Follow-up: Уточните, неизвестен статус/актуальность: «Возможно зависит от поставок микросхем Sirius».",
+          "Follow-up: Подтверждена ли сейчас зависимость «поставок через Северный порт»?",
+          "Follow-up: Подтверждена ли сейчас зависимость «доступности OrionCloud»?",
+          "Follow-up: Актуально ли сейчас сведение «запас импортных разъёмов на 7 дней.»?"
+        ]
+      },
+      "actual_searches": [
+        {
+          "query": "Поставщик OrionCloud опубликовал план ограничения интеграций API с 1 ноября. Точные условия перехода для клиентов пока не раскрыты.",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1"
+          ]
+        },
+        {
+          "query": "OrionCloud планирует ограничение интеграций API",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Прибор и платформа (учебная компания) поставок через Северный порт доступности OrionCloud запас импортных разъёмов на 7 дней. Компания производит промышленные датчики Разрабатывает платформу мониторинга Импортирует разъёмы OrionCloud планирует ограничение интеграций API поставок через Северный порт доступности OrionClo",
+          "role": "bank",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "OrionCloud планирует ограничение интеграций API OrionCloud планирует ограничение интеграций API",
+          "role": "external",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        },
+        {
+          "query": "Прибор и платформа (учебная компания) поставок через Северный порт доступности OrionCloud запас импортных разъёмов на 7 дней. Компания производит промышленные датчики Разрабатывает платформу мониторинга Импортирует разъёмы OrionCloud планирует ограничение интеграций API поставок через Северный порт доступности OrionClo",
+          "role": "bank",
+          "source_ids": [
+            "comparison-source"
+          ],
+          "document_revision_refs": [
+            "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "doc_aa4b8b893f06f65d927a5e8f8efa2209:1",
+            "doc_ac3acc29333cdc67f35da1f5c7224593:1"
+          ]
+        }
+      ],
+      "candidate": {
+        "schema_version": "candidate-assessment-v1",
+        "request_id": "94b02d3932ad345d7b41e244ee801427649d2ec5f9b7444f6bae08b2e1315f95",
+        "tenant_id": "personalization-example",
+        "company_id": "mixed-business",
+        "status": "partial",
+        "execution_mode": "baseline",
+        "summary": "Событие сопоставлено с указанной в профиле зависимостью: доступности OrionCloud. Масштаб влияния не установлен. В анкете указано: «запас импортных разъёмов на 7 дней.». Причинная оценка baseline не выполнялась.",
+        "claims": [
+          {
+            "claim_id": "event-evidence",
+            "kind": "external_fact",
+            "text": "Внешний материал описывает событие: Поставщик OrionCloud опубликовал план ограничения интеграций API с 1 ноября. Точные условия перехода для клиентов пока не раскрыты.",
+            "evidence_refs": [
+              "ev_dd0679fda2eb241413a51751b1df0209bcfcd365"
+            ],
+            "context_refs": [],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": null,
+            "horizon": null,
+            "confirmation_conditions": []
+          },
+          {
+            "claim_id": "bank-unknown",
+            "kind": "unknown",
+            "text": "Среди использованных материалов не подтверждена позиция банка по этому событию.",
+            "evidence_refs": [],
+            "context_refs": [],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": "bank",
+            "horizon": null,
+            "confirmation_conditions": []
+          },
+          {
+            "claim_id": "company-applicability",
+            "kind": "unknown",
+            "text": "Применимость требует проверки по зависимости профиля: доступности OrionCloud",
+            "evidence_refs": [],
+            "context_refs": [
+              "dependency-e39626831fec"
+            ],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": null,
+            "horizon": null,
+            "confirmation_conditions": []
+          },
+          {
+            "claim_id": "declared-company-conditions",
+            "kind": "unknown",
+            "text": "Сведения анкеты для проверки применимости: запас импортных разъёмов на 7 дней.. Они не доказывают размер воздействия.",
+            "evidence_refs": [],
+            "context_refs": [
+              "fact-0f6a5edf6045"
+            ],
+            "assumptions": [],
+            "alternatives": [],
+            "falsifiers": [],
+            "origin": null,
+            "horizon": null,
+            "confirmation_conditions": []
+          }
+        ],
+        "evidence": [
+          {
+            "data_classification": "synthetic",
+            "author": "",
+            "event_time": null,
+            "received_at": "2026-10-25T10:00:00Z",
+            "raw_sha256": "d9a2c6493f26eed3e93b3fae4ae2e9b6ed6d845211cf0aede734f441deb7c60d",
+            "evidence_id": "ev_dd0679fda2eb241413a51751b1df0209bcfcd365",
+            "document_id": "doc_440f98c883127ed7e6d8baa8b9bd6644",
+            "document_revision_ref": "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+            "source_id": "comparison-source",
+            "source_role": "external",
+            "title": "OrionCloud планирует ограничение интеграций API",
+            "canonical_uri": "https://comparison.example/cloud",
+            "published_at": "2026-10-25T09:00:00Z",
+            "fetched_at": "2026-10-25T10:00:00Z",
+            "locator": "chars:0-131",
+            "quote": "Поставщик OrionCloud опубликовал план ограничения интеграций API с 1 ноября. Точные условия перехода для клиентов пока не раскрыты.",
+            "content_hash": "4bfe8f4f66ef991585eed1807f5ed62852cf20ab01f7d55044aa57529bd0ea91",
+            "synthetic": true,
+            "score": 0.615
+          }
+        ],
+        "influence_chain": [],
+        "clarifications": [
+          "Какие заказы, договорные сроки и резервы могут изменить значимость этой зависимости: доступности OrionCloud?",
+          "Действует ли направление деятельности «Компания производит промышленные датчики»?",
+          "Действует ли направление деятельности «Разрабатывает платформу мониторинга»?",
+          "Действует ли направление деятельности «Импортирует разъёмы»?",
+          "Уточните, неизвестен статус/актуальность: «Возможно зависит от поставок микросхем Sirius».",
+          "Подтверждена ли сейчас зависимость «поставок через Северный порт»?",
+          "Подтверждена ли сейчас зависимость «доступности OrionCloud»?",
+          "Актуально ли сейчас сведение «запас импортных разъёмов на 7 дней.»?"
+        ],
+        "coverage": {
+          "external": 1,
+          "bank": 0,
+          "confirmed_dependencies": 2,
+          "company_facts": 1,
+          "limitations": [
+            "freshness_unknown:activities:activity-aaa2ab22fbe4",
+            "freshness_unknown:activities:activity-842a78edef90",
+            "freshness_unknown:activities:activity-428c629a729b",
+            "unresolved:assertions:assertion-d2b4ae2ee993",
+            "freshness_unknown:dependencies:dependency-f5c21bcf26bd",
+            "freshness_unknown:dependencies:dependency-e39626831fec",
+            "freshness_unknown:facts:fact-0f6a5edf6045",
+            "external_web_search_unavailable",
+            "independent_origin_count_unavailable",
+            "semantic_critic_not_run"
+          ],
+          "checked_at": "2026-10-25T11:51:25.463159Z",
+          "independent_origins": 1,
+          "origin_groups": 1,
+          "independence_status": "unknown"
+        },
+        "versions": {
+          "prompt": "analysis-v2",
+          "analyst_config": "company-087b1d9d46ffebf42f8ff336@1",
+          "pipeline": "bounded-pipeline-v2",
+          "model": null,
+          "context": 1,
+          "source_policy": 1,
+          "as_of": "2026-10-25T10:00:00Z",
+          "event_id": "evt_a27033aa58da4f7898340595131d4821",
+          "event_revision": 1,
+          "event_document_revision_ref": "doc_440f98c883127ed7e6d8baa8b9bd6644:1",
+          "synthetic": true
+        },
+        "usage": {
+          "model_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "accounting_basis": "reserved_estimate",
+          "attempts": [],
+          "errors": [],
+          "shared_package_ref": "pkg_6f57b9f1bbb1582d3a60f6d9066a927a",
+          "workflow": "research-analysis-critic-v1",
+          "reserved_tokens": 0,
+          "budget_overrun": false,
+          "research_missing_context": [],
+          "critic_review": {
+            "mode": "structural_only",
+            "decision": "not_evaluated",
+            "issues": [],
+            "clarifications": []
+          }
+        },
+        "trace": [
+          {
+            "stage": "workflow_started",
+            "workflow": "research-analysis-critic-v1"
+          },
+          {
+            "stage": "shared_package_loaded",
+            "package_id": "pkg_6f57b9f1bbb1582d3a60f6d9066a927a",
+            "revision": 1
+          },
+          {
+            "stage": "research_plan",
+            "planner": "deterministic",
+            "search_roles": [
+              "bank",
+              "external"
+            ],
+            "query_lengths": {
+              "external": 47,
+              "bank": 270
+            }
+          },
+          {
+            "stage": "plan",
+            "step": 1
+          },
+          {
+            "stage": "event_ingested",
+            "revision": "doc_440f98c883127ed7e6d8baa8b9bd6644:1"
+          },
+          {
+            "stage": "plan_created",
+            "tools": [
+              "search_external",
+              "search_bank"
+            ],
+            "max_steps": 12,
+            "shared_package_ref": "pkg_6f57b9f1bbb1582d3a60f6d9066a927a"
+          },
+          {
+            "stage": "tool_search_external",
+            "step": 2
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "external",
+            "result_count": 2,
+            "evidence_ids": [
+              "ev_dd0679fda2eb241413a51751b1df0209bcfcd365",
+              "ev_dd0679fda2eb241413a51751b1df0209bcfcd365"
+            ]
+          },
+          {
+            "stage": "tool_search_bank",
+            "step": 3
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "bank",
+            "result_count": 0,
+            "evidence_ids": []
+          },
+          {
+            "stage": "check",
+            "step": 4
+          },
+          {
+            "stage": "check_result",
+            "external_evidence": true,
+            "bank_evidence": false,
+            "confirmed_company_context": true
+          },
+          {
+            "stage": "adapt",
+            "step": 5
+          },
+          {
+            "stage": "adapt_plan",
+            "reason": "missing_bank_material",
+            "strategy": "broaden_bank_context_query"
+          },
+          {
+            "stage": "tool_search_external",
+            "step": 6
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "external",
+            "result_count": 1,
+            "evidence_ids": [
+              "ev_dd0679fda2eb241413a51751b1df0209bcfcd365"
+            ]
+          },
+          {
+            "stage": "tool_search_bank",
+            "step": 7
+          },
+          {
+            "stage": "tool_result",
+            "tool": "search",
+            "role": "bank",
+            "result_count": 0,
+            "evidence_ids": []
+          },
+          {
+            "stage": "adapt_result",
+            "primary_count": 1,
+            "additional_count": 1,
+            "evidence_count": 1,
+            "external_evidence": 1,
+            "bank_evidence": 0
+          },
+          {
+            "stage": "baseline"
+          },
+          {
+            "stage": "baseline_personalization",
+            "priority": 0.8,
+            "priority_type": "heuristic_signal",
+            "context_refs": [
+              "dependency-e39626831fec"
+            ],
+            "matched_terms": [
+              "OrionCloud"
+            ],
+            "reasons": [
+              "company_dependency_text_matches_event_term"
+            ]
+          },
+          {
+            "stage": "analyst_handoff",
+            "status": "partial",
+            "evidence_count": 1,
+            "candidate_claim_count": 4
+          },
+          {
+            "stage": "critic_unavailable",
+            "reason": "role_or_budget_unavailable",
+            "structural_checks_completed": true
+          },
+          {
+            "stage": "dependency_paths",
+            "paths": []
+          }
+        ],
+        "created_at": "2026-10-25T11:51:25.463112Z",
+        "watch_conditions": [],
+        "changes": {
+          "status": "changed",
+          "publication_revision_required": true,
+          "reason": "first_assessment",
+          "changed_inputs": [
+            "event_id",
+            "event_semantics",
+            "context_projection",
+            "context_version",
+            "company_snapshot",
+            "analysis_context",
+            "dependency_graph",
+            "active_context_ids",
+            "active_fact_ids",
+            "policy",
+            "relevant_bank_refs",
+            "config_ref",
+            "config",
+            "execution_budget",
+            "model_selected",
+            "model",
+            "runtime",
+            "data_classification",
+            "knowledge_mode",
+            "workflow"
+          ],
+          "input_signature": "e66044d7856e331e548153877fe608422b7f3adde3989d9b82b6abc262781bc5"
+        },
+        "shared_package_ref": "pkg_6f57b9f1bbb1582d3a60f6d9066a927a"
+      }
+    }
+  ],
+  "executions": [
+    {
+      "request_id": "comparison-case-fa6a3a948030495896a61821c2088ce3",
+      "company_id": "instrument-port",
+      "status": "partial",
+      "coverage": {
+        "events_available": 1,
+        "events_selected": 1,
+        "event_selection": "lexical_priority_with_bounded_exploration",
+        "selection_recall_not_established": true,
+        "runtime_fingerprint": "e85341d59db0589096799052be71b15cbadf9a11b206ef1b1f5def651224e039",
+        "source_ids": [
+          "comparison-source"
+        ],
+        "documents": 3,
+        "external_search": "configured_sources_and_corpus_only",
+        "knowledge_mode": "as_of",
+        "requested_as_of": "2026-10-25T10:00:00+00:00",
+        "analysis_as_of": "2026-10-25T10:00:00+00:00",
+        "model_calls": 0,
+        "reserved_tokens": 0,
+        "model_attempts": []
+      }
+    },
+    {
+      "request_id": "comparison-case-2e50f908d3d04ce1bf15575e01485e51",
+      "company_id": "instrument-port",
+      "status": "partial",
+      "coverage": {
+        "events_available": 1,
+        "events_selected": 1,
+        "event_selection": "lexical_priority_with_bounded_exploration",
+        "selection_recall_not_established": true,
+        "runtime_fingerprint": "e85341d59db0589096799052be71b15cbadf9a11b206ef1b1f5def651224e039",
+        "source_ids": [
+          "comparison-source"
+        ],
+        "documents": 3,
+        "external_search": "configured_sources_and_corpus_only",
+        "knowledge_mode": "as_of",
+        "requested_as_of": "2026-10-25T10:00:00+00:00",
+        "analysis_as_of": "2026-10-25T10:00:00+00:00",
+        "model_calls": 0,
+        "reserved_tokens": 0,
+        "model_attempts": []
+      }
+    },
+    {
+      "request_id": "comparison-case-d485bd226b4c4f5e98ee33030d021813",
+      "company_id": "instrument-port",
+      "status": "partial",
+      "coverage": {
+        "events_available": 1,
+        "events_selected": 1,
+        "event_selection": "lexical_priority_with_bounded_exploration",
+        "selection_recall_not_established": true,
+        "runtime_fingerprint": "e85341d59db0589096799052be71b15cbadf9a11b206ef1b1f5def651224e039",
+        "source_ids": [
+          "comparison-source"
+        ],
+        "documents": 3,
+        "external_search": "configured_sources_and_corpus_only",
+        "knowledge_mode": "as_of",
+        "requested_as_of": "2026-10-25T10:00:00+00:00",
+        "analysis_as_of": "2026-10-25T10:00:00+00:00",
+        "model_calls": 0,
+        "reserved_tokens": 0,
+        "model_attempts": []
+      }
+    },
+    {
+      "request_id": "comparison-case-1841e6b35aea477c9ff653c14359cdec",
+      "company_id": "instrument-grid",
+      "status": "partial",
+      "coverage": {
+        "events_available": 1,
+        "events_selected": 1,
+        "event_selection": "lexical_priority_with_bounded_exploration",
+        "selection_recall_not_established": true,
+        "runtime_fingerprint": "e85341d59db0589096799052be71b15cbadf9a11b206ef1b1f5def651224e039",
+        "source_ids": [
+          "comparison-source"
+        ],
+        "documents": 3,
+        "external_search": "configured_sources_and_corpus_only",
+        "knowledge_mode": "as_of",
+        "requested_as_of": "2026-10-25T10:00:00+00:00",
+        "analysis_as_of": "2026-10-25T10:00:00+00:00",
+        "model_calls": 0,
+        "reserved_tokens": 0,
+        "model_attempts": []
+      }
+    },
+    {
+      "request_id": "comparison-case-613a066e68174d408e13653af8a28fd0",
+      "company_id": "instrument-grid",
+      "status": "partial",
+      "coverage": {
+        "events_available": 1,
+        "events_selected": 1,
+        "event_selection": "lexical_priority_with_bounded_exploration",
+        "selection_recall_not_established": true,
+        "runtime_fingerprint": "e85341d59db0589096799052be71b15cbadf9a11b206ef1b1f5def651224e039",
+        "source_ids": [
+          "comparison-source"
+        ],
+        "documents": 3,
+        "external_search": "configured_sources_and_corpus_only",
+        "knowledge_mode": "as_of",
+        "requested_as_of": "2026-10-25T10:00:00+00:00",
+        "analysis_as_of": "2026-10-25T10:00:00+00:00",
+        "model_calls": 0,
+        "reserved_tokens": 0,
+        "model_attempts": []
+      }
+    },
+    {
+      "request_id": "comparison-case-e9802031079b43f1b286a06c8713e2d6",
+      "company_id": "instrument-grid",
+      "status": "partial",
+      "coverage": {
+        "events_available": 1,
+        "events_selected": 1,
+        "event_selection": "lexical_priority_with_bounded_exploration",
+        "selection_recall_not_established": true,
+        "runtime_fingerprint": "e85341d59db0589096799052be71b15cbadf9a11b206ef1b1f5def651224e039",
+        "source_ids": [
+          "comparison-source"
+        ],
+        "documents": 3,
+        "external_search": "configured_sources_and_corpus_only",
+        "knowledge_mode": "as_of",
+        "requested_as_of": "2026-10-25T10:00:00+00:00",
+        "analysis_as_of": "2026-10-25T10:00:00+00:00",
+        "model_calls": 0,
+        "reserved_tokens": 0,
+        "model_attempts": []
+      }
+    },
+    {
+      "request_id": "comparison-case-dcdc8478b8be49ab8925c9618fd07644",
+      "company_id": "mixed-business",
+      "status": "partial",
+      "coverage": {
+        "events_available": 1,
+        "events_selected": 1,
+        "event_selection": "lexical_priority_with_bounded_exploration",
+        "selection_recall_not_established": true,
+        "runtime_fingerprint": "e85341d59db0589096799052be71b15cbadf9a11b206ef1b1f5def651224e039",
+        "source_ids": [
+          "comparison-source"
+        ],
+        "documents": 3,
+        "external_search": "configured_sources_and_corpus_only",
+        "knowledge_mode": "as_of",
+        "requested_as_of": "2026-10-25T10:00:00+00:00",
+        "analysis_as_of": "2026-10-25T10:00:00+00:00",
+        "model_calls": 0,
+        "reserved_tokens": 0,
+        "model_attempts": []
+      }
+    },
+    {
+      "request_id": "comparison-case-50110263d5674ffd843a5ef62ede11e2",
+      "company_id": "mixed-business",
+      "status": "partial",
+      "coverage": {
+        "events_available": 1,
+        "events_selected": 1,
+        "event_selection": "lexical_priority_with_bounded_exploration",
+        "selection_recall_not_established": true,
+        "runtime_fingerprint": "e85341d59db0589096799052be71b15cbadf9a11b206ef1b1f5def651224e039",
+        "source_ids": [
+          "comparison-source"
+        ],
+        "documents": 3,
+        "external_search": "configured_sources_and_corpus_only",
+        "knowledge_mode": "as_of",
+        "requested_as_of": "2026-10-25T10:00:00+00:00",
+        "analysis_as_of": "2026-10-25T10:00:00+00:00",
+        "model_calls": 0,
+        "reserved_tokens": 0,
+        "model_attempts": []
+      }
+    },
+    {
+      "request_id": "comparison-case-710a0cb11c054c88a72e5b5bd08241ac",
+      "company_id": "mixed-business",
+      "status": "partial",
+      "coverage": {
+        "events_available": 1,
+        "events_selected": 1,
+        "event_selection": "lexical_priority_with_bounded_exploration",
+        "selection_recall_not_established": true,
+        "runtime_fingerprint": "e85341d59db0589096799052be71b15cbadf9a11b206ef1b1f5def651224e039",
+        "source_ids": [
+          "comparison-source"
+        ],
+        "documents": 3,
+        "external_search": "configured_sources_and_corpus_only",
+        "knowledge_mode": "as_of",
+        "requested_as_of": "2026-10-25T10:00:00+00:00",
+        "analysis_as_of": "2026-10-25T10:00:00+00:00",
+        "model_calls": 0,
+        "reserved_tokens": 0,
+        "model_attempts": []
+      }
+    }
+  ],
+  "model_calls": 0,
+  "quality_improvement_proven": false
+}
