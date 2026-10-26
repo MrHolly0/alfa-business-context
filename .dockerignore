@@ -23,3 +23,7 @@ AGENTS.md
 **/AGENTS.md
 
 **/.pytest_cache/
+
+# Core dependencies are installed from the lock; private runtime files stay out.
+apps/core/vendor/
+apps/core/var/

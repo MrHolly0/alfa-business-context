@@ -6,6 +6,7 @@
     "ext-pdo": "*",
     "symfony/framework-bundle": "^7.4",
     "symfony/runtime": "^7.4",
+    "symfony/string": "^7.4",
     "symfony/yaml": "^7.4"
   },
   "autoload": {

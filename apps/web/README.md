@@ -1,19 +1,20 @@
-# Веб-приложение
+# Web-интерфейс
 
-Браузерный React-интерфейс. Node.js используется только для сборки и тестов; контейнер runtime содержит nginx, который раздаёт статические файлы. Сейчас `/api/` отвечает `503`: PHP Core в Compose ещё не подключён.
+React-интерфейс собирается Node.js и запускается как статический сайт в непривилегированном nginx. В Compose nginx обслуживает UI и проксирует same-origin `/api/*` в Symfony Core.
 
-## Структура
+## Запуск и вход
 
-- `src/` — JavaScript и JSX интерфейса, каталога и демонстрационной предметной логики.
-- `public/` — HTML, стили приложения и статические изображения/шрифты. Растровые изображения поставляются в WebP; PNG-дубликаты в сборку не включаются.
-- `scripts/` — esbuild-сборка и проверка готового статического артефакта.
-- `tests/` — тесты каталога, демо-сценариев и предметного поведения браузера.
-- `docs/` — архивные материалы интерфейса; актуальная документация находится в корневом `docs/`.
+Полный продуктовый Compose stack запускается из корня: `docker compose up --build --wait`. Откройте http://localhost:4173 и войдите в Core локальной учётной записью из seeded database (`demo@alpha.test` / `DemoAlpha2026!`). Кнопка «Посмотреть демо» явно включает старый браузерный прототип: фикстуры и изменения этого режима остаются в localStorage и не становятся Core данными.
 
-## Запуск
+Web использует cookie Core с `credentials: same-origin`; токенов модели или внутренних Python service tokens в браузере нет. При старте приложение проверяет `/api/auth/me`, затем загружает доступные компании и их профиль/метрики/news read views. Context updates отправляются с `expectedVersion`; конфликт перезагружает актуальный Core state. Новости отображаются read-only: UI сам не запускает collection/analysis.
 
-Из корня репозитория выполните `npm run dev`. Docker Compose соберёт статический UI и откроет его на http://localhost:4173. Остановка: `docker compose down`. Это браузерный прототип; он не запускает Python DataTask и не обращается к Core.
+## Разработка
 
-Для локальной сборки и тестов установите зависимости через `npm run install:web`, затем используйте `npm run build`, `npm run validate` и `npm test`. Для локального запуска сайта без Docker Node HTTP-сервер не предоставляется.
+```sh
+npm ci --prefix apps/web
+npm --prefix apps/web test
+npm run build
+npm run validate
+```
 
-Python AI/Data находится в `apps/intelligence` и запускается отдельно (например, `demo-data` или `run-task`). Код frontend пока не подключён к Python API или PHP Core. Текущие ограничения описаны в [статусе web-приложения](../../docs/web-status.md), команды — в [infra README](../../infra/README.md).
+Root scripts: `npm run build`, `npm run validate`, `npm test`. Docker web runtime — nginx; Node применяется при сборке и тестировании, отдельный Node server не нужен. API endpoints переписываются proxy в `nginx.conf`; см. также [Core API](../core/README.md), [web status](../../docs/web-status.md) и [Docker](../../infra/README.md).

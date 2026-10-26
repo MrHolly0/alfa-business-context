@@ -10,6 +10,6 @@
     "dev": "docker compose up --build --wait",
     "build": "npm --prefix apps/web run build",
     "validate": "npm --prefix apps/web run validate",
-    "test": "docker compose run --build --rm web-test && docker compose run --build --rm intelligence-test"
+    "test": "docker compose --profile test run --build --rm core-test && docker compose --profile test run --build --rm web-test && docker compose --profile test run --build --rm intelligence-test"
   }
 }

@@ -112,6 +112,11 @@ def create_app(*, store, pipeline, artifact_store: ArtifactStore | None = None,
                data_workflow=None, service_token: str | None = None, tenant_ids: set[str] | list[str] | None = None) -> FastAPI:
     """Build private service API. Missing identity configuration denies all private calls."""
     token = service_token if service_token is not None else os.getenv("INTELLIGENCE_SERVICE_TOKEN", "")
+    if service_token is None and not token and os.getenv("INTELLIGENCE_SERVICE_TOKEN_FILE"):
+        token_path = Path(os.environ["INTELLIGENCE_SERVICE_TOKEN_FILE"])
+        if token_path.stat().st_size > 4096:
+            raise ValueError("service_token_file_too_large")
+        token = token_path.read_text().strip()
     tenants = set(tenant_ids if tenant_ids is not None else (v.strip() for v in os.getenv("INTELLIGENCE_TENANTS", "").split(",") if v.strip()))
     artifacts = artifact_store or ArtifactStore(os.getenv("INTELLIGENCE_ARTIFACT_DB", "/data/intelligence-artifacts.sqlite3"))
     app = FastAPI(title="Intelligence internal API", docs_url=None, redoc_url=None, openapi_url=None)
@@ -127,6 +132,11 @@ def create_app(*, store, pipeline, artifact_store: ArtifactStore | None = None,
 
     @app.get("/health")
     def health():
+        try:
+            with artifacts.database.connection() as db:
+                db.execute("SELECT 1")
+        except Exception:
+            return JSONResponse({"status": "unavailable"}, status_code=503)
         return {"status": "ok"}
 
     def auth(authorization: str | None = Header(default=None)):

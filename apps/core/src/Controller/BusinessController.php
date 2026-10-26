@@ -75,6 +75,7 @@ final class BusinessController {
         if (strlen($json)>30000) return new JsonResponse(['error'=>'Context too large'],400);
         $db=Database::connect();$db->beginTransaction();
         try {
+            Database::lockCompany($db,$id);
             $q=$db->prepare('SELECT MAX(version) FROM company_context_versions WHERE company_id=?');$q->execute([$id]);$current=(int)$q->fetchColumn();
             if ($current!==$v['expectedVersion']) {$db->rollBack();return new JsonResponse(['error'=>'Version conflict','currentVersion'=>$current],409);}
             $new=$current+1;

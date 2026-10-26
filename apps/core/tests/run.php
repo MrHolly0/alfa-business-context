@@ -21,6 +21,12 @@ function csv(string $file, array $headers, array $rows): void {
 $dir = sys_get_temp_dir().'/alfa-core-test-'.bin2hex(random_bytes(5));
 mkdir($dir);
 try {
+    $source=['uri'=>'https://feeds.example/demo.rss','article_hosts_json'=>'["news.example"]'];
+    check(App\Intelligence\SourceUriPolicy::allowsDocumentUri('https://news.example/story/1',$source), 'Configured article host was rejected');
+    check(App\Intelligence\SourceUriPolicy::allowsDocumentUri('https://feeds.example/demo.rss',$source), 'Source host was rejected');
+    check(!App\Intelligence\SourceUriPolicy::allowsDocumentUri('https://other.example/story/1',$source), 'Unconfigured document host was accepted');
+    check(!App\Intelligence\SourceUriPolicy::allowsDocumentUri('https://news.example/story/1',['uri'=>'https://feeds.example/demo.rss','article_hosts_json'=>'{}']), 'Malformed article host policy was accepted');
+    check(!App\Intelligence\SourceUriPolicy::allowsDocumentUri('https://feeds.example/demo.rss',['uri'=>'https://feeds.example/demo.rss','article_hosts_json'=>'{}']), 'Object host policy was accepted on source host');
     $database = $dir.'/core.sqlite';
     $headers = ['SYNTHETIC_U','ORG_TYPE','OKFS_NAME','COMPANY_AGE_YEARS_GRADATION','ECO_MARK_LABEL','MAINOKVED_CODE','MAINOKVED_NAME','NEGATIVEMARK','AMOUNT_WORKERS_FNS_GRADATION','AMOUNT_WORKERS_SPARK_GRADATION','CL_TYPE','CL_PRODUCT_RKO_MARK','CL_PRODUCT_GAR_MARK','CL_PRODUCT_LOA_MARK','CL_PRODUCT_LEA_MARK','CL_PRODUCT_DEP_MARK','CL_PRODUCT_ZPP_MARK','FTS_FLAG','FTS_COUNTRY_NAME','FACTORING_MARK','REVENUE_COMPANY','GROUP_ID','CITY','REGION'];
     $company = array_fill_keys($headers, '');

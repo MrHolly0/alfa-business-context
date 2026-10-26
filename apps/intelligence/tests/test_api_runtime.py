@@ -74,3 +74,27 @@ def test_openapi_exposes_closed_runtime_models(tmp_path):
     schemas=spec["components"]["schemas"]
     assert "DocumentInput" in schemas and schemas["DocumentInput"]["additionalProperties"] is False
     assert "SearchInput" in schemas and "AnalysisRequest" in schemas
+
+
+def test_service_token_file_supports_container_auth_without_opening_other_tenants(tmp_path, monkeypatch):
+    monkeypatch.delenv('INTELLIGENCE_SERVICE_TOKEN', raising=False)
+    token_file=tmp_path/'service-token'
+    token_file.write_text('test-internal-service-credential\n')
+    monkeypatch.setenv('INTELLIGENCE_SERVICE_TOKEN_FILE',str(token_file))
+    client=TestClient(create_app(store=Store(),pipeline=object(),
+        artifact_store=ArtifactStore(tmp_path/'file-auth'),tenant_ids={'allowed'}))
+    body={'tenant_id':'allowed','source_ids':['s'],'as_of':'2026-10-24T00:00:00Z','query':'x'}
+    assert client.post('/internal/v1/search',json=body).status_code==401
+    headers={'Authorization':'Bearer test-internal-service-credential'}
+    assert client.post('/internal/v1/search',headers=headers,json=body).status_code==200
+    assert client.post('/internal/v1/search',headers=headers,json={**body,'tenant_id':'other'}).status_code==403
+
+
+def test_explicit_empty_service_token_stays_closed_even_with_file_configured(tmp_path, monkeypatch):
+    token_file=tmp_path/'service-token'
+    token_file.write_text('test-internal-service-credential')
+    monkeypatch.setenv('INTELLIGENCE_SERVICE_TOKEN_FILE',str(token_file))
+    client=TestClient(create_app(store=Store(),pipeline=object(),
+        artifact_store=ArtifactStore(tmp_path/'disabled-auth'),service_token='',tenant_ids={'allowed'}))
+    body={'tenant_id':'allowed','source_ids':['s'],'as_of':'2026-10-24T00:00:00Z','query':'x'}
+    assert client.post('/internal/v1/search',headers={'Authorization':'Bearer test-internal-service-credential'},json=body).status_code==401

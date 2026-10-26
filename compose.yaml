@@ -2,14 +2,16 @@ name: alfa-business-context
 
 services:
   postgres:
+    restart: unless-stopped
     image: postgres:17.11-bookworm
-    profiles: [tools, analysis, worker, test, database]
     environment:
       POSTGRES_DB: business_context_ai
       POSTGRES_USER: bootstrap_admin
       POSTGRES_PASSWORD: ${INTELLIGENCE_DB_BOOTSTRAP_PASSWORD:-local-bootstrap-only}
       INTELLIGENCE_DB_PASSWORD: ${INTELLIGENCE_DB_PASSWORD:-local-ai-only}
       INTELLIGENCE_MIGRATION_DB_PASSWORD: ${INTELLIGENCE_MIGRATION_DB_PASSWORD:-local-migration-only}
+      CORE_DB_PASSWORD: ${CORE_DB_PASSWORD:-local-core-only}
+      CORE_MIGRATION_DB_PASSWORD: ${CORE_MIGRATION_DB_PASSWORD:-local-core-migration-only}
     ports:
       - "127.0.0.1:${INTELLIGENCE_DB_PORT:-55483}:5432"
     volumes:
@@ -21,7 +23,130 @@ services:
       timeout: 3s
       retries: 30
 
+  database-setup:
+    image: postgres:17.11-bookworm
+    environment:
+      PGHOST: postgres
+      PGUSER: bootstrap_admin
+      PGPASSWORD: ${INTELLIGENCE_DB_BOOTSTRAP_PASSWORD:-local-bootstrap-only}
+      CORE_DB_PASSWORD: ${CORE_DB_PASSWORD:-local-core-only}
+      CORE_MIGRATION_DB_PASSWORD: ${CORE_MIGRATION_DB_PASSWORD:-local-core-migration-only}
+    volumes:
+      - ./infra/postgres/provision-core.sh:/scripts/provision-core.sh:ro
+    entrypoint: ["sh", "/scripts/provision-core.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs: [/tmp]
+
+  service-auth:
+    image: python:3.12.14-slim
+    environment:
+      SERVICE_TOKEN_SEED: ${INTELLIGENCE_SERVICE_TOKEN:-}
+    volumes:
+      - service-auth:/run/intelligence-auth
+      - ./infra/service-auth.py:/scripts/service-auth.py:ro
+    entrypoint: ["python", "/scripts/service-auth.py"]
+    read_only: true
+    network_mode: none
+    cap_drop: [ALL]
+
+  core-migrate:
+    build: &core-build
+      context: .
+      dockerfile: apps/core/Dockerfile
+      target: runtime
+    environment:
+      DATABASE_URL: ${CORE_MIGRATION_DATABASE_URL:-postgresql://core_migrator:${CORE_MIGRATION_DB_PASSWORD:-local-core-migration-only}@postgres:5432/business_context_core}
+      CORE_SEED_DEMO: ${CORE_SEED_DEMO:-1}
+    command: ["sh", "/scripts/core-migrate.sh"]
+    volumes:
+      - core-secrets:/var/lib/core-secrets
+      - core-sessions:/var/lib/core-sessions
+      - ./infra/core-migrate.sh:/scripts/core-migrate.sh:ro
+    depends_on:
+      database-setup:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs: ["/tmp:rw,nosuid,nodev,size=64m,uid=33,gid=33"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  core: &core
+    build: *core-build
+    init: true
+    restart: unless-stopped
+    environment: &core-environment
+      DATABASE_URL: ${CORE_DATABASE_URL:-postgresql://core_app:${CORE_DB_PASSWORD:-local-core-only}@postgres:5432/business_context_core}
+      INTELLIGENCE_BASE_URL: http://intelligence-api:8081
+      INTELLIGENCE_SERVICE_TOKEN_FILE: /run/intelligence-auth/service-token
+      CORE_INTELLIGENCE_TENANT_ID: ${CORE_INTELLIGENCE_TENANT_ID:-core-local}
+      INTELLIGENCE_TIMEOUT_SECONDS: ${CORE_INTELLIGENCE_TIMEOUT_SECONDS:-180}
+      APP_ENV: prod
+      APP_DEBUG: "0"
+    volumes:
+      - core-secrets:/var/lib/core-secrets
+      - core-sessions:/var/lib/core-sessions
+      - service-auth:/run/intelligence-auth:ro
+    depends_on:
+      core-migrate:
+        condition: service_completed_successfully
+      service-auth:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs: ["/tmp:rw,nosuid,nodev,size=64m,uid=33,gid=33"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    ports:
+      - "127.0.0.1:${CORE_PORT:-8090}:8080"
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@file_get_contents('http://127.0.0.1:8080/health') === false ? 1 : 0);"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 10s
+
+  core-scheduler:
+    <<: *core
+    profiles: [scheduler]
+    environment:
+      <<: *core-environment
+      CORE_SCHEDULER_INTERVAL: ${CORE_SCHEDULER_INTERVAL:-60}
+    ports: []
+    healthcheck:
+      disable: true
+    command: ["sh", "/scripts/core-scheduler.sh"]
+    volumes:
+      - core-secrets:/var/lib/core-secrets
+      - core-sessions:/var/lib/core-sessions
+      - service-auth:/run/intelligence-auth:ro
+      - ./infra/core-scheduler.sh:/scripts/core-scheduler.sh:ro
+    depends_on:
+      core:
+        condition: service_healthy
+      intelligence-api:
+        condition: service_healthy
+
+  core-test:
+    profiles: [test]
+    build:
+      <<: *core-build
+      target: test
+    read_only: true
+    tmpfs: ["/tmp:rw,nosuid,nodev,size=64m,uid=33,gid=33"]
+    volumes:
+      - core-test-secrets:/var/lib/core-secrets
+      - core-test-sessions:/var/lib/core-sessions
+    network_mode: none
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
   web:
+    restart: unless-stopped
+    depends_on:
+      core:
+        condition: service_healthy
     build:
       context: .
       dockerfile: apps/web/Dockerfile
@@ -94,12 +219,27 @@ services:
 
   intelligence-api:
     <<: *intelligence
-    profiles: [analysis]
+    restart: unless-stopped
+    profiles: []
     environment:
       <<: *intelligence-environment
-      INTELLIGENCE_SERVICE_TOKEN: ${INTELLIGENCE_SERVICE_TOKEN:-}
-      INTELLIGENCE_TENANTS: ${INTELLIGENCE_TENANTS:-}
+      INTELLIGENCE_SERVICE_TOKEN_FILE: /run/intelligence-auth/service-token
+      INTELLIGENCE_TENANTS: ${CORE_INTELLIGENCE_TENANT_ID:-core-local},${INTELLIGENCE_TENANTS:-}
     command: ["serve", "--host", "0.0.0.0", "--mode", "${INTELLIGENCE_MODE:-baseline}", "--config", "/config/providers.json", "--profile", "${INTELLIGENCE_PROFILE:-openrouter}"]
+    volumes:
+      - intelligence-state:/app/.state
+      - service-auth:/run/intelligence-auth:ro
+      - type: bind
+        source: ${INTELLIGENCE_CONFIG_FILE:-./apps/intelligence/examples/providers.template.json}
+        target: /config/providers.json
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      intelligence-migrate:
+        condition: service_completed_successfully
+      service-auth:
+        condition: service_completed_successfully
     ports:
       - "127.0.0.1:${INTELLIGENCE_PORT:-8081}:8081"
     healthcheck:
@@ -120,7 +260,6 @@ services:
     command: ["worker", "--mode", "${INTELLIGENCE_MODE:-baseline}", "--config", "/config/providers.json", "--profile", "${INTELLIGENCE_PROFILE:-openrouter}"]
 
   intelligence-migrate:
-    profiles: [tools, analysis, worker, test, database]
     build:
       context: .
       dockerfile: apps/intelligence/Dockerfile
@@ -182,3 +321,8 @@ volumes:
     name: alfa-business-context-intelligence-state
   intelligence-postgres:
     name: alfa-business-context-postgres
+  service-auth:
+  core-secrets:
+  core-sessions:
+  core-test-secrets:
+  core-test-sessions:

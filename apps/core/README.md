@@ -1,80 +1,51 @@
-# Symfony Core: пользователи и база кейса
+# Symfony Core
 
-Symfony Core stores users, company data, metrics, source policies, collected documents, baseline assessments, feedback, and discussions. Bank identity and model inference are not connected yet.
+Core — PHP 8.4 + Symfony 7.4 приложение для локального продукта. В Docker Compose оно обслуживает пользовательский `/api`, хранит Core business data в `business_context_core` и отдельно от AI/Data базы. Входная точка команды — [корневой README](../../README.md); полный запуск через Compose предпочтителен для демонстрации.
 
-## Локальный запуск
+## Основной запуск
 
-Нужны PHP 8.2+, PDO SQLite и Composer. Из `apps/core`:
+```sh
+docker compose up --build --wait
+```
+
+Миграционный контейнер выполняет `bin/schema.php`, затем при `CORE_SEED_DEMO=1` вызывает `bin/seed-demo.php`. Демо-вход: `demo@alpha.test` / `DemoAlpha2026!`. Этот account/company — локальный synthetic seed. Отключить seed можно `CORE_SEED_DEMO=0` до создания/миграции базы.
+
+Core runtime использует роль `core_app`; миграции — отдельную `core_migrator` с членством в `core_owner`. Вне Docker можно запустить Composer и PHP server, но это не даёт полного demo стека и требует самостоятельно передать PDO SQLite или отдельный Core PostgreSQL DSN, APP_SECRET и настроить AI HTTP auth, если нужен news path.
+
+## Реализованные API
+
+Auth использует cookie `alfa_core` с HttpOnly, SameSite=Strict и 30 минутами бездействия. `POST /api/auth/login` проверяет password hash; `GET /api/auth/me` возвращает текущего пользователя; `POST /api/auth/logout` закрывает сессию. Запись проверяет same-origin. Пользователь видит только компании из `company_memberships`; `viewer` не может редактировать контекст/метрики/наблюдения/события.
+
+- `GET /api/companies`, `GET /api/companies/{id}` — список и карточка компании с проверкой членства.
+- `GET/PUT /api/companies/{id}/context` — факты компании и CAS по `expectedVersion`; несоответствие версии возвращает `409`.
+- `GET/POST /api/companies/{id}/metrics`, `PATCH /api/companies/{id}/metrics/{metricId}`, `POST .../observations` — метрики, версии определений и ручные наблюдения.
+- `GET /api/companies/{id}/dashboard` — сводка метрик и бизнес-событий. Аналитический summary остаётся `no_analysis`, если отдельно не записан результат.
+- `GET/POST /api/companies/{id}/events` и маршруты metric/event associations — ручные события и подтверждённые связи.
+- `GET/POST /api/companies/{id}/feedback` и `/discussions` — обратная связь и обсуждения.
+- `GET /api/companies/{id}/news/sources`, `/news/documents`, `/news/runs`, `/news/runs/{runId}`, `/news/events/{eventId}/assessment` — чтение Core news records.
+- `GET/PUT /api/me/onboarding` — прогресс знакомства.
+
+Точные аннотации маршрутов находятся в `src/Controller`. Это текущие `/api/...` routes, не более ранний проектный `/api/v1` контракт.
+
+## Core → Intelligence: ограниченная интеграция
+
+`bin/run-news.php COMPANY_ID` формирует `ai-data-task-v1` из Core context/source-policy snapshot и отправляет `POST /internal/v1/analyze` в Python с bearer из `/run/intelligence-auth/service-token`. Для вызывающего tenant берётся `CORE_INTELLIGENCE_TENANT_ID`, Compose default `core-local`. Core проверяет tenant в ответе и сверяет актуальные context/policy версии перед записью. Baseline — режим по умолчанию; платная модель отдельно настраивается в Intelligence.
+
+`bin/run-due-news.php` выбирает компании с enabled sources и запускает их не чаще одного раза в час. Опциональный Compose `scheduler` profile повторяет эту команду. Это прямой ограниченный HTTP workflow; PHP Core не реализует общую Analysis Job queue с worker claim/heartbeat/result/failure, fencing или UI job progress. Python worker из `apps/intelligence` не следует считать подключённым к PHP Core queue.
+
+## Локальные команды и тесты
+
+В `apps/core`:
 
 ```sh
 composer install
-php bin/schema.php
-APP_SECRET='локальный-случайный-секрет' php -S 127.0.0.1:8090 -t public public/router.php
-```
-
-Для PostgreSQL задайте `DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DB` при запуске всех команд и сервера. Создавайте секрет и учётные данные самостоятельно, не добавляйте их в Git. SQLite-файл по умолчанию `var/core.sqlite`; путь меняется через `CORE_SQLITE_PATH`.
-
-## Импорт и доступ
-
-```sh
-php bin/import-case.php case-v1 companies.csv [person-links.csv] [payments.csv]
-php bin/create-user.php user@example.test 'Имя Пользователя' < password.txt
-php bin/grant-company.php USER_ID COMPANY_ID viewer
-```
-
-Импорт одной версии выполняется в транзакции. Он требует все 24 заголовка компании, проверяет ссылки в остальных файлах и сохраняет каждый ряд без изменения, с hash и номером строки. Для платежей фактическое имя файла надо проверить: в PDF оно совпадает с именем файла физических лиц. Сумма, количество и выручка остаются исходными текстовыми значениями: единица/период не подтверждены.
-
-Список company ID для администратора можно получить запросом к базе. Публичного маршрута для выдачи прав нет. `create-user.php` получает пароль из stdin, чтобы не помещать его в аргументы команды.
-
-## Проверка
-
-```sh
 composer test
 ```
 
-Проверяются импорт полей, хеширование пароля, выдача доступа и откат повреждённого импорта. HTTP-сценарий входа и изоляции организаций также проверен локально.
-
-## API
-
-- `POST /api/auth/login` `{ "email": "...", "password": "..." }` — вход, защищённая cookie-сессия на 30 минут без активности.
-- `GET /api/auth/me`, `POST /api/auth/logout`.
-- `GET /api/companies` — только организации пользователя.
-- `GET /api/companies/{id}` — исходные признаки доступной организации без raw JSON.
-- `GET/PUT /api/me/onboarding` — текущий шаг обучения; `PUT` `{ "nextStep": 0..9 }`.
-
-
-## Реализованные возможности ядра
-
-После `php bin/schema.php` доступны:
-
-- `GET/PUT /api/companies/{id}/context` — подтверждённые пользователем факты с номером версии. Для записи нужны `facts` и `expectedVersion`.
-- `GET/POST /api/companies/{id}/metrics`, `PATCH /api/companies/{id}/metrics/{metricId}` — каталог метрик и история определений.
-- `POST /api/companies/{id}/metrics/{metricId}/observations` — ручное значение с периодом, единицей и источником. Без значения API возвращает `no_data`.
-- `GET /api/companies/{id}/dashboard?from=YYYY-MM-DD&to=YYYY-MM-DD` — метрики и события за период. Сводка имеет статус `no_analysis`, пока ML не подключён.
-- `POST /api/companies/{id}/events`, `GET /api/companies/{id}/metrics/{metricId}/events`, `PUT /api/companies/{id}/metrics/{metricId}/events/{eventId}` — ручные события и подтверждённые связи с метриками.
-- `POST /api/companies/{id}/feedback`, `GET/POST /api/companies/{id}/discussions` — отзывы и обсуждения.
-
-Роли `editor` и `admin` могут менять контекст, метрики, наблюдения и события. `viewer` может читать и оставлять отзывы или сообщения. Все данные фильтруются по доступу к компании. Конфликт версий возвращает HTTP 409. Прогресс обучения принимается последовательно и хранится по пользователю.
-
-Для локального демо выполните `php bin/seed-demo.php`. Вход: `demo@alpha.test` / `DemoAlpha2026!`. Тестовая компания и пользователь не являются реальными данными банка. Форма входа сайта пока не подключена к этому API.
-
-## Новости: источник → документ → оценка
-
-Core хранит разрешённые источники и версию политики, а Python Intelligence выполняет сбор и baseline-анализ. Для локального запуска нужны зависимости из `apps/intelligence` (`python3.12 -m venv .venv` и `pip install -e .`). В каталоге `apps/core/config/case-bank-materials.json` перечислены девять названий из приложения 2 PDF и ссылка на общую папку; отдельные файлы и их метаданные из неё ещё не загружены.
-
-Источник регистрирует оператор, указав точный HTTPS URL и разрешённые домены статей:
+Для Compose-совместимого тестового контейнера из корня:
 
 ```sh
-php bin/add-news-source.php COMPANY_ID https://example.org/feed.xml rss external public 'Название' 'Издатель' 2026-10-23T00:00:00+00:00 example.org
-php bin/run-news.php COMPANY_ID
+docker compose --profile test run --build --rm core-test
 ```
 
-Для HTML/PDF обязательна дата публикации в metadata источника или документа. Неуказанная дата не заменяется временем загрузки. `run-news.php` собирает версионированный снимок контекста и источников, запускает существующий Python workflow, сверяет версии перед записью, сохраняет документы, ревизии, события и аналитические кандидаты. Повторный сбор не создаёт дублей. Python сохраняет оригинальные байты отдельно; Core отдаёт только доступные пользователю метаданные и основания.
-
-`php bin/run-due-news.php` выбирает компании, которые не проверялись последний час. Эту команду нужно вызывать внешним планировщиком; постоянный процесс расписания в Core пока не запущен. Для офлайн-проверки без сети:
-
-```sh
-sh tests/news-smoke.sh
-```
-
-API: `GET /api/companies/{id}/news/sources`, `/news/documents?from=&to=`, `/news/runs`, `/news/runs/{runId}`, `/news/events/{eventId}/assessment`. На дашборде события из документов показывают статус и краткое описание оценки. Автоматическое совпадение темы пользовательской метрики с текстом материала сохраняется только со статусом `proposed` и неизвестным направлением влияния; подтверждение доступно отдельной командой. Baseline не вызывает LLM и не выдаёт причинную оценку. Реальный модельный режим, права на материалы и загрузка файлов из общей папки требуют отдельной настройки и проверки.
+`tests/run.php` использует временную SQLite fixture и проверяет импорт, хеширование пароля, членство, версионную запись контекста, метрики, события и базовые API permissions. Core production schema запускается на PostgreSQL отдельно от AI DB. Скрипты импорта требуют предоставленных и проверенных файлов; настоящие CSV/PDF не включены.

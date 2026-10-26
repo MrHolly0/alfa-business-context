@@ -7,7 +7,7 @@ import * as C from "./catalog.js";
 import { contextualProduct } from "./bank-products.js";
 import { volumeSources } from "./volume-demo.js";
 import { renderMarkup } from "./core-ui.jsx";
-import { backendCapabilities } from "./capabilities.js";
+import { createCoreClient, CoreApiError } from "./core-client.js";
 const $ = (s) => document.querySelector(s),
   esc = (s) =>
     String(s ?? "").replace(
@@ -106,8 +106,24 @@ if (root?.schema !== 6 || !root.companies?.[root.active]) {
 }
 let demoSignedIn = false;
 try {
-  demoSignedIn = sessionStorage.getItem("business-context-demo-session") === "1";
+  demoSignedIn = sessionStorage.getItem("business-context-demo-session-v2") === "1";
 } catch {}
+const coreClient = createCoreClient();
+let coreMode = false,
+  coreUser = null,
+  coreCompanies = [],
+  coreCompany = null,
+  coreContext = null,
+  coreDashboardData = null,
+  coreMetrics = [],
+  coreNewsSources = [],
+  coreNewsDocuments = [],
+  coreMetricEvents = [],
+  coreMetricEventsId = "",
+  coreMetricEventsLoading = false,
+  coreCompanyGeneration = 0,
+  coreBusy = false,
+  coreError = "";
 let state,
   routeKey = "",
   view = { page: "overview" },
@@ -211,11 +227,11 @@ function route() {
             : sourcePage,
       scroll: window.scrollY,
     });
-  if (view.page === "news" && view.id) markEventSeen(view.id, view.scope === "volume");
+  if (!coreMode && view.page === "news" && view.id) markEventSeen(view.id, view.scope === "volume");
   const key = decodeURI(location.hash.slice(1) || "home"),
     parts = key.split("/"),
     previous = view.page;
-  if (demoSignedIn && key === "login") {
+  if ((demoSignedIn || coreMode) && key === "login") {
     location.hash = "home";
     return;
   }
@@ -237,7 +253,7 @@ function route() {
     if (view.page === "events") {
       eventPage = listMemory.get(key)?.page || 0;
     }
-    if (view.page === "detail") {
+    if (!coreMode && view.page === "detail") {
       const assessment = E.assess(state, view.id);
       if (assessment) {
         state.viewedVersions[view.id] = assessment.signature;
@@ -256,7 +272,7 @@ function route() {
             : previous === "research"
               ? "research"
               : routeKey || "overview";
-      if (view.page === "context")
+      if (!coreMode && view.page === "context")
         draft = {
           ...state.company.facts,
           ...(view.scope === "scenario" ? state.scenarios[view.id] || {} : {}),
@@ -392,8 +408,193 @@ function nav(label, icon, path) {
     (path === "research" && ["research-new", "report"].includes(view.page));
   return `<a class="navitem ${active ? "active" : ""}" href="#${path}" ${view.page === path ? 'aria-current="page"' : ""}>${I(icon)}<span>${label}</span></a>`;
 }
+function coreCompanyLabel(company) {
+  return company?.synthetic_u || company?.name || company?.id || "Компания";
+}
+function coreStatusLabel(status) {
+  return ({ no_analysis: "Сводка пока не готова", partial: "Нужны уточнения", ready: "Готово", unknown: "Не установлено", observed: "Есть наблюдение", confirmed: "Подтверждено", proposed: "Предложено", blocked: "Проверка ограничена", error: "Не удалось проверить", published: "Опубликовано", failed: "Не удалось проверить", no_data: "Данных нет", not_evaluated: "Не проверено", unavailable: "Недоступно" })[status] || (status ? "Нужны уточнения" : "Не указано");
+}
+function coreEventKind(kind) {
+  return ({ source_document: "Новость", manual: "Добавлено вручную", official: "Официальное сообщение", forecast: "Прогноз", opinion: "Мнение" })[kind] || "Материал";
+}
+function coreSourceRole(role) {
+  return ({ external: "Внешний источник", bank: "Банк", internal: "Внутренний источник", synthetic: "Учебный источник" })[role] || "Тип источника не указан";
+}
+function coreClassification(value) {
+  return ({ public: "Открытый", confidential: "Конфиденциальный", synthetic: "Учебный" })[value] || "Классификация не указана";
+}
+async function loadCoreCompanies(selectId = null) {
+  const sessionUser = coreUser?.id;
+  coreBusy = true;
+  coreError = "";
+  render();
+  try {
+    const result = await coreClient.companies();
+    if (coreUser?.id !== sessionUser) return;
+    coreCompanies = result.companies || [];
+    const selected = coreCompanies.find((c) => c.id === selectId) || coreCompanies[0] || null;
+    if (selected) await loadCoreCompany(selected.id, false);
+    else {
+      coreCompany = null;
+      coreContext = coreDashboardData = null;
+      coreMetrics = coreNewsSources = coreNewsDocuments = [];
+    }
+  } catch (e) {
+    coreError = e.message;
+  } finally {
+    coreBusy = false;
+    render();
+  }
+}
+async function loadCoreCompany(id, repaint = true) {
+  const generation = ++coreCompanyGeneration;
+  if (repaint) {
+    coreBusy = true; coreError = "";
+    if (coreCompany?.id !== id) {
+      coreCompany = null; coreContext = coreDashboardData = null;
+      coreMetrics = coreNewsSources = coreNewsDocuments = [];
+      coreMetricEvents = []; coreMetricEventsId = ""; coreMetricEventsLoading = false;
+    }
+    render();
+  }
+  try {
+    const [companyResult, contextResult, metricsResult, dashboardResult, sourcesResult, documentsResult] = await Promise.all([
+      coreClient.company(id), coreClient.context(id), coreClient.metrics(id), coreClient.dashboard(id),
+      coreClient.newsSources(id), coreClient.newsDocuments(id),
+    ]);
+    if (generation !== coreCompanyGeneration) return;
+    coreCompany = companyResult.company;
+    coreContext = contextResult.context;
+    coreMetrics = metricsResult.metrics || [];
+    coreDashboardData = dashboardResult;
+    coreNewsSources = sourcesResult.sources || [];
+    coreNewsDocuments = documentsResult.documents || [];
+    coreMetricEvents = []; coreMetricEventsId = ""; coreMetricEventsLoading = false;
+    coreCompanies = coreCompanies.map((c) => c.id === id ? { ...c, ...coreCompany } : c);
+    coreError = "";
+  } catch (e) {
+    if (generation !== coreCompanyGeneration) return;
+    coreError = e.message;
+    if (e.status === 401) {
+      coreMode = false; coreUser = null; coreCompanies = []; coreCompany = null;
+      try { sessionStorage.removeItem("business-context-demo-session-v2"); } catch {}
+      error = "Сессия завершилась. Войдите снова.";
+    }
+  } finally {
+    if (generation === coreCompanyGeneration && repaint) { coreBusy = false; render(); }
+  }
+}
+async function loadCoreMetricEvents(metricId) {
+  if (!coreCompany || coreMetricEventsId === metricId || coreMetricEventsLoading) return;
+  const generation = coreCompanyGeneration;
+  coreMetricEventsId = metricId; coreMetricEvents = []; coreMetricEventsLoading = true;
+  try {
+    const result = await coreClient.metricEvents(coreCompany.id, metricId);
+    if (generation !== coreCompanyGeneration || coreMetricEventsId !== metricId) return;
+    coreMetricEvents = await Promise.all((result.events || []).map(async (event) => {
+      try {
+        const response = await coreClient.newsAssessment(coreCompany.id, event.id);
+        return { ...event, assessment: response.assessment || null };
+      } catch (e) { if (e.status === 401) throw e; return event; }
+    }));
+  } catch (e) {
+    if (generation === coreCompanyGeneration && coreMetricEventsId === metricId) {
+      coreError = e.message;
+      if (e.status === 401) {
+        coreMode = false; coreUser = null; coreCompanies = []; coreCompany = null;
+        coreContext = coreDashboardData = null; coreMetrics = coreNewsSources = coreNewsDocuments = [];
+        error = "Сессия завершилась. Войдите снова.";
+      }
+    }
+  } finally {
+    if (generation === coreCompanyGeneration && coreMetricEventsId === metricId) {
+      coreMetricEventsLoading = false; render();
+    }
+  }
+}
+function coreMetricForm() {
+  const canWrite = coreCompany?.role !== "viewer";
+  return `<div class="form-page">${intro("Новый показатель", "Определите показатель компании. Значения не создаются автоматически.")}<form id="core-metric-form" class="card">${formError()}${textField("title","Название","","","text",'required maxlength="160"')}${textarea("description","Описание","", "", 'required maxlength="2000"')}${textField("unit","Единица измерения","","","text",'maxlength="40"')}${selectField("direction","Направление",[["neutral","Без заданного направления"],["up","Рост предпочтителен"],["down","Снижение предпочтительно"]],"neutral")}<div class="actions"><button class="btn primary" type="submit" ${canWrite ? "" : "disabled"}>Создать показатель</button>${B("Отмена","nav:home","secondary")}</div>${canWrite ? "" : '<p class="hint">Роль viewer даёт доступ только для чтения.</p>'}</form></div>`;
+}
+async function startCoreSession(email, password) {
+  coreBusy = true; error = ""; render();
+  try {
+    const result = await coreClient.login(email, password);
+    coreCompanyGeneration++;
+    coreCompany = coreContext = coreDashboardData = null;
+    coreCompanies = []; coreMetrics = coreNewsSources = coreNewsDocuments = [];
+    coreMetricEvents = []; coreMetricEventsId = "";
+    coreUser = result.user;
+    coreMode = true; demoSignedIn = false;
+    try { sessionStorage.removeItem("business-context-demo-session-v2"); } catch {}
+    await loadCoreCompanies();
+    navigate("home");
+  } catch (e) {
+    error = e.message;
+  } finally {
+    coreBusy = false; render();
+  }
+}
+function coreContextForm() {
+  const groups = [
+    ["activities", "Направления деятельности"], ["products", "Продукты"],
+    ["markets", "Рынки"], ["suppliers", "Поставщики"],
+    ["customers", "Клиенты"], ["risks", "Риски"], ["notes", "Примечания"],
+  ];
+  const facts = coreContext?.facts || {};
+  const canWrite = coreCompany?.role !== "viewer";
+  return `<div class="form-page">${intro("Контекст компании", "Сохраняйте подтверждённые сведения о компании. Каждая строка — отдельное утверждение.")}<form id="core-context-form" class="card">${formError()}${groups.map(([key,label]) => textarea(key,label,(facts[key] || []).join("\n"),"До 30 строк, максимум 300 знаков на строку; не добавляйте предположения как факты.",'maxlength="9000"')).join("")}${canWrite ? `<div class="actions"><button class="btn primary" type="submit" ${coreBusy ? "disabled" : ""}>Сохранить изменения</button>${B("Отмена","nav:company","secondary")}</div>` : '<p class="hint">Роль viewer даёт доступ только для чтения.</p>'}<p class="hint">Текущая версия: ${coreContext?.version ?? 0}. При конфликте версий данные будут перечитаны.</p></form></div>`;
+}
+function coreCompanyPage() {
+  const facts = coreContext?.facts || {};
+  const lines = Object.entries(facts).filter(([,items]) => Array.isArray(items) && items.length);
+  return `${intro("Моя компания", "Сведения о компании и сохранённый контекст.", B("Уточнить контекст","nav:context","primary","pencil"))}<div class="company-identity"><span class="company-avatar">${I("building")}</span><div><h2>${esc(coreCompanyLabel(coreCompany))}</h2><p>${esc(coreCompany?.mainokved_name || "Основная деятельность не указана")} · ${esc(coreCompany?.region || "Регион не указан")}</p></div></div><section class="profile-groups"><div class="profile-group"><h2>Контекст компании · версия ${coreContext?.version ?? 0}</h2><dl class="profile-facts">${lines.map(([key,items]) => `<div><dt>${esc(({activities:"Направления деятельности",products:"Продукты",markets:"Рынки",suppliers:"Поставщики",customers:"Клиенты",risks:"Риски",notes:"Примечания"})[key] || key)}</dt><dd>${items.map((x) => esc(x)).join("; ")}<span class="fact-origin">Сохранено</span></dd></div>`).join("") || '<div><dt>Контекст</dt><dd>Пока не уточнён</dd></div>'}</dl></div></section><div class="actions">${B("Изменить контекст","nav:context","secondary","pencil")}</div>`;
+}
+function coreNewsPage() {
+  return `${intro("Новости и источники", "Здесь показаны сохранённые материалы. Управление источниками и запуск сбора пока недоступны.")}<section class="card source-directory"><h2>Источники · ${coreNewsSources.length}</h2>${coreNewsSources.map((s) => `<article class="directory-row"><div class="row-grow"><h3>${esc(s.title || s.uri)}</h3><p class="source-meta">${esc(s.publisher || "Издатель не указан")} · ${esc(coreSourceRole(s.source_role))} · ${esc(coreClassification(s.classification))}</p><span class="source-kind">${s.enabled ? "Включён" : "Выключен"}</span></div></article>`).join("") || '<p>Источники не зарегистрированы.</p>'}</section><section class="card source-directory"><h2>Документы · ${coreNewsDocuments.length}</h2>${coreNewsDocuments.map((d) => `<article class="directory-row"><div class="row-grow"><h3>${esc(d.title || d.canonical_uri)}</h3><p class="source-meta">${esc(d.publisher || "Издатель не указан")} · ${esc(d.published_at || "Дата не указана")}</p><p>${esc(d.excerpt || "Текстовый фрагмент не сохранён.")}</p><span class="source-kind">${esc(coreClassification(d.classification))}</span></div></article>`).join("") || '<p>Документы не сохранены.</p>'}</section>`;
+}
+function coreUnsupportedPage() {
+  return empty("Раздел пока недоступен", "Здесь не показываются демоданные. Доступны обзор, профиль компании и сохранённые новости.", B("К обзору","nav:home"));
+}
+function renderCore() {
+  document.title = "Бизнес-пульс · Альфа-Бизнес";
+  if (!coreUser) {
+    renderMarkup($("#app"), loginPage()); renderAssistant(); return;
+  }
+  const userName = coreUser.displayName || coreUser.display_name || coreUser.email || "Пользователь";
+  let page;
+  if (coreBusy && !coreCompany) page = '<div class="card">Загружаем данные компании…</div>';
+  else if (coreError && !coreCompany) page = `<div class="card form-error">${esc(coreError)}</div>`;
+  else if (!coreCompany) page = `<div class="card">${coreError ? `<p class="form-error">${esc(coreError)}</p>` : ""}<h2>Нет доступных компаний</h2><p>Для этой учётной записи пока нет доступных организаций.</p></div>`;
+  else switch (view.page) {
+    case "home": case "overview": page = pulse.coreDashboard(coreCompany, coreDashboardData); break;
+    case "metric": {
+      loadCoreMetricEvents(view.id);
+      page = pulse.coreMetricPage(coreMetrics.find((m) => m.id === view.id), coreMetricEventsId === view.id ? coreMetricEvents : [], coreCompany.role !== "viewer");
+      break;
+    }
+    case "metric-new": page = coreMetricForm(); break;
+    case "company": page = coreCompanyPage(); break;
+    case "context": page = coreContextForm(); break;
+    case "events": case "sources": page = coreNewsPage(); break;
+    case "news": {
+      const event = coreDashboardData?.events?.find((e) => e.id === view.id);
+      page = event ? `${back("events","К событиям")}<article class="news-reader"><header><h1>${esc(event.title)}</h1><p>${esc(coreEventKind(event.kind))} · ${esc(event.published_on)}</p></header><div class="reader-body"><p>${esc(event.summary || "Текст события не предоставлен.")}</p></div><section class="reader-source"><p>Статус оценки: ${esc(coreStatusLabel(event.assessment_status))}</p><p>${esc(event.assessment_summary || "Опубликованной оценки пока нет.")}</p></section></article>` : back("events","К событиям") + '<div class="card">Событие не найдено среди сохранённых данных.</div>';
+      break;
+    }
+    case "account": page = `<div class="form-page account-page">${intro("Мой профиль","Данные учётной записи.")}<section class="card account-identity"><div><h2>${esc(userName)}</h2><p>${esc(coreUser.email || "")}</p></div></section><div class="actions">${B("Выйти","core-logout","secondary")}</div></div>`; break;
+    default: page = coreUnsupportedPage();
+  }
+  const companyTitle = coreCompany ? coreCompanyLabel(coreCompany) : "Нет доступных компаний";
+  const navItem = (label, icon, path) => `<a class="navitem ${view.page === path ? "active" : ""}" href="#${path}">${I(icon)}<span>${label}</span></a>`;
+  renderMarkup($("#app"), `${mobile ? '<button class="mobile-shade" data-action="mobile" aria-label="Закрыть навигацию"></button>' : ""}<aside class="sidebar ${mobile ? "open" : ""}"><a class="brand" href="#home"><span>Альфа Банк</span></a><nav class="banknav" aria-label="Меню банка"><div class="navlabel">Мои сервисы</div>${navItem("Бизнес-пульс","trend","home")}${navItem("Моя компания","building","company")}${navItem("Новости","file","events")}</nav></aside><main class="main"><div class="workspace"><header class="topbar"><div class="module-name"><a href="#home">Бизнес-пульс</a></div><div class="toptools"><button class="company-button" data-action="core-company-menu" aria-label="Выбрать компанию: ${esc(companyTitle)}" aria-haspopup="menu">${I("building")}<span>${esc(companyTitle)}</span>${I("down")}</button><a class="account-button" href="#account" aria-label="Профиль: ${esc(userName)}" title="${esc(userName)}"><span class="user-avatar">${esc(Array.from(userName)[0] || "П")}</span></a></div></header><div class="toolbar"><nav class="tabs module-tabs" aria-label="Бизнес-пульс"><a class="tab ${["home","overview","metric","metric-new"].includes(view.page)?"active":""}" href="#home">Обзор</a><a class="tab ${["company","context"].includes(view.page)?"active":""}" href="#company">Компания</a><a class="tab ${["events","news","sources"].includes(view.page)?"active":""}" href="#events">Новости</a></nav></div><div id="main-content" tabindex="-1">${coreBusy ? '<p class="hint">Обновляем сведения…</p>' : ""}${coreError && coreCompany ? `<p class="form-error">${esc(coreError)}</p>` : ""}${page}</div></div></main>`);
+}
 function render() {
   UI.close();
+  if (coreMode) {
+    renderCore();
+    return;
+  }
   sync();
   if (!demoSignedIn) {
     document.title = "Вход · Альфа-Бизнес";
@@ -484,7 +685,7 @@ function profileInitials() {
   return [root.profile.firstName, root.profile.lastName].filter(Boolean).map((s) => Array.from(s.trim())[0] || "").join("").toLocaleUpperCase("ru");
 }
 function loginPage() {
-  return `<main class="login-layout" id="main-content"><section class="login-showcase" aria-label="О сервисе"><a class="brand" href="#login" aria-label="Альфа-Бизнес"><span class="alpha">А</span><span>Альфа-Бизнес</span></a><div><span class="login-eyebrow">Бизнес-пульс</span><h1>Всё важное для вашего бизнеса — в одном месте</h1><p>Ситуации, новости и следующие шаги с учётом выбранной компании.</p><div class="login-preview"><span>Ваш рабочий обзор</span><strong>От события к решению</strong><small>Одинаково удобно для производства, торговли, услуг и других направлений.</small></div></div><span class="login-footnote">Демонстрационная версия</span></section><section class="login-panel"><div class="login-mobile-brand"><span class="alpha">А</span><strong>Альфа-Бизнес</strong></div><form id="demo-login-form" class="login-card"><span class="login-eyebrow">Вход в сервис</span><h2>С возвращением</h2><p>Откройте рабочее пространство компании.</p><label for="demo-login-email">Электронная почта</label><input id="demo-login-email" name="email" type="email" autocomplete="username" placeholder="name@company.ru" required><label for="demo-login-password">Пароль</label><input id="demo-login-password" name="password" type="password" autocomplete="current-password" placeholder="Введите пароль" required><button class="login-submit" type="submit">Войти ${I("right")}</button><p class="login-disclaimer">Это макет входа: логин и пароль не проверяются и не отправляются на сервер. Не используйте настоящий пароль.</p></form></section></main>`;
+  return `<main class="login-layout" id="main-content"><section class="login-showcase" aria-label="О сервисе"><a class="brand" href="#login" aria-label="Альфа-Бизнес"><span class="alpha">А</span><span>Альфа-Бизнес</span></a><div><span class="login-eyebrow">Бизнес-пульс</span><h1>Всё важное для вашего бизнеса — в одном месте</h1><p>Ситуации, новости и следующие шаги с учётом выбранной компании.</p><div class="login-preview"><span>Ваш рабочий обзор</span><strong>От события к решению</strong><small>Одинаково удобно для производства, торговли, услуг и других направлений.</small></div></div><span class="login-footnote">Вход в сервис или отдельное демо</span></section><section class="login-panel"><div class="login-mobile-brand"><span class="alpha">А</span><strong>Альфа-Бизнес</strong></div><form id="demo-login-form" class="login-card"><span class="login-eyebrow">Вход в сервис</span><h2>Войдите в сервис</h2><p>Используйте свою учётную запись.</p>${formError()}${coreError ? `<p class="form-error" role="alert">${esc(coreError)}</p>` : ""}<label for="demo-login-email">Электронная почта</label><input id="demo-login-email" name="email" type="email" autocomplete="username" placeholder="name@company.ru" required><label for="demo-login-password">Пароль</label><input id="demo-login-password" name="password" type="password" autocomplete="current-password" placeholder="Введите пароль" required><button class="login-submit" type="submit" ${coreBusy ? "disabled" : ""}>${coreBusy ? "Входим…" : "Войти"} ${I("right")}</button><p class="login-disclaimer">Вход проверяется сервером; используется защищённая cookie-сессия.</p><div class="actions">${B("Посмотреть демо","demo-login","secondary")}</div></form></section></main>`;
 }
 function accountPage() {
   return back("home", "На главную банка") + `<div class="form-page account-page">${intro("Мой профиль", "Личные данные пользователя. Организация выбирается отдельно в шапке.")}<form id="account-form" class="card">${formError()}<div class="account-identity"><span class="user-avatar large" aria-hidden="true">${esc(profileInitials())}</span><div><h2>${esc(profileName())}</h2><p>Демонстрационный профиль</p></div></div><div class="form-grid">${textField("firstName","Имя",draft.firstName,"","text",'required maxlength="80" autocomplete="given-name"')}${textField("lastName","Фамилия",draft.lastName,"","text",'maxlength="80" autocomplete="family-name"')}</div><div class="actions"><button type="submit" class="btn primary">Сохранить</button>${B("Отмена","form-cancel","secondary")}</div><p class="account-limit">Имя используется в этом прототипе. Банковский вход и управление правами не подключены.</p></form><section class="account-organization"><h2>Текущая организация</h2><div class="account-org-row">${I("building")}<div><strong>${esc(state.company.name)}</strong><p>${esc(state.company.facts.activity)}</p></div></div><p>Смена организации меняет рабочие данные и оценки. Ваш профиль остаётся прежним.</p></section></div>`;
@@ -1498,11 +1699,37 @@ let dirty = false;
 function perform(action, anchor) {
   const [type, id, value] = action.split(":");
   if (pulse.action(type, id, view.page)) return;
+  if (type === "demo-login") {
+    error = ""; coreError = ""; coreMode = false; coreUser = null; demoSignedIn = true;
+    try { sessionStorage.setItem("business-context-demo-session-v2", "1"); } catch {}
+    navigate("home"); render(); return;
+  }
+  if (type === "core-company-menu") {
+    UI.show(anchor, `<div class="menu-caption">Доступные компании</div>` + coreCompanies.map((c) => UI.item(`<strong>${esc(coreCompanyLabel(c))}</strong><span class="hint">${esc(c.mainokved_name || c.region || "")}</span>`, "switch-core-company:" + c.id, "building")).join(""), "Выбор компании");
+    return;
+  }
+  if (type === "switch-core-company") {
+    if (dirty) { toast("Сначала сохраните изменения или отмените редактирование."); return; }
+    UI.close();
+    loadCoreCompany(id).then(() => { if (!coreError) navigate("home"); });
+    return;
+  }
+  if (type === "core-logout") {
+    coreCompanyGeneration++;
+    coreClient.logout().catch(() => {}).finally(() => {
+      coreMode = false; coreUser = null; coreCompanies = []; coreCompany = null;
+      coreContext = coreDashboardData = null; coreMetrics = coreNewsSources = coreNewsDocuments = [];
+      coreMetricEvents = []; coreMetricEventsId = ""; coreMetricEventsLoading = false;
+      dirty = false; draft = {};
+      error = ""; location.hash = "login"; render();
+    });
+    return;
+  }
   if (type === "demo-logout") {
     demoSignedIn = false;
     assistant = false;
     UI.close();
-    try { sessionStorage.removeItem("business-context-demo-session"); } catch {}
+    try { sessionStorage.removeItem("business-context-demo-session-v2"); } catch {}
     location.hash = "login";
     render();
     return;
@@ -2551,11 +2778,50 @@ document.addEventListener("submit", async (e) => {
   error = "";
   try {
     if (f.id === "demo-login-form") {
-      demoSignedIn = true;
-      try { sessionStorage.setItem("business-context-demo-session", "1"); } catch {}
-      f.reset();
+      const email = String(data.email || "").trim(), password = String(data.password || "");
+      await startCoreSession(email, password);
+      if (coreMode) f.reset();
       dirty = false;
-      navigate("home");
+    } else if (f.id === "core-metric-form") {
+      if (coreCompany?.role === "viewer") throw Error("У вас есть доступ только для чтения.");
+      const companyId = coreCompany.id;
+      const created = await coreClient.createMetric(companyId, {
+        title: String(data.title || "").trim(), description: String(data.description || "").trim(),
+        unit: String(data.unit || "").trim(), direction: data.direction || "neutral",
+      });
+      if (coreCompany?.id !== companyId) return;
+      await loadCoreCompany(companyId, false);
+      dirty = false; navigate("metric/" + created.id); toast("Показатель создан.");
+    } else if (f.id === "core-observation-form") {
+      if (coreCompany?.role === "viewer") throw Error("У вас есть доступ только для чтения.");
+      const metricId = f.dataset.metricId;
+      const companyId = coreCompany.id;
+      if (!E.validDate(data.periodStart) || !E.validDate(data.periodEnd) || data.periodStart > data.periodEnd) throw Error("Проверьте даты периода.");
+      const result = await coreClient.addObservation(companyId, metricId, {
+        value: String(data.value || ""), unit: String(data.unit || "").trim(),
+        periodStart: data.periodStart, periodEnd: data.periodEnd, source: String(data.source || "").trim(),
+      });
+      if (coreCompany?.id !== companyId) return;
+      await loadCoreCompany(companyId, false);
+      dirty = false; navigate("metric/" + metricId); toast("Наблюдение сохранено.");
+    } else if (f.id === "core-context-form") {
+      const companyId = coreCompany.id;
+      const facts = {};
+      for (const key of ["activities", "products", "markets", "suppliers", "customers", "risks", "notes"]) {
+        facts[key] = String(data[key] || "").split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+        if (facts[key].length > 30 || facts[key].some((x) => x.length > 300)) throw Error("В каждом разделе допускается до 30 строк, не более 300 знаков каждая.");
+      }
+      try {
+        await coreClient.saveContext(companyId, Number(coreContext?.version || 0), facts);
+        if (coreCompany?.id !== companyId) return;
+        await loadCoreCompany(companyId, false);
+        dirty = false; draft = {}; navigate("company"); render(); toast("Контекст сохранён.");
+      } catch (e) {
+        if (coreCompany?.id !== companyId) return;
+        error = e.status === 409 ? "Контекст уже изменился в другой сессии. Данные перечитаны; проверьте форму и сохраните ещё раз." : e.message;
+        if (e.status === 409 && coreCompany?.id === companyId) await loadCoreCompany(companyId, false);
+        dirty = false; render();
+      }
     } else if (f.id === "account-form") {
       const firstName = String(data.firstName || "").trim(), lastName = String(data.lastName || "").trim();
       if (!firstName || firstName.length > 80 || lastName.length > 80) throw Error("Укажите имя не длиннее 80 знаков.");
@@ -2713,17 +2979,28 @@ setInterval(() => {
   if (integration.news && root.auto && !document.hidden && !busy && !dirty)
     refresh("all", true);
 }, 300000);
-api("/api/status")
-  .then((s) => {
-    integration = backendCapabilities(s);
-    render();
-  })
-  .catch(() => {});
+async function bootstrapCore() {
+  if (demoSignedIn) return;
+  try {
+    const result = await coreClient.me();
+    coreUser = result.user;
+    coreMode = true;
+    try { sessionStorage.removeItem("business-context-demo-session-v2"); } catch {}
+    if (!location.hash || location.hash === "#login") location.hash = "#home";
+    await loadCoreCompanies();
+  } catch (e) {
+    if (!(e instanceof CoreApiError) || e.status !== 401) {
+      coreError = e.message || "Сервис пока недоступен.";
+    }
+  }
+  render();
+}
 if (location.hash.startsWith("#panel/context/"))
   location.hash = location.hash.replace("#panel/context/", "#context/");
 if (!location.hash) history.replaceState(null, "", demoSignedIn ? "#home" : "#login");
 route();
-persist();
+if (demoSignedIn) persist();
+void bootstrapCore();
 
 let resizeTimer;
 addEventListener("resize", () => {

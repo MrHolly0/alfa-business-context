@@ -1,128 +1,74 @@
 # Разработка и локальная проверка
 
-Основной запуск — [Docker Compose](../infra/README.md). Общие границы и статус проекта описаны в [интеграции Backend/Frontend](ai-integration.md), [процессе AI/Data](ai-process.md) и [матрице готовности](ai-scope-and-readiness.md). Live результаты не дублируются здесь: см. [ai-live-checks.md](ai-live-checks.md).
+## Полный локальный запуск
 
-## Python
-
-Нужны Python 3.12+, uv и отдельная PostgreSQL для AI/Data. Из корня:
+Нужны Docker и Compose. Из корня:
 
 ```sh
-docker compose --profile database up -d --wait postgres
-docker compose --profile database run --build --rm intelligence-migrate
-cd apps/intelligence
-export INTELLIGENCE_DATABASE_URL='postgresql://intelligence_app:local-ai-only@127.0.0.1:55483/business_context_ai'
-uv sync --frozen
-uv run --frozen python -m intelligence --help
-uv run --frozen python -m intelligence demo-data --state-dir /tmp/alfa-demo-data
-uv run --frozen python -m intelligence demo-personalization --output /tmp/personalization-comparison.json
-uv run --frozen python -m intelligence demo-research --output /tmp/indirect-research.json
-uv run --frozen python -m intelligence prepare-description --input examples/description-context.json \
-  --output /tmp/description-proposal.json
-uv run --frozen python -m intelligence run-task --mode baseline \
-  --input examples/data-task.json --state-dir /tmp/alfa-data-task
+docker compose up --build --wait
 ```
 
-`demo-data` запускает локальную синтетическую фикстуру без HTTP и LLM. `run-task` выполняет разрешённый `ai-data-task-v1` напрямую и не проверяет Core queue/lease/publication lifecycle. Baseline не делает внешние model calls. Результат оценивает структуру/сценарий; качество на неизвестных реальных банковских данных этим не подтверждается.
+Откройте http://localhost:4173 и войдите `demo@alpha.test` / `DemoAlpha2026!` (только для локального демо). Для чистого браузерного прототипа нажмите «Посмотреть демо». Параметры локальных портов и dev DB пароли перечислены в `.env.example`; не копируйте эти значения в общий deployment.
 
-`prepare-description` возвращает детерминированное предложение, не меняя канонический профиль Core. `demo-personalization` сравнивает три синтетические компании на одинаковых событиях. Его приоритеты — поисковые эвристики, не вероятности. Ограничения и способы читать результаты описаны в [персонализации](personalization.md).
+Первый запуск автоматически создаёт отдельные Core/AI базы, роли, таблицы и Core demo seed. Переменные `CORE_DB_PASSWORD`, `CORE_MIGRATION_DB_PASSWORD`, `INTELLIGENCE_DB_PASSWORD` и другие bootstrap credentials применяются при инициализации volume; изменение env не меняет уже сохранённые пароли. Для обычной остановки используйте `docker compose down`, не `down -v`, если нужно сохранить данные.
 
-### PostgreSQL для локальной разработки и тестов
+## Тесты
 
-Обычные CLI/API/worker команды хранят рабочее состояние в PostgreSQL. Настроить локальный основной database profile можно так:
+Из корня запустите:
 
 ```sh
-docker compose --profile database up -d --wait postgres
-docker compose --profile database run --build --rm intelligence-migrate
+npm test
 ```
 
-Хостовому процессу нужны `INTELLIGENCE_DATABASE_URL` с ролью приложения и `INTELLIGENCE_MIGRATION_DATABASE_URL` для миграций. Не передавайте миграционную роль API или worker. DSN и команды `db migrate`, `db check`, `db import-sqlite` описаны в [руководстве PostgreSQL](postgresql.md). `--state-dir` остаётся логическим корнем путей/namespaces и private файлов, а рабочие таблицы Intelligence живут в PostgreSQL.
-
-Тесты используют отдельную базу `business_context_ai_test`:
+Отдельные Docker-команды:
 
 ```sh
-docker compose --profile test up -d --wait postgres
-docker compose --profile test run --build --rm intelligence-test-migrate
-cd apps/intelligence
-INTELLIGENCE_DATABASE_URL='postgresql://intelligence_app:local-ai-only@127.0.0.1:55483/business_context_ai_test' \
-INTELLIGENCE_MIGRATION_DATABASE_URL='postgresql://intelligence_migrator:local-migration-only@127.0.0.1:55483/business_context_ai_test' \
-  uv run --frozen python -m pytest -q -p no:cacheprovider tests
+docker compose --profile test run --build --rm core-test
+docker compose --profile test run --build --rm web-test
+docker compose --profile test run --build --rm intelligence-test
 ```
 
-### Fixture job stand
+Core-тесты запускаются без сети и используют временную SQLite fixture для миграции/бизнес API; Compose Core production использует отдельную PostgreSQL database. Web-тесты запускаются в offline test image. Python suite использует `business_context_ai_test` и отдельную роль приложения/мигратора; провайдерские ключи ему не передаются. GitHub Actions настроен на те же три тестовых контура. Отдельная проверка общего запуска и браузерных сценариев описана в [отчёте интеграции](product-docker-checks.md).
 
-Чтобы проверить CoreClient/Worker, запустите fixture stand в одном терминале, а worker — в другом из `apps/intelligence`:
+## Новостной путь Core → Python
+
+Для локального baseline-пути сначала запустите полный Compose stack и получите company ID:
 
 ```sh
-uv run --frozen python -m intelligence core-stand --fixture-mode \
-  --state-dir /tmp/alfa-core-stand --seed examples/core-stand-ai-job.json
+docker compose exec core php bin/seed-demo.php
+docker compose exec core php -r 'require "vendor/autoload.php"; $db=App\Database::connect(); echo $db->query("SELECT id FROM companies ORDER BY id LIMIT 1")->fetchColumn(), PHP_EOL;'
 ```
 
-Для проверки автоматической постановки можно добавить `--auto-optimization-policy examples/auto-optimization-policy.json`. Пример разрешает только одну optimize-задачу с отдельным резервом $0.01; исполнение модели требует явно настроенного worker в модельном режиме. По умолчанию политики нет, intent остаётся `skipped_budget`.
-
-Это явный SQLite-backed stand на loopback, не PHP Core и не production job owner. Он создаёт локальный тестовый service token для fixture; пользовательские права, UI, SSE, публикация и PHP бизнес-таблицы здесь не реализованы. SQLite используется самим stand; worker и рабочие данные Intelligence используют PostgreSQL.
-
-Чтобы worker подключился к stand, задайте ему адрес и локальный тестовый token, показанный stand, а затем выполните:
+Добавьте только разрешённый учебный RSS URL с правом на запросы и доменами статей, затем вручную запустите сбор:
 
 ```sh
-CORE_BASE_URL=http://127.0.0.1:8765 \
-CORE_SERVICE_TOKEN='<fixture-token>' \
-uv run --frozen python -m intelligence worker --once --mode baseline \
-  --state-dir /tmp/alfa-worker
+docker compose exec core php bin/add-news-source.php COMPANY_ID https://example.org/feed.xml rss external public 'Учебный источник' 'Издатель' 2026-10-26T00:00:00+00:00 example.org
+docker compose exec core php bin/run-news.php COMPANY_ID
 ```
 
-Подставляйте token только локально в командную сессию; это не production credential и не значение для репозитория. Для durable расписания используйте `--schedule examples/core-stand-ai-task.json --schedule-id demo-collect --interval 3600`; интервал должен быть не меньше 60 секунд. Stand создаёт обычную fixture job, без браузера и сетевых источников.
+Замените `COMPANY_ID` на прочитанный ID и примерный домен/URL на источник, который разрешено опрашивать. Команда не нужна для базового UI: без источников dashboard и news read views пусты. Не добавляйте закрытые материалы, банковские PDF/CSV или ссылки без права на загрузку.
 
-## Внутренний HTTP API
-
-Для локального `serve` нужны operator-owned `INTELLIGENCE_SERVICE_TOKEN` и `INTELLIGENCE_TENANTS`; без обоих приватные маршруты закрыты:
+Опциональный расписанный сбор:
 
 ```sh
-INTELLIGENCE_SERVICE_TOKEN='<local-test-token>' \
-INTELLIGENCE_TENANTS='demo-tenant' \
-uv run --frozen python -m intelligence serve --mode baseline \
-  --host 127.0.0.1 --port 8081 --state-dir /tmp/alfa-api
+docker compose --profile scheduler up --build --wait
 ```
 
-Не используйте эти test values как рабочую настройку. Frontend ходит в Core; Python API предназначен для доверенного service caller. Маршруты и входы перечислены в [контрактах](../contracts/intelligence/README.md).
+Профиль запускает тот же PHP CLI `run-due-news.php` примерно раз в минуту; скрипт не чаще раза в час обрабатывает каждую компанию с enabled sources. Это scheduler конкретного news command, не общий job worker и не Python queue.
 
-## Web
+## Python отдельно
 
-Нужен Node.js версии, указанной в `apps/web/.nvmrc`:
+Для синтетических тестовых путей без LLM:
 
 ```sh
-npm ci --prefix apps/web
-npm --prefix apps/web test
-npm --prefix apps/web run build
-npm --prefix apps/web run validate
+docker compose --profile tools run --build --rm intelligence demo-data
+docker compose --profile tools run --build --rm intelligence evaluate --mode baseline
 ```
 
-UI до подключения PHP/Core использует demo data; его `/api/` не является настоящим backend.
+Команды Python API/worker для разработки, schemas и fixture stand описаны в [README Intelligence](../apps/intelligence/README.md). Fixture worker не подтверждает Core job queue: полноценные claim/lease/result endpoints в текущем Core отсутствуют. Модельный режим требует явно настроенного provider-конфига и ключа в локальном env; baseline — значение по умолчанию.
 
-## Контракты и зависимости
+## Изменение PHP и web
 
-Проверка сгенерированных схем и OpenAPI:
+Core работает из `apps/core`; зависимости фиксируются `composer.lock`. Web package находится в `apps/web` и собирается Node 22.15 в build stage; runtime — nginx. Изменение frontend проверяйте `npm --prefix apps/web test`, `npm run build`, `npm run validate`. Core unit/integration suite: `composer test` из `apps/core` либо Compose `core-test`. Не редактируйте `.env` с личными настройками для проверки проекта; пример переменных для репозитория — `.env.example`.
 
-```sh
-cd apps/intelligence
-uv run --frozen python scripts/export_contracts.py --check
-```
-
-После согласованного изменения Python-моделей экспортируйте схемы без `--check` и включите ожидаемые JSON diffs. Lock-файлы обновляйте командами `uv lock` и `uv export`, описанными в [infra README](../infra/README.md). Worker/contract payloads описаны в [`contracts/intelligence`](../contracts/intelligence/README.md).
-
-## Проверяемые границы
-
-- Core — единственный владелец user settings, прав, source policy, профиля и опубликованных business revisions.
-- Probe URL — разовая проверка разрешённого grant; он не подписывает на издание.
-- Поиск работает по уже разрешённому локальному корпусу, а не по всей сети.
-- CSV prepare возвращает только proposal; сохранение контекста делает Core. Неизвестная единица выручки остаётся неизвестной.
-- Модель вызывается только в явном `--mode model` с согласованной конфигурацией и budget. Confidential materials блокируют внешний вызов.
-- Fixtures подменяют сеть и входные данные, не бизнес-смысл. Полный PHP путь, банковский корпус и независимая экспертная оценка остаются внешними проверками.
-
-## Ветки и коммиты
-
-Основная ветка — `main`. Рабочую ветку создавайте под одну задачу: `feat/<задача>`, `fix/<задача>` или `docs/<задача>`. После включения в `main` удаляйте её. Коммиты оформляйте как `type: описание на русском`, сохраняя своё обычное авторство. Инструкция для нового участника: [передача проекта](handoff.md).
-
-
-Проверки без сети и модели: `docker compose run --build --rm intelligence demo-business` и `docker compose run --build --rm intelligence demo-personalization`. На хосте из `apps/intelligence`: `.venv/bin/python -m intelligence demo-personalization --output /tmp/personalization-comparison.json`. Контекстные регрессии: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/test_company_context.py tests/test_description_context.py tests/test_workflow_extension.py tests/test_business_scenario.py tests/test_personalization_comparison.py tests/test_auto_personalization.py`. Полный набор и экспорт контрактов проверяются перед завершением изменений.
-
-[Содержательные проверки косвенных цепочек и реального турнира](research-and-tournament-checks.md). [Последовательные JSON-примеры и оставшиеся подключения Symfony](symfony-integration.md).
+См. [infra README](../infra/README.md), [Symfony/Core](../apps/core/README.md), [web](../apps/web/README.md), [архитектуру](architecture.md).

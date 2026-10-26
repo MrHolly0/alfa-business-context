@@ -80,14 +80,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker compose config --quiet
-      - run: docker compose build web intelligence web-test intelligence-test intelligence-api intelligence-worker
-      - run: docker compose --profile test run --rm web-test
+      - run: docker compose build core core-migrate core-test web intelligence web-test intelligence-test intelligence-api intelligence-worker
+      - run: docker compose --profile test run --build --rm core-test
+      - run: docker compose --profile test run --build --rm web-test
       - run: docker compose --profile test run --build --rm intelligence-test
       - run: docker compose --profile tools run --build --rm intelligence demo
       - run: docker compose --profile tools run --build --rm intelligence evaluate
       - run: docker compose --profile analysis up --build --wait intelligence-api
       - run: curl --fail --silent --show-error http://127.0.0.1:8081/health
-      - run: docker compose up --wait web
+      - run: docker compose up --build --wait
+      - run: curl --fail --silent --show-error http://127.0.0.1:8090/health
       - run: curl --fail --silent --show-error http://127.0.0.1:4173/healthz
+      - name: Проверить вход через Web → Core
+        run: |
+          python3 - <<'PY'
+          import http.cookiejar
+          import json
+          import urllib.request
+
+          base = 'http://127.0.0.1:4173'
+          client = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+          request = urllib.request.Request(base + '/api/auth/login',
+              data=json.dumps({'email': 'demo@alpha.test', 'password': 'DemoAlpha2026!'}).encode(),
+              headers={'Content-Type': 'application/json', 'Origin': base})
+          with client.open(request, timeout=15) as response:
+              assert response.status == 200
+          with client.open(base + '/api/companies', timeout=15) as response:
+              assert json.load(response)['companies']
+          PY
       - if: always()
         run: docker compose down

@@ -1,26 +1,25 @@
 # Демо для проверки
 
-React UI и Python AI/Data — два отдельных пути. UI не запускает Python задачу и пока не подключён к PHP Core.
+## Продуктовый путь с Core
 
-## React UI
+1. Из корня выполните `docker compose up --build --wait`.
+2. Откройте http://localhost:4173 и войдите `demo@alpha.test` / `DemoAlpha2026!` (локальный seed only).
+3. Проверьте список компании, карточку, профиль/context, метрики и dashboard. Измените факт в контексте и сохраните: Core хранит новую версию; при устаревшем `expectedVersion` отвечает конфликтом.
+4. Откройте «Новости». Демо seed не создаёт источники, поэтому список новостей может быть пуст. UI только читает Core news данные и не инициирует сбор.
+5. Чтобы проверить Core→Python: оператор добавляет разрешённый URL-командой `bin/add-news-source.php`, затем `bin/run-news.php COMPANY_ID`. Core передаёт snapshot во внутренний Python endpoint в режиме baseline; созданные run/document/event/assessment читаются через UI/API. Не добавляйте источник, который нельзя опрашивать.
 
-1. Из корня репозитория запустите `npm run dev`, затем откройте http://localhost:4173.
-2. Откройте очередь ситуаций, выберите учебную ситуацию и посмотрите основание, дату, источник и неизвестные условия.
-3. Откройте каталог источников, найдите материал и проверьте действия исключения одного материала или издания. Переключите профиль компании и сравните учебные сценарии.
-4. Ожидаемый результат: интерфейс показывает локальные фикстуры и сохраняет локальные действия в `localStorage`. Это не обращение к backend, не проверка прав и не анализ через Python.
+Можно вместо Core нажать «Посмотреть демо». Это локальные browser fixtures/localStorage, не те же данные и не та же сессия, что Core.
 
-## Python AI/Data
+## Python offline demo
 
-Из каталога `apps/intelligence` выполните:
+Для самостоятельного синтетического пути выполните из корня:
 
 ```sh
-.venv/bin/python -m intelligence demo-data \
-  --state-dir /tmp/alfa-demo-fresh \
-  --output /tmp/alfa-demo-result.json
+docker compose --profile tools run --build --rm intelligence demo-data
 ```
 
-Ожидаемый JSON содержит `status: partial`; в `coverage.demo_summary` — 2 события, 2 учебные компании и 4 кандидата, `network_access: false`, `baseline_only: true`. Это офлайн-синтетический путь через Collector → Corpus → events → DataTask. Он не использует реальные банковские PDF/CSV или внешний LLM.
+Он проходит Python collector/corpus/events/baseline на локальной учебной фикстуре без внешней сети и model calls. Это не настоящая банковская новость и не Core job queue. Результат содержит кандидаты и coverage, не автоматически опубликованные Core assessments.
 
-## Ограничения и проверки
+## Границы
 
-UI и Python демо не соединены; `/api/` в nginx отвечает `503`, PHP Core отсутствует в текущем Compose. Python fixture не доказывает точность на реальных клиентах или новостях. Все ограничения и команды тестов приведены в [infra README](../infra/README.md); для полного backend/frontend контракта см. [AI integration](ai-integration.md).
+Успешный UI login подтверждает только локальную cookie-сессию. Демо не проверяет банковскую SSO, промышленную изоляцию tenants, AlfaGen, качество на реальных клиентах или полноценную Core job queue/lease worker. Подробные команды — [development](development.md) и [infra](../infra/README.md).

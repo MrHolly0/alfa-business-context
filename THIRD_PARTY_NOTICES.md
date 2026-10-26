@@ -1,24 +1,28 @@
 # Сторонние компоненты и материалы
 
-Версии интерфейса закреплены в `apps/web/package-lock.json`; Python — в `apps/intelligence/uv.lock` и производных `requirements*.lock` с hash. При обновлении зависимостей проверяйте также их транзитивное дерево.
+Версии Web закреплены в `apps/web/package-lock.json`, Python — в `apps/intelligence/uv.lock` и производных `requirements*.lock`, PHP — в `apps/core/composer.lock`. Сверяйте транзитивные зависимости и условия лицензии при обновлении.
 
 ## Прямые зависимости
 
-| Компонент | Версия | Использование | Лицензия по метаданным пакета |
-|---|---|---|---|
-| React / react-dom | 18.3.1 | Интерфейс | MIT |
-| html-react-parser | 6.1.9 | Адаптация разметки | MIT |
-| esbuild | 0.28.2 | Сборка | MIT |
+| Компонент | Версия | Использование | Лицензия по lock/package metadata |
+|---|---:|---|---|
+| React / react-dom | 18.3.1 | Web UI | MIT |
+| html-react-parser | 6.1.9 | Разбор отображаемой разметки | MIT |
+| esbuild | 0.28.2 | Сборка Web | MIT |
 | @alfalab/core-components | 50.37.0 | Компоненты Альфы | MIT в package-lock; условия дистрибутива сверить перед выпуском |
-| FastAPI | 0.162.0 | Внутренний HTTP API | MIT |
-| Pydantic | 2.14.1 | Проверка JSON и схемы | MIT |
-| Uvicorn | 0.54.0 | HTTP-сервер | BSD-3-Clause |
-| HTTPX | 0.28.1 | Клиент PHP Core | BSD-3-Clause |
+| FastAPI | 0.162.0 | Python internal HTTP API | MIT |
+| Pydantic | 2.14.1 | Проверка JSON и схем | MIT |
+| Uvicorn | 0.54.0 | Python HTTP server | BSD-3-Clause |
+| HTTPX | 0.28.1 | Вызовы Core API из Python worker | BSD-3-Clause |
+| Psycopg / psycopg-binary | 3.3.6 | PostgreSQL driver | Сверять лицензию дистрибутива при изменении версии |
+| psycopg-pool | 3.3.3 | Ограниченный PostgreSQL connection pool | Сверять лицензию дистрибутива при изменении версии |
 | pypdf | 6.21.2 | Извлечение текста PDF | BSD-3-Clause |
 | defusedxml | 0.7.1 | Разбор RSS/XML | PSFL |
-| pytest | 9.1.1 | Тесты | MIT |
+| pytest | 9.1.1 | Python tests | MIT |
 
-Node нужен для сборки и тестов интерфейса; nginx — для раздачи статики. Python использует SQLite из стандартной библиотеки. PHP/Symfony пока не является исполняемой частью этого репозитория.
+Web собирается на Node.js 22.15 и в runtime обслуживается nginx. Symfony Core запускается в контейнере `php:8.4-apache`; `apps/core/composer.json` требует PHP `>=8.2`, а `composer.lock` фиксирует Symfony FrameworkBundle `v7.4.21`. В `composer.lock` записано 29 runtime-пакетов; у всех 29 license metadata — MIT. Ключевые зафиксированные Symfony packages: `framework-bundle`, `http-foundation`, `http-kernel`, `dependency-injection`, `routing`, `runtime`, `string`, `yaml` — `v7.4.21`; остальные транзитивные версии указаны в [composer.lock](apps/core/composer.lock). Apache/PHP image tag здесь закреплён на ветке 8.4, а не на patch release.
+
+Основная рабочая persistence граница Python — PostgreSQL через Psycopg; Core имеет отдельную PostgreSQL database/roles. SQLite остаётся в Python fixture/local state и legacy import путях, а также в PHP test fixtures. Это не утверждение, что production persistence обоих сервисов SQLite.
 
 ## Сохранённые материалы
 
@@ -28,6 +32,6 @@ Node нужен для сборки и тестов интерфейса; nginx 
 
 ## Данные и модели
 
-CSV и девять аналитических PDF, упомянутых в кейсе, в репозиторий не добавлены. Учебные Python-примеры и сценарии явно помечены как синтетические. Материалы с ролью `bank` в этих примерах не являются реальной позицией Альфа-Банка. Для реальных материалов сохраняйте источник и допустимые условия использования.
+CSV и девять аналитических PDF из кейса в репозиторий не добавлены. Учебные Python-примеры и сценарии явно помечены как синтетические. Материалы с ролью `bank` в этих примерах не являются реальной позицией Альфа-Банка. Для реальных материалов сохраняйте источник и разрешённые условия использования.
 
-Runtime допускает шесть моделей кейса: Gemma 4 26B A4B, GLM-5.3-Flash, Qwen3.6 35B A3B, DeepSeek-V4.1-Flash, Qwen3-VL-30B-A3B-Instruct, Kimi-K2.6. Точные ID и адреса задаются [адаптером](apps/intelligence/intelligence/llm/config.py) по инструкции организаторов. OpenAI-compatible протокол не означает использование модели OpenAI. Тестовые профили OpenRouter включают бесплатную Gemma `:free` и отдельные платные маршруты Gemma, Qwen и GLM с ограничением цены и расходов. Автоматического перехода между ними нет. Подключение к SSO и банковским системам не реализовано.
+Runtime поддерживает шесть моделей кейса: Gemma 4 26B A4B, GLM-5.3-Flash, Qwen3.6 35B A3B, DeepSeek-V4.1-Flash, Qwen3-VL-30B-A3B-Instruct, Kimi-K2.6. Точные ID и адреса задаются [адаптером](apps/intelligence/intelligence/llm/config.py) по инструкции организаторов. OpenAI-compatible протокол не означает использование модели OpenAI. Тестовые профили OpenRouter включают бесплатную Gemma `:free` и отдельные платные маршруты Gemma, Qwen и GLM с ограничением цены и расходов; автоматического перехода между ними нет. Подключение к SSO и банковским системам не реализовано.

@@ -12,6 +12,7 @@ if (!$hostList || count($hostList)>5 || array_filter($hostList,fn($h)=>!preg_mat
 $hostsJson=json_encode($hostList,JSON_THROW_ON_ERROR);
 $db=App\Database::connect();$db->beginTransaction();
 try {
+    App\Database::lockCompany($db,$companyId);
     $q=$db->prepare('SELECT id FROM companies WHERE id=?');$q->execute([$companyId]);if(!$q->fetchColumn())throw new RuntimeException('Unknown company');
     $q=$db->prepare('SELECT id FROM news_sources WHERE company_id=? AND uri=?');$q->execute([$companyId,$uri]);$id=$q->fetchColumn();
     if ($id) $db->prepare('UPDATE news_sources SET content_type=?,source_role=?,classification=?,title=?,publisher=?,published_at=?,article_hosts_json=?,enabled=1 WHERE id=?')->execute([$types[$type],$role,$classification,$title,$publisher,$published,$hostsJson,$id]);

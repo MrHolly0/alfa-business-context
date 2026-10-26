@@ -2,6 +2,14 @@
 namespace App;
 use PDO;
 final class Database {
+    public static function lockCompany(PDO $db, string $companyId): void {
+        if (!$db->inTransaction()) throw new \LogicException('Company lock requires a transaction');
+        $sql='SELECT id FROM companies WHERE id=?';
+        if ($db->getAttribute(PDO::ATTR_DRIVER_NAME)==='pgsql') $sql.=' FOR UPDATE';
+        $statement=$db->prepare($sql);$statement->execute([$companyId]);
+        if (!$statement->fetchColumn()) throw new \RuntimeException('Unknown company');
+    }
+
     public static function connect(): PDO {
         $url = getenv('DATABASE_URL');
         if (!$url) {

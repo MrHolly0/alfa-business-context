@@ -1,10 +1,17 @@
 # Подключение Symfony к Core и Python Intelligence
 
-Эта инструкция описывает границы интеграции для backend-команды. Symfony остается владельцем пользовательского запроса, авторизации, канонического профиля и бизнес-очереди. Python Intelligence исполняет ограниченную задачу по неизменяемому снимку. Контрактные JSON-примеры лежат в `apps/intelligence/examples/symfony/`.
+Эта инструкция описывает текущую Symfony/PHP Core интеграцию и дальнейший контракт с Python. Core уже владеет локальными пользователями, company access, контекстом и новостными записями. Для новостей PHP CLI сейчас напрямую вызывает Python `POST /internal/v1/analyze`; общего Core jobs enqueue/claim/heartbeat/result/failure lifecycle в PHP пока нет. JSON-примеры лежат в `apps/intelligence/examples/symfony/` и относятся к AI/worker контрактам, а не к уже развёрнутым PHP job endpoints.
 
 Рабочее состояние Python Intelligence хранится в отдельной PostgreSQL-базе `business_context_ai`, с отдельными app/migration roles и scoped `store_key`/RLS. Это внутреннее изменение persistence: поля `ai-job-v1`, `ai-result-v1`, HTTP-маршруты Worker и Core не меняются из-за перехода на PostgreSQL. Canonical profile, queue, budget allocation и publication по-прежнему принадлежат Symfony/Core; общих AI/Core SQL-таблиц нет. Локальный SQLite Core Stand остаётся только fixture. См. [роли, миграции и окружения](postgresql.md).
 
-## Поток данных
+## Что реализовано сейчас
+
+- Web обращается к Symfony через same-origin nginx proxy; Core auth — cookie-сессия, company scope — membership, а сохранение профиля использует версию контекста.
+- `bin/run-news.php COMPANY_ID` читает Core context/source policy, строит ограниченный `ai-data-task-v1` и выполняет прямой HTTP вызов `POST /internal/v1/analyze` с общим bearer и `CORE_INTELLIGENCE_TENANT_ID` (Compose default `core-local`). Режим по умолчанию — baseline.
+- `bin/run-due-news.php` и opt-in Compose profile `scheduler` периодически вызывают тот же PHP news runner для компаний с enabled sources.
+- Python worker/`CoreClient` и `CoreStand` описывают и проверяют job protocol отдельно; PHP Core пока не реализует соответствующие worker endpoints и общую durable queue.
+
+## Целевой поток после появления Core job lifecycle
 
 1. **Сохранение компании.** Symfony проверяет право пользователя менять компанию, сохраняет исходное описание и увеличивает `context_version`. Сохраняйте tenant/company scope, время `as_of`, классификацию и происхождение ввода. При первом заполнении вызовите `POST /internal/v1/company-context/from-description` с `DescriptionPrepareRequest` для быстрого детерминированного предложения либо поставьте `prepare_description` как обычный `ai-data-task-v1`, если разрешен настроенный генератор. Прямой HTTP endpoint не вызывает модель и не записывает канонический профиль; результат workflow-задачи является предложением в обычном result cache.
 2. **Проверка полей.** Покажите поля, точные цитаты/offsets, происхождение и отдельно assumptions/questions. Core или пользователь решает, какие утверждения принять. Уникальная точная цитата позволяет локально проверить span; предложение модели само по себе не подтверждение. Symfony/Core записывает принятую версию `CompanyContext v2` как канонический профиль и увеличивает версию. Python не становится владельцем master-данных; его snapshots и кеш не заменяют canonical store.
@@ -14,9 +21,9 @@
 6. **Частичный кандидат.** Если доказательств недостаточно, `DataResult.status` и `CandidateAssessment.status` могут быть `partial` или `unknown`; передайте пользователю ограничения и уточнения. Это не причинный вывод и не подтверждение, что компания затронута или не затронута. Для публикации Symfony повторно проверяет ACL, версии профиля/policy/config, scope и нужные доказательства, затем сохраняет собственную publication revision и `input_signature`.
 7. **Publication proof.** После успешной записи/публикации Core создает proof `{company_id,event_id,input_signature,assessment_revision}`. Добавляйте его как `published_assessments` в следующий `DataTask`. Python сможет вернуть `no_change` при совпадении подписи. Доставка результата/запись outbox сами по себе не являются доказательством публикации.
 
-## Job endpoints и envelope
+## Worker contract и envelope (ещё не реализован в PHP Core)
 
-Исполняющий Worker использует базовый origin `CORE_BASE_URL` и bearer `CORE_SERVICE_TOKEN`, заданные оператором. URL не выбирается из job. Worker обращается к:
+Целевой/fixture Worker использует базовый origin `CORE_BASE_URL` и bearer `CORE_SERVICE_TOKEN`, заданные оператором. URL не выбирается из job. Указанные ниже endpoints ожидаются Python worker-контрактом, но сейчас не предоставляются Symfony Core:
 
 | Действие | Запрос |
 |---|---|
@@ -44,7 +51,7 @@ Symfony enqueue hook — бизнес-интеграция, а не Python API. 
 
 **Frontend Alfa:** форма описания и подтверждение конкретных полей; раздельный показ подтвержденных фактов и предположений; статус/прогресс job; причина `skipped_budget`/`skipped_frequency`; ограничения и вопросы для `partial` результата; действия пользователя по публикации/отклонению. Не показывайте отсутствие найденных документов как отсутствие риска.
 
-В этом репозитории есть Python API, Worker/CoreClient и fixture stand; реальный Symfony Core connection и его endpoint/auth/queue lifecycle не поставляются. Наличие тестового stand подтверждает контрактную форму, но не фактическое подключение или production поведение. Генератор Alfa не считается настроенным или доступным только потому, что Python поддерживает provider route; его модель, credentials и лимиты отдельно подтверждаются владельцем deployment. Учебные fixtures и тестовые оценки не являются независимой валидацией качества на реальных компаниях.
+В этом репозитории есть рабочий Symfony Core и прямой Core→Python news API вызов, а также Python Worker/CoreClient и fixture stand. В PHP не поставлены endpoints для Worker claim/heartbeat/result/failure и Core-owned Analysis Job lifecycle; fixture stand не подменяет эти компоненты. Наличие тестового stand подтверждает контрактную форму, но не фактическое подключение или production поведение. Генератор Alfa не считается настроенным или доступным только потому, что Python поддерживает provider route; его модель, credentials и лимиты отдельно подтверждаются владельцем deployment. Учебные fixtures и тестовые оценки не являются независимой валидацией качества на реальных компаниях.
 
 ## Локальные контракты и проверка
 
@@ -69,7 +76,7 @@ Symfony enqueue hook — бизнес-интеграция, а не Python API. 
 | Контур | Проверено | Остаётся подключить и проверить |
 |---|---|---|
 | Python и стенд Core | Получение/lease/result, приём onboarding, постановка optimize с квотой и частотой, scoped collect/analyze, publication proof и устранение повторов | Это локальные контрактные сценарии; публикация стенда не является публикацией Symfony |
-| Настоящий Symfony | В репозитории есть протокол и согласованные примеры; PHP-реализация не предоставлена | ACL и canonical store, транзакционная очередь, service auth, scheduler, cancel, актуальность версий, приём/доставка/публикация и путь до UI |
+| Symfony Core | Cookie-auth, memberships, контекст с CAS, метрики, news records, прямой `run-news.php` → Python baseline вызов, опциональный scheduler | Durable jobs, worker endpoints, lease/fencing, retry policy, cancellation, публикация worker candidate и job UI |
 | Шлюз Альфы | Ранее metadata endpoints отвечали 200, ключ объявлял лимит 500; генеративный вызов не выполнялся | Подтверждённая модель, тарификация/верхний резерв, генерация и учёт реального расхода через этот шлюз |
 | Другой модельный API | Настоящие вызовы OpenRouter/GLM, включая небольшой турнир и косвенное исследование | Это не проверка Альфы и не независимая оценка качества |
 
