@@ -248,12 +248,17 @@ def test_model_prompt_receives_current_ids_for_each_context_group(tmp_path):
             "status": "confirmed", "provenance": "p:4"}],
         "facts": [{"fact_id": "fact-current", "text": "Есть склад", "provenance": "p:5"}]})
     llm=InspectingLLM()
-    AnalysisPipeline(store(tmp_path),llm).run(request)
+    result=AnalysisPipeline(store(tmp_path),llm).run(request)
     assert set(llm.payload["CONFIRMED_CONTEXT_IDS"]) == {
         "activity-current", "assertion-current", "dependency-current", "fact-current"}
     projected=llm.payload["REQUEST_CONTEXT"]["company"]
     assert [item["assertion_id"] for item in projected["assertions"]] == ["assertion-current"]
     assert "assertion-unknown" not in llm.payload["CONFIRMED_CONTEXT_IDS"]
+    compaction=result.usage["prompt_projection"]["profile_prompt_compaction"]
+    assert compaction["confirmed_status_omitted"] > 0
+    assert compaction["nonconfirmed_status_preserved"] == 0
+    assert compaction["confirmed_status_omission_scope"] == "confirmed_items_in_active_company_projection_only"
+    assert any(item["stage"] == "model_profile_prompt_compacted" for item in result.trace)
 
 
 def test_confirmed_resource_assertion_is_first_pass_impact_basis(tmp_path):

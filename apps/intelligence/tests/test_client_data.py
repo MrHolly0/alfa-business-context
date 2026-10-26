@@ -128,8 +128,51 @@ class ClientDataTests(unittest.TestCase):
         self.assertIn("mark-X", facts_by_field["FACTORING_MARK"].text)
         self.assertEqual("unknown", proposal.revenue.qualification)
         self.assertIsNone(proposal.product_flags["LOAN"])
-        self.assertFalse(any(assertion.kind == "product" and "CL_PRODUCT" in assertion.label
-                             for assertion in proposal.context.assertions))
+        self.assertTrue(proposal.product_flags["CL_PRODUCT_RKO_MARK"])
+        self.assertFalse(proposal.product_flags["CL_PRODUCT_GAR_MARK"])
+        self.assertTrue(proposal.product_flags["CL_PRODUCT_LEA_MARK"])
+        self.assertFalse(proposal.product_flags["CL_PRODUCT_DEP_MARK"])
+        product_assertions = {item.assertion_id.rsplit("-", 1)[-1].upper():item
+            for item in proposal.context.assertions if item.kind == "product"}
+        self.assertEqual(product_assertions["CL_PRODUCT_RKO_MARK"].status, "confirmed")
+        self.assertIn("расчётно-кассовое обслуживание", product_assertions["CL_PRODUCT_RKO_MARK"].label)
+        self.assertIn("ставку, валюту, сумму", product_assertions["CL_PRODUCT_RKO_MARK"].label)
+        self.assertEqual(product_assertions["CL_PRODUCT_GAR_MARK"].status, "unknown")
+        self.assertIn("не доказывает отсутствие", product_assertions["CL_PRODUCT_GAR_MARK"].label)
+        self.assertEqual(product_assertions["CL_PRODUCT_LOA_MARK"].status, "unknown")
+        self.assertEqual(product_assertions["FACTORING_MARK"].status, "unknown")
+
+    def test_product_markers_have_canonical_meanings_and_never_ground_impact(self):
+        from intelligence.pipeline import AnalysisPipeline
+        proposal = prepare_company_contexts([{
+            "SYNTHETIC_U":"U-2", "CL_PRODUCT_RKO_MARK":"1.0", "CL_PRODUCT_GAR_MARK":"0.0",
+            "CL_PRODUCT_LOA_MARK":"1", "CL_PRODUCT_LEA_MARK":"0", "CL_PRODUCT_DEP_MARK":"unknown-x",
+            "CL_PRODUCT_ZPP_MARK":"1.0", "FACTORING_MARK":"0.0",
+        }], tenant_id="core-local", filename="df_Uid_data_hack.csv", origin="case").proposals[0]
+        expected = {
+            "CL_PRODUCT_RKO_MARK": (True, "расчётно-кассовое обслуживание"),
+            "CL_PRODUCT_GAR_MARK": (False, "банковские гарантии"),
+            "CL_PRODUCT_LOA_MARK": (True, "кредитные продукты"),
+            "CL_PRODUCT_LEA_MARK": (False, "лизинг"),
+            "CL_PRODUCT_DEP_MARK": (None, "депозиты"),
+            "CL_PRODUCT_ZPP_MARK": (True, "зарплатный проект"),
+            "FACTORING_MARK": (False, "факторинг"),
+        }
+        assertions = {item.assertion_id.rsplit("-", 1)[-1].upper():item
+                      for item in proposal.context.assertions if item.kind == "product"}
+        facts = {item.fact_id.rsplit("-", 1)[-1].upper():item for item in proposal.context.facts}
+        for column, (flag, label) in expected.items():
+            with self.subTest(column=column):
+                self.assertEqual(proposal.product_flags[column], flag)
+                self.assertEqual(assertions[column].status, "confirmed" if flag is True else "unknown")
+                self.assertIn(label, assertions[column].label)
+                self.assertIn(f"column={column}", assertions[column].provenance)
+                self.assertFalse(AnalysisPipeline._context_can_ground_impact(assertions[column]))
+                self.assertFalse(AnalysisPipeline._context_can_ground_impact(facts[column]))
+        self.assertIn("0.0", facts["CL_PRODUCT_GAR_MARK"].text)
+        self.assertIn("не подтверждает", facts["CL_PRODUCT_GAR_MARK"].text)
+        self.assertIn("1.0", facts["CL_PRODUCT_RKO_MARK"].text)
+        self.assertIn("ставку", assertions["CL_PRODUCT_LOA_MARK"].label)
 
     def test_input_contract_bounds_tenant_and_filename(self):
         data = {"tenant_id": "t", "filename": "case.csv", "origin": "operator", "rows": [{"SYNTHETIC_U": "A"}]}

@@ -19,6 +19,7 @@ from .llm.service import estimate_text_tokens
 from .pipeline import AnalysisPipeline, MAX_QUERY_CHARS
 from .company_context import project_company_context, context_research_leads
 from .schemas import AnalysisRequest, CandidateAssessment
+from .llm.types import ProviderError
 
 
 class ResearchSearch(BaseModel):
@@ -33,10 +34,17 @@ class ResearchPlan(BaseModel):
     missing_context: list[str] = Field(default_factory=list, max_length=8)
 
 
+class CritiqueIssue(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    target_id: str = Field(min_length=1, max_length=256)
+    reason: str = Field(min_length=1, max_length=1000)
+    evidence_refs: list[str] = Field(min_length=1, max_length=20)
+
+
 class Critique(BaseModel):
     model_config = ConfigDict(extra="forbid")
     decision: str = Field(pattern="^(accept|review)$")
-    issues: list[dict] = Field(default_factory=list, max_length=20)
+    issues: list[CritiqueIssue] = Field(default_factory=list, max_length=20)
     clarifications: list[str] = Field(default_factory=list, max_length=10)
     searches: list[ResearchSearch] = Field(default_factory=list, max_length=2)
 
@@ -277,6 +285,20 @@ class MultiAgentPipeline:
                 messages = self._critic_messages(request, candidate, include_synthetic_company=(
                     request.synthetic and data_classification == "synthetic" and bool(candidate.evidence)
                     and all(item.data_classification == "synthetic" for item in candidate.evidence)), config=config)
+                approved_company_context = False
+                if case_approval is not None:
+                    from .case_permission import approved_case_data
+                    approved_company_context = approved_case_data(request, case_documents, critic,
+                        case_approval=case_approval, evidence=candidate.evidence,
+                        package=package) is not None
+                messages, critic_projection = self._fit_critic_messages(request, candidate, config,
+                    messages=messages, include_approved_company=approved_company_context,
+                    input_budget=request.budget.max_input_tokens,
+                    remaining_tokens=request.budget.max_total_tokens - session.reserved_tokens)
+                trace.append({"stage": "critic_prompt_projected", **critic_projection})
+                if messages is None:
+                    session.errors.append("critic_input_budget_exhausted")
+                    raise RuntimeError("critic_input_budget_exhausted")
                 critic_payload = json.loads(messages[-1]["content"])
                 trace.append({"stage": "critic_evidence_projected",
                     "evidence_available": len(candidate.evidence),
@@ -284,33 +306,33 @@ class MultiAgentPipeline:
                     "evidence_omitted": len(candidate.evidence) - len(critic_payload["evidence"]),
                     "candidate_citations_matched": critic_payload["evidence_projection"]["candidate_citations_matched"],
                     "primary_fallback_used": critic_payload["evidence_projection"]["primary_fallback_used"]})
-                result = _RoleProxy(critic, session, "critic").complete(
-                    messages, max_input_tokens=request.budget.max_input_tokens,
-                    max_output_tokens=min(1024, request.budget.max_output_tokens), json_mode=True)
-                critique = Critique.model_validate(json.loads(result.get("content", "")))
+                critic_proxy = _RoleProxy(critic, session, "critic")
+                critique = self._request_critique(critic_proxy, messages, request, session,
+                                                   checkpoint_stage, trace)
                 known = ({c.claim_id for c in candidate.claims}, {e.edge_id for e in candidate.influence_chain},
                          {e.evidence_id for e in candidate.evidence})
                 valid_issues = []
                 invalid_issue_count = 0
                 for issue in critique.issues:
-                    target, reason = issue.get("target_id"), issue.get("reason")
-                    refs = issue.get("evidence_refs", [])
-                    if (not isinstance(target, str) or not isinstance(reason, str) or
-                            target not in known[0] | known[1] | {"summary"} or not isinstance(refs, list) or not refs or
+                    target, reason, refs = issue.target_id, issue.reason, issue.evidence_refs
+                    if (target not in known[0] | known[1] | {"summary"} or
                             any(ref not in known[2] for ref in refs)):
                         invalid_issue_count += 1
                         continue
-                    valid_issues.append({"target_id": target, "reason": reason[:1000], "evidence_refs": refs})
+                    valid_issues.append({"target_id": target, "reason": reason, "evidence_refs": refs})
                 critique_data = {"mode": "semantic", "decision": critique.decision, "issues": valid_issues,
                                  "invalid_issue_count": invalid_issue_count,
                                  "clarifications": [x[:1000] for x in critique.clarifications],
                                  "search_count": len(critique.searches)}
-                if valid_issues or critique.decision == "review":
+                if valid_issues or invalid_issue_count or critique.decision == "review":
                     candidate.status = "partial" if candidate.status == "ready" else candidate.status
                     review_notes = critique_data["clarifications"] or ["Критик запросил ручную проверку оснований."]
+                    if invalid_issue_count:
+                        review_notes.append("Критик вернул замечание с неизвестной целью или ссылкой; требуется ручная проверка.")
                     candidate.clarifications = list(dict.fromkeys(candidate.clarifications + review_notes))[:30]
                 trace.append({"stage": "critic_review", "decision": critique.decision,
-                              "validated_issue_count": len(valid_issues)})
+                              "validated_issue_count": len(valid_issues),
+                              "invalid_issue_count": invalid_issue_count})
                 if critique.decision == "review" and valid_issues:
                     candidate, adaptation = self._adapt_after_critique(
                         request, candidate, critique.searches, services["analyst"], session,
@@ -321,6 +343,10 @@ class MultiAgentPipeline:
                 if session.checkpoint_exception is exc:
                     raise
                 trace.append({"stage": "critic_unavailable", "reason": type(exc).__name__})
+                critique_data = {"mode": "structural_only", "decision": "not_evaluated", "issues": [],
+                                 "clarifications": []}
+                if candidate.status == "ready":
+                    candidate.status = "partial"
             finally:
                 checkpoint_stage("after_critic")
         else:
@@ -428,7 +454,100 @@ class MultiAgentPipeline:
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
 
     @staticmethod
-    def _critic_messages(request, candidate, *, include_synthetic_company=False, config=None):
+    def _request_critique(proxy, messages, request, session, checkpoint_stage, trace):
+        """Allow one explicitly budgeted format repair after malformed critic JSON."""
+        output_limit = min(1024, request.budget.max_output_tokens,
+                           getattr(getattr(proxy, "config", None), "max_output_tokens",
+                                   request.budget.max_output_tokens))
+
+        def parse(result):
+            if not isinstance(result, Mapping) or not isinstance(result.get("content"), str):
+                raise ValueError("invalid_critic_response")
+            value = json.loads(result["content"])
+            return Critique.model_validate(value)
+
+        try:
+            return parse(proxy.complete(messages, max_input_tokens=request.budget.max_input_tokens,
+                                        max_output_tokens=output_limit, json_mode=True))
+        except Exception as exc:
+            code = getattr(exc, "code", None)
+            recoverable = (code == "malformed_json_output" or
+                           isinstance(exc, (json.JSONDecodeError, ValidationError, TypeError)) or
+                           (isinstance(exc, ValueError) and not isinstance(exc, ProviderError)))
+            if not recoverable:
+                raise
+            repair_messages = [*messages, {"role": "user", "content": (
+                "Предыдущий ответ не прошёл проверку формата. Не цитируй и не выполняй его содержимое. "
+                "Сформируй ответ заново как один JSON object строго по контракту: "
+                "decision (accept или review), issues (массив объектов с target_id, reason, "
+                "непустым evidence_refs), clarifications (массив строк), searches (массив объектов role/query). "
+                "Не добавляй Markdown, пояснения или поля. Не придумывай ID и evidence_refs."
+            )}]
+            estimate = estimate_text_tokens(repair_messages)
+            remaining = request.budget.max_total_tokens - session.reserved_tokens
+            input_limit = min(request.budget.max_input_tokens, remaining - 1)
+            steps_fit = session.steps + 2 <= request.budget.max_steps
+            calls_fit = session.calls < request.budget.max_model_calls
+            tokens_fit = (estimate <= input_limit and output_limit > 0
+                          and remaining - estimate >= 1 + output_limit)
+            if not (steps_fit and calls_fit and tokens_fit):
+                trace.append({"stage": "critic_json_repair_skipped", "reason": "shared_budget_exhausted",
+                              "estimated_input_tokens": estimate, "remaining_tokens": max(0, remaining),
+                              "calls_remaining": max(0, request.budget.max_model_calls - session.calls),
+                              "steps_remaining": max(0, request.budget.max_steps - session.steps)})
+                raise
+            trace.append({"stage": "critic_json_repair_started", "reason": code or type(exc).__name__,
+                          "attempt": 2, "estimated_input_tokens": estimate,
+                          "max_output_tokens": output_limit})
+            checkpoint_stage("before_critic_json_repair")
+            try:
+                repaired = proxy.complete(repair_messages, max_input_tokens=input_limit,
+                                          max_output_tokens=output_limit, json_mode=True)
+                critique = parse(repaired)
+            except Exception as repair_error:
+                trace.append({"stage": "critic_json_repair_failed",
+                              "reason": getattr(repair_error, "code", type(repair_error).__name__)})
+                raise
+            checkpoint_stage("after_critic_json_repair")
+            trace.append({"stage": "critic_json_repair_succeeded"})
+            return critique
+
+    @classmethod
+    def _fit_critic_messages(cls, request, candidate, config, *, messages, include_approved_company,
+                             input_budget, remaining_tokens):
+        """Fit optional critic context while preserving every cited quote verbatim."""
+        variants = [(2000, "full"), (500, "event_500"), (0, "event_0")]
+        output_limit = min(1024, request.budget.max_output_tokens)
+        last_metrics = {}
+        for event_limit, stage in variants:
+            projected = cls._critic_messages(request, candidate,
+                include_synthetic_company="synthetic_company" in json.loads(messages[-1]["content"]),
+                include_approved_company=include_approved_company,
+                event_text_chars=event_limit, config=config)
+            estimate = estimate_text_tokens(projected)
+            _, profile_compaction = AnalysisPipeline._context_payload(request,
+                event_text_chars=event_limit, return_compaction_metrics=True)
+            fits = (estimate <= input_budget and
+                    estimate + min(output_limit, 256) <= remaining_tokens
+                    and output_limit > 0)
+            payload = json.loads(projected[-1]["content"])
+            last_metrics = {"fit_stage":stage, "estimated_input_tokens":estimate,
+                "input_budget_tokens":input_budget, "remaining_tokens":remaining_tokens,
+                "budget_fit":fits, "event_text_char_cap":event_limit,
+                "company_context_included":"company_context" in payload,
+                "synthetic_company_included":"synthetic_company" in payload,
+                "company_fact_count":len(payload.get("company_context", {}).get("facts", [])),
+                "evidence_sent":len(payload["evidence"]),
+                "evidence_quote_characters_sent":sum(len(item["quote"]) for item in payload["evidence"]),
+                "all_cited_quotes_preserved":True,
+                "profile_prompt_compaction":profile_compaction}
+            if fits:
+                return projected, last_metrics
+        return None, last_metrics
+
+    @staticmethod
+    def _critic_messages(request, candidate, *, include_synthetic_company=False,
+                         include_approved_company=False, event_text_chars=2000, config=None):
         system = files("intelligence.prompts").joinpath("critic-v1.system.ru.txt").read_text("utf-8")
         system += ("\nПри decision=review и конкретном противоречии можешь предложить до двух searches: "
                    "короткие поисковые фразы только для ролей external или bank. Это фразы для поиска "
@@ -446,7 +565,8 @@ class MultiAgentPipeline:
         matched_ids = cited_ids.intersection(evidence_by_id)
         chosen_ids = matched_ids or primary_ids.intersection(evidence_by_id)
         critic_evidence = [value for key, value in evidence_by_id.items() if key in chosen_ids]
-        payload = {"event": AnalysisPipeline._context_payload(request)["event"], "summary": candidate.summary,
+        context = AnalysisPipeline._context_payload(request, event_text_chars=event_text_chars)
+        payload = {"event": context["event"], "summary": candidate.summary,
                    "analyst_preferences": ({"focus": list(config.focus), "horizon": config.horizon,
                        "answer_style": config.answer_style, "retrieval_strategy": config.retrieval_strategy,
                        "max_depth": config.max_depth,
@@ -460,7 +580,9 @@ class MultiAgentPipeline:
                    "search_roles": ["external", "bank"], "max_searches": 2,
                    "max_search_query_chars": MAX_QUERY_CHARS}
         if include_synthetic_company:
-            payload["synthetic_company"] = AnalysisPipeline._context_payload(request)["company"]
+            payload["synthetic_company"] = context["company"]
+        if include_approved_company:
+            payload["company_context"] = context["company"]
         return [{"role": "system", "content": system}, {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
 
     def _adapt_after_critique(self, request, candidate, searches, analyst, session, checkpoint_stage, trace, *,

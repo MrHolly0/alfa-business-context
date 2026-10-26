@@ -2,6 +2,15 @@
 // Explicit operator setup; never runs as part of normal container startup.
 require dirname(__DIR__).'/vendor/autoload.php';
 if($argc!==3){fwrite(STDERR,"Usage: php bin/prepare-judging.php /case/core-setup.json USER_EMAIL\n");exit(2);}
+function orderedProfile(mixed $value): mixed {
+    if(!is_array($value))return $value;
+    if(!array_is_list($value))ksort($value,SORT_STRING);
+    foreach($value as $key=>$item)$value[$key]=orderedProfile($item);
+    return $value;
+}
+function sameProfile(array $left,array $right): bool {
+    return json_encode(orderedProfile($left),JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR)===json_encode(orderedProfile($right),JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);
+}
 try {
     if(!is_file($argv[1]) || filesize($argv[1])>4_000_000)throw new RuntimeException('Invalid setup size');
     $setup=json_decode(file_get_contents($argv[1]),true,512,JSON_THROW_ON_ERROR);
@@ -18,11 +27,25 @@ try {
             $q=$db->prepare('SELECT synthetic_u FROM companies WHERE id=?');$q->execute([$companyId]);
             if($q->fetchColumn()!==$profile['synthetic_u_id'])throw new RuntimeException('Company identifier mismatch');
             $db->prepare('INSERT INTO company_memberships(user_id,company_id,role,created_at) VALUES(?,?,?,?) ON CONFLICT(user_id,company_id) DO NOTHING')->execute([$userId,$companyId,'editor',gmdate('c')]);
-            $q=$db->prepare('SELECT version,facts_json FROM company_context_versions WHERE company_id=? ORDER BY version DESC LIMIT 1');$q->execute([$companyId]);$prior=$q->fetch();
+            $q=$db->prepare('SELECT version,facts_json,source FROM company_context_versions WHERE company_id=? ORDER BY version DESC LIMIT 1');$q->execute([$companyId]);$prior=$q->fetch();
             $contextStatus='preserved_existing';
             if(!$prior){
                 $manual=['activities'=>[],'notes'=>[],'ai_profile'=>$company];
                 $db->prepare('INSERT INTO company_context_versions(id,company_id,version,facts_json,source,created_at) VALUES(?,?,?,?,?,?)')->execute([bin2hex(random_bytes(16)),$companyId,1,json_encode($manual,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR),'organizer_csv',gmdate('c')]);$contextStatus='created';
+            } else {
+                $existingFacts=json_decode($prior['facts_json'],true,512,JSON_THROW_ON_ERROR);
+                $hasManual=false;
+                foreach($existingFacts as $key=>$value){
+                    if($key!=='ai_profile' && $value!==[] && $value!==null && $value!=='')$hasManual=true;
+                }
+                // Only an untouched import/initial snapshot may be refreshed. A user
+                // version and all its private additions remain exactly as saved.
+                if(in_array($prior['source'],['organizer_csv','initial'],true) && !$hasManual
+                    && (!is_array($existingFacts['ai_profile'] ?? null) || !sameProfile($existingFacts['ai_profile'],$company))){
+                    $existingFacts['ai_profile']=$company;
+                    $db->prepare('INSERT INTO company_context_versions(id,company_id,version,facts_json,source,created_at) VALUES(?,?,?,?,?,?)')->execute([bin2hex(random_bytes(16)),$companyId,(int)$prior['version']+1,json_encode($existingFacts,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR),'organizer_csv',gmdate('c')]);
+                    $contextStatus='updated_import';
+                }
             }
             $changed=false;$sourceCount=0;
             foreach($setup['sources'] ?? [] as $source){

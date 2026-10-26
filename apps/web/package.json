@@ -10,7 +10,7 @@
     "dev": "npm run build",
     "build": "node scripts/build.mjs",
     "validate": "node scripts/validate-artifact.mjs",
-    "test": "node --test tests/catalog.test.mjs tests/product.test.mjs tests/capabilities.test.mjs tests/core-client.test.mjs"
+    "test": "node --test tests/catalog.test.mjs tests/product.test.mjs tests/capabilities.test.mjs tests/core-client.test.mjs tests/core-news-view.test.mjs tests/pulse.test.mjs"
   },
   "dependencies": {
     "@alfalab/core-components": "50.37.0",

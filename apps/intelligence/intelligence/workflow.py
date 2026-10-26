@@ -18,6 +18,7 @@ from .events import EventStore, PublicationInput
 from .research import DependencyEdge, PeriodObservation, ImpactSelection, select_affected_businesses, impact_candidates, analyze_period
 from .analysts import PromptRegistry, CompanyAnalystStore, AnalystConfig
 from .multi_agent import MultiAgentPipeline
+from .pipeline import AnalysisPipeline
 from .watches import WatchCondition, WatchObservation, WatchEvaluation, evaluate_conditions
 from .periods import PeriodPublication, analyze_period_research
 from .artifacts import canonical_json, payload_hash
@@ -350,6 +351,20 @@ class DataWorkflow:
     def _case_gateway_allowed(self, task):
         return self._case_approval(task) is not None
 
+    @staticmethod
+    def _preloaded_case_bank_ids(task):
+        """Local source reuse is separate from permission to send a profile to a model."""
+        from .case_permission import load_case_approval
+        if os.getenv('INTELLIGENCE_ALLOW_HACKATHON_CASE_DATA') != '1':
+            return set()
+        approval=load_case_approval()
+        if approval is None or approval.tenant_id != task.tenant_id:
+            return set()
+        pinned={(document.source_id,document.canonical_uri) for document in approval.documents}
+        return {source.source_id for source in task.source_policy.effective_sources()
+            if source.source_role=='bank' and ((source.source_id,source.uri) in pinned
+                or source.published_at is None)}
+
     def run(self,task,checkpoint=None):
         task=task if isinstance(task,DataTask) else DataTask.model_validate(task)
         original_check=checkpoint or (lambda stage:None);original_check('before_workflow')
@@ -399,6 +414,7 @@ class DataWorkflow:
         result=DataResult(request_id=task.request_id,tenant_id=task.tenant_id,company_id=task.company_id,status='completed',versions={'context':task.context_version,'source_policy':policy.revision,'company_contexts':{business.company_id:business.context_version for business in task.businesses},'policy_id':policy.policy_id},created_at=self.clock())
         case_approval=self._case_approval(task)
         case_gateway_allowed=case_approval is not None
+        preloaded_bank_ids=self._preloaded_case_bank_ids(task)
         model_allowed=task.data_classification in {'synthetic','public'} or case_gateway_allowed
         model=_TaskLLM(self.llm,task.budget,check,self.role_services) if model_allowed and (self.llm or self.role_services) else None
         if model:
@@ -406,7 +422,15 @@ class DataWorkflow:
             result.provider={'profile':getattr(config,'profile',None),'base_url':getattr(config,'base_url',None),
                 'model':getattr(config,'model',None),'pricing_mode':getattr(config,'pricing_mode',None)}
         if (self.llm or self.role_services) and not model_allowed:
-            result.coverage['model_limitation']='confidential_external_model_disabled'
+            from .case_permission import load_case_approval
+            approval=load_case_approval()
+            profile_changed=(os.getenv('INTELLIGENCE_ALLOW_HACKATHON_CASE_DATA')=='1'
+                and approval is not None and task.tenant_id==approval.tenant_id
+                and any(business.company_id in approval.company_profiles
+                    and payload_hash(business.company)!=approval.company_profiles[business.company_id]
+                    for business in task.businesses))
+            result.coverage['model_limitation']=('organizer_profile_requires_approval'
+                if profile_changed else 'confidential_external_model_disabled')
         if task.operation=='prepare_description':
             proposal=prepare_description(task.description_input,llm=model.for_role('generator') if model else None)
             result.context_proposals.append(proposal)
@@ -419,7 +443,8 @@ class DataWorkflow:
         if task.operation=='collect':
             stage('before_collection',{'source_count':len(allowed)})
             result.collection=self.collector.collect(policy,now=self.clock(),checkpoint=check,
-                source_ids=[source.source_id for source in policy.effective_sources() if source.source_role=='external'] if case_gateway_allowed else None)
+                source_ids=[source.source_id for source in policy.effective_sources()
+                    if source.source_id not in preloaded_bank_ids] if preloaded_bank_ids else None)
             stage('collection_complete',{'report_saved':True})
         analysis_as_of=(self.clock() if task.knowledge_mode=='latest' else task.as_of)
         if task.period and task.period.mode=='retrospective': analysis_as_of=self.clock()
@@ -446,10 +471,10 @@ class DataWorkflow:
         docs=self.store.list_documents(tenant_id=task.tenant_id,source_ids=allowed,as_of=analysis_as_of.isoformat(),policy=policy,as_known=bool(task.period and task.period.mode=='as_known'))
         docs=[d for d in docs if not d['canonical_uri'].startswith('urn:event:')]
         refs=[d['document_revision_ref'] for d in docs]
-        if task.operation=='collect' and case_gateway_allowed:
+        if task.operation=='collect' and preloaded_bank_ids:
             present={document['document_revision_ref'] for document in result.collection['documents']}
-            result.collection['documents'].extend(document for document in docs if document['source_role']=='bank' and document['document_revision_ref'] not in present)
-            result.coverage['bank_documents_preloaded']=sum(document['source_role']=='bank' for document in docs)
+            result.collection['documents'].extend(document for document in docs if document['source_id'] in preloaded_bank_ids and document['document_revision_ref'] not in present)
+            result.coverage['bank_documents_preloaded']=sum(document['source_id'] in preloaded_bank_ids for document in docs)
         if case_gateway_allowed:
             case_approval=self._case_approval(task,docs)
             case_gateway_allowed=case_approval is not None
@@ -673,7 +698,8 @@ class DataWorkflow:
                         candidate.coverage.origin_groups=package.coverage.origin_group_count
                         candidate.coverage.independence_status=package.coverage.independence_status
                         candidate.coverage.checked_at=datetime.now(timezone.utc)
-                        candidate.coverage.limitations=list(dict.fromkeys(candidate.coverage.limitations+package.coverage.limitations))
+                        candidate.coverage.limitations=AnalysisPipeline._bounded_context_limitations(
+                            candidate.coverage.limitations+package.coverage.limitations,candidate.usage)
                         candidate.watch_conditions=list(dict.fromkeys([x for c in candidate.claims for x in c.falsifiers+c.confirmation_conditions]))[:50]
                         candidate.trace.append({'stage':'dependency_paths','paths':[p.model_dump(mode='json') for p in paths]})
                         changes=self.changes(previous,candidate,inputs);changes['input_signature']=signature;candidate.changes=changes

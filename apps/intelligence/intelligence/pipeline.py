@@ -18,6 +18,7 @@ from .schemas import AnalysisRequest, CandidateAssessment, CandidateClaim, Influ
 from .analysts import AnalystConfig, PromptRegistry
 from .events import ImpactPackage
 from .company_context import project_company_context, context_research_leads
+from .client_data import PRODUCT_MARKER_FACT_CAVEAT, PRODUCT_MARKER_LABELS, PRODUCT_MARKER_POLICY
 
 PROMPT_VERSION = "analysis-v2"
 PIPELINE_VERSION = "bounded-pipeline-v2"
@@ -351,6 +352,9 @@ class AnalysisPipeline:
                           "projected_characters": prompt_projection["event_text_char_cap"]})
         if prompt_projection["fit_stage"] != "full":
             trace.append({"stage": "model_prompt_adapted_to_input_budget", **prompt_projection})
+        if prompt_projection.get("profile_prompt_compaction"):
+            trace.append({"stage": "model_profile_prompt_compacted",
+                          **prompt_projection["profile_prompt_compaction"]})
         trace.append({"stage": "model_prompt_projected", **prompt_projection})
         repair = False
         reserved_total = 0
@@ -712,7 +716,7 @@ class AnalysisPipeline:
             status = "partial"
         projection = project_company_context(request.company, as_of=request.as_of)
         clarifications = list(dict.fromkeys([*payload.get("clarifications", []),
-            *(question.question for question in projection.questions)]))[:30]
+            *(question.question for question in projection.questions)]))
         if missing_confirmation:
             clarifications.append("Уточните наблюдаемый показатель или событие, которое подтвердит гипотезу.")
             status = "partial"
@@ -723,6 +727,7 @@ class AnalysisPipeline:
         if len(request.event.text) > MAX_MODEL_EVENT_CHARS:
             limitations.append("event_text_excerpt_only")
             if status == "ready": status = "partial"
+        bounded_limitations = self._bounded_context_limitations(limitations, usage)
         return CandidateAssessment(request_id=request.request_id, tenant_id=request.tenant_id,
             company_id=request.company_id, status=status,
             execution_mode="baseline" if self.llm is None or local_fallback else "model",
@@ -733,7 +738,7 @@ class AnalysisPipeline:
             coverage={"external": sum(e["source_role"] == "external" for e in evidence),
                       "bank": sum(e["source_role"] == "bank" for e in evidence),
                       "confirmed_dependencies": len(projection.dependencies),
-                      "company_facts": len(projection.facts), "limitations": limitations},
+                      "company_facts": len(projection.facts), "limitations": bounded_limitations},
             versions={"prompt": PROMPT_VERSION, "analyst_config": config.ref if config else "baseline@1", "pipeline": PIPELINE_VERSION,
                       "model": next((a.get("model") for a in reversed(usage["attempts"]) if a.get("model")), None),
                       "context": request.context_version, "source_policy": request.source_policy_version,
@@ -744,40 +749,145 @@ class AnalysisPipeline:
             trace=trace, created_at=datetime.now(timezone.utc))
 
     @staticmethod
-    def _compact_context_items(items, fields):
+    def _bounded_context_limitations(limitations, usage):
+        """Keep full per-item constraints in usage; bound the Coverage summary."""
+        prior_full = list(usage.get("context_limitations", []))
+        full = list(dict.fromkeys(prior_full))
+        for limitation in limitations:
+            value = str(limitation)
+            if value == "additional_limitations_in_usage":
+                continue
+            parts = value.split(":", 2)
+            if len(parts) == 2 and parts[0] in {"freshness_unknown", "unresolved"}:
+                # A previous invocation may have passed its grouped Coverage
+                # summary back in. Expand that summary from the retained detail.
+                matches = [item for item in prior_full
+                           if str(item).startswith(value + ":")]
+                if matches:
+                    full.extend(matches)
+                    continue
+            full.append(value)
+        full = list(dict.fromkeys(full))
+        counts = {}
+        grouped = []
+        for limitation in full:
+            value = str(limitation)
+            category = value.split(":", 1)[0]
+            parts = value.split(":", 2)
+            if len(parts) == 3 and parts[0] in {"freshness_unknown", "unresolved"}:
+                category = f"{parts[0]}:{parts[1]}"
+                summary_item = category
+            else:
+                summary_item = value
+            counts[category] = counts.get(category, 0) + 1
+            grouped.append(summary_item)
+        usage["context_limitations"] = full
+        usage["context_limitation_counts"] = counts
+        unique = list(dict.fromkeys(grouped))
+        if len(unique) > 30:
+            return [*unique[:29], "additional_limitations_in_usage"]
+        return unique
+
+    @staticmethod
+    def _compact_context_items(items, fields, *, group, stats, raw_facts=None):
         result = []
         for item in items:
             value = item.model_dump(mode="json", exclude_none=True)
-            result.append({key: value[key] for key in fields if key in value})
+            projected = {key: value[key] for key in fields if key in value}
+            stats["items_preserved"][group] = stats["items_preserved"].get(group, 0) + 1
+            if projected.get("status") == "confirmed":
+                projected.pop("status")
+                stats["confirmed_status_omitted"] += 1
+            elif "status" in projected:
+                stats["nonconfirmed_status_preserved"] += 1
+            refs = projected.get("evidence_refs")
+            if refs == []:
+                projected.pop("evidence_refs")
+                stats["empty_evidence_refs_omitted"] += 1
+            elif refs and refs == [projected.get("provenance")]:
+                projected.pop("evidence_refs")
+                stats["provenance_duplicate_refs_omitted"] += 1
+
+            if group == "facts":
+                column = next((key for key in PRODUCT_MARKER_LABELS
+                               if str(projected.get("fact_id", "")).endswith(key.lower())), None)
+                if column and projected.get("text", "").endswith(" " + PRODUCT_MARKER_FACT_CAVEAT):
+                    projected["text"] = projected["text"][:-len(" " + PRODUCT_MARKER_FACT_CAVEAT)]
+                    stats["product_fact_caveats_compacted"] += 1
+            elif group == "assertions":
+                column = next((key for key in PRODUCT_MARKER_LABELS
+                               if str(projected.get("assertion_id", "")).endswith(key.lower())), None)
+                if column:
+                    row_id = str(projected["assertion_id"]).split("-product-", 1)[0]
+                    fact_id = f"{row_id}-{column.lower()}"
+                    raw_fact = (raw_facts or {}).get(fact_id)
+                    raw_value = "unknown"
+                    if raw_fact is not None:
+                        prefix = f"Наблюдаемое поле {column}: "
+                        fact_text = str(raw_fact.get("text", ""))
+                        if fact_text.startswith(prefix):
+                            raw_value = fact_text[len(prefix):]
+                            suffix = ". " + PRODUCT_MARKER_FACT_CAVEAT
+                            if raw_value.endswith(suffix):
+                                raw_value = raw_value[:-len(suffix)]
+                    projected["label"] = (f"{PRODUCT_MARKER_LABELS[column]} ({column}); "
+                                           f"исходное значение={raw_value}")
+                    stats["product_assertion_labels_compacted"] += 1
+            result.append(projected)
         return result
 
     @classmethod
-    def _context_payload(cls, request, projection=None, *, event_text_chars=MAX_MODEL_EVENT_CHARS):
+    def _context_payload(cls, request, projection=None, *, event_text_chars=MAX_MODEL_EVENT_CHARS,
+                         return_compaction_metrics=False):
         event = request.event.model_dump(mode="json")
         projection = projection or project_company_context(request.company, as_of=request.as_of)
         # This projection never changes the request or its pinned corpus revision.
         # Exact primary quotes remain available in RETRIEVED_EVIDENCE.
         event["text"] = request.event.text[:event_text_chars]
         source = request.company
+        stats = {"items_preserved": {}, "confirmed_status_omitted": 0,
+                 "nonconfirmed_status_preserved": 0,
+                 "empty_evidence_refs_omitted": 0, "provenance_duplicate_refs_omitted": 0,
+                 "product_fact_caveats_compacted": 0, "product_assertion_labels_compacted": 0}
+        raw_facts = {item.fact_id: item.model_dump(mode="json", exclude_none=True)
+                     for item in projection.facts}
         company = {"name": source.name, "industry": source.industry,
                    "description": source.description, "role": source.role,
                    "activities": cls._compact_context_items(projection.activities,
                        ("activity_id", "label", "normalized_class", "status", "provenance", "evidence_refs",
-                        "observed_at", "valid_from", "valid_until")),
+                        "observed_at", "valid_from", "valid_until"), group="activities", stats=stats),
                    "assertions": cls._compact_context_items(projection.assertions,
                        ("assertion_id", "kind", "label", "status", "provenance", "evidence_refs",
-                        "observed_at", "valid_from", "valid_until")),
+                        "observed_at", "valid_from", "valid_until"), group="assertions", stats=stats,
+                       raw_facts=raw_facts),
                    "dependencies": cls._compact_context_items(projection.dependencies,
                        ("dependency_id", "label", "kind", "status", "provenance", "source_node", "target_node",
-                        "evidence_refs", "observed_at", "valid_from", "valid_until")),
+                        "evidence_refs", "observed_at", "valid_from", "valid_until"), group="dependencies", stats=stats),
                    "facts": cls._compact_context_items(projection.facts,
                        ("fact_id", "text", "provenance", "status", "evidence_refs",
-                        "observed_at", "valid_from", "valid_until"))}
-        return {"company": company, "event": event,
+                        "observed_at", "valid_from", "valid_until"), group="facts", stats=stats,
+                       raw_facts=raw_facts)}
+        stats["all_ids_and_provenance_preserved"] = True
+        stats["raw_product_values_preserved"] = True
+        company["context_projection_policy"] = (
+            "Items in these company lists are from the in-effect confirmed projection; omitted status means confirmed only here. "
+            "Hypotheses, unknowns and unconfirmed research leads remain separate and are not confirmed by this rule.")
+        if any(str(item.fact_id).endswith(column.lower()) for item in projection.facts
+               for column in PRODUCT_MARKER_LABELS):
+            company["PRODUCT_MARKER_POLICY"] = PRODUCT_MARKER_POLICY
+            stats["product_marker_policy_included"] = True
+            stats["product_marker_policy_version"] = "product-marker-semantics-v1"
+        else:
+            stats["product_marker_policy_included"] = False
+        stats["confirmed_status_omission_scope"] = "confirmed_items_in_active_company_projection_only"
+        context = {"company": company, "event": event,
                 "event_original_characters": len(request.event.text),
                 "event_text_truncated": len(request.event.text) > event_text_chars,
                 "context_version": request.context_version,
                 "source_policy_version": request.source_policy_version}
+        if return_compaction_metrics:
+            return context, stats
+        return context
 
     @staticmethod
     def _prompt_evidence(evidence, primary_ids, *, max_items=MAX_PROMPT_EVIDENCE,
@@ -825,7 +935,8 @@ class AnalysisPipeline:
                               quote_chars=MAX_PROMPT_EVIDENCE_QUOTE_CHARS,
                               event_text_chars=MAX_MODEL_EVENT_CHARS,
                               include_leads=True):
-        context = cls._context_payload(request, company_projection, event_text_chars=event_text_chars)
+        context, profile_compaction = cls._context_payload(request, company_projection,
+            event_text_chars=event_text_chars, return_compaction_metrics=True)
         prompt_evidence, metrics = cls._prompt_evidence(evidence, primary_ids,
             max_items=max_evidence, quote_limit=quote_chars)
         context_items = (*company_projection.dependencies, *company_projection.facts,
@@ -865,6 +976,7 @@ class AnalysisPipeline:
                         "user_prompt_bytes": len(user_content.encode("utf-8")),
                         "prompt_utf8_bytes": sum(len(message["content"].encode("utf-8")) for message in messages),
                         "input_estimator": "utf8_bytes_plus_4_per_message"})
+        metrics["profile_prompt_compaction"] = profile_compaction
         metrics.update({"event_text_char_cap": event_text_chars,
                         "shared_package_included": bool(include_package and package),
                         "unconfirmed_leads_available": len(leads),
@@ -912,7 +1024,7 @@ class AnalysisPipeline:
                       "confirmed_dependencies": sum(d.status == "confirmed" and self._context_is_current(d, request.as_of)
                                                      for d in request.company.dependencies),
                       "company_facts": len(projection.facts),
-                      "limitations": projection.limitations},
+                      "limitations": self._bounded_context_limitations(projection.limitations, usage)},
             versions={"prompt": PROMPT_VERSION, "analyst_config": config.ref if config else self.analyst_config.ref if self.analyst_config else "baseline@1", "pipeline": PIPELINE_VERSION, "model": None,
                       "context": request.context_version, "source_policy": request.source_policy_version,
                       "as_of": request.as_of, "event_id": request.event.event_id,

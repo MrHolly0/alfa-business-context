@@ -1,6 +1,7 @@
 import { build } from "esbuild";
 import { cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 import { extname, relative, resolve } from "node:path";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -32,5 +33,24 @@ for (const file of bundle.outputFiles) {
   await mkdir(resolve(outputPath, ".."), { recursive: true });
   await writeFile(outputPath, file.contents);
 }
+
+// Keep stable aliases for local tooling, but give the browser a new URL for
+// every script and stylesheet referenced by the HTML after each content change.
+const htmlPath = resolve(dist, "index.html");
+let html = await readFile(htmlPath, "utf8");
+const fingerprint = async (name, extension) => {
+  const sourcePath = resolve(dist, `${name}.${extension}`);
+  const contents = await readFile(sourcePath);
+  const digest = createHash("sha256").update(contents).digest("hex").slice(0, 12);
+  const versionedName = `${name}-${digest}.${extension}`;
+  await writeFile(resolve(dist, versionedName), contents);
+  html = html.replaceAll(`/${name}.${extension}`, `/${versionedName}`);
+};
+await fingerprint("app", "js");
+const stylesheets = [...html.matchAll(/href="\/([^"/]+\.css)"/g)].map((match) => match[1]);
+for (const stylesheet of stylesheets) {
+  await fingerprint(stylesheet.slice(0, -4), "css");
+}
+await writeFile(htmlPath, html);
 
 console.log("Built static frontend in apps/web/dist.");

@@ -31,6 +31,12 @@ try {
     check(!App\Intelligence\SourceUriPolicy::allowsDocumentUri('https://other.example/story/1',$source), 'Unconfigured document host was accepted');
     check(!App\Intelligence\SourceUriPolicy::allowsDocumentUri('https://news.example/story/1',['uri'=>'https://feeds.example/demo.rss','article_hosts_json'=>'{}']), 'Malformed article host policy was accepted');
     check(!App\Intelligence\SourceUriPolicy::allowsDocumentUri('https://feeds.example/demo.rss',['uri'=>'https://feeds.example/demo.rss','article_hosts_json'=>'{}']), 'Object host policy was accepted on source host');
+    $caseClassification=App\Intelligence\TaskClassification::forCoreTask(true,['public'],false);
+    check($caseClassification===['data_classification'=>'confidential','synthetic'=>false], 'Public-only sources must not downgrade an organizer profile with manual context');
+    check(App\Intelligence\TaskClassification::forCoreTask(false,['public'],false)['data_classification']==='confidential', 'Ordinary Core company context must remain confidential with public-only sources');
+    check(App\Intelligence\TaskClassification::forCoreTask(false,['synthetic'],true)===['data_classification'=>'synthetic','synthetic'=>true], 'Explicit synthetic test fixture should retain synthetic classification');
+    check(App\Intelligence\TaskClassification::forCoreTask(true,['synthetic'],true)['data_classification']==='confidential', 'Organizer profile must stay confidential even in fixture mode');
+    check((new App\Intelligence\HttpStatusException(422))->safeErrorCode()==='intelligence_http_422', 'Upstream HTTP status error code was not safely retained');
     $database = $dir.'/core.sqlite';
     $headers = ['SYNTHETIC_U','ORG_TYPE','OKFS_NAME','COMPANY_AGE_YEARS_GRADATION','ECO_MARK_LABEL','MAINOKVED_CODE','MAINOKVED_NAME','NEGATIVEMARK','AMOUNT_WORKERS_FNS_GRADATION','AMOUNT_WORKERS_SPARK_GRADATION','CL_TYPE','CL_PRODUCT_RKO_MARK','CL_PRODUCT_GAR_MARK','CL_PRODUCT_LOA_MARK','CL_PRODUCT_LEA_MARK','CL_PRODUCT_DEP_MARK','CL_PRODUCT_ZPP_MARK','FTS_FLAG','FTS_COUNTRY_NAME','FACTORING_MARK','REVENUE_COMPANY','GROUP_ID','CITY','REGION'];
     $company = array_fill_keys($headers, '');
@@ -71,6 +77,29 @@ try {
     $savedContext=json_decode($api->context($companyId)->getContent(),true)['context'];
     check(($savedContext['version']??null)===2 && ($savedContext['facts']['ai_profile']['name']??null)==='Imported profile' && ($savedContext['facts']['activities'][0]??null)==='Другое', 'Saving manual context discarded the imported profile');
     check($api->saveContext($companyId,$request('PUT',['expectedVersion'=>1,'facts'=>['activities'=>['Другое']]]))->getStatusCode()===409, 'Context conflict not detected');
+    $dashboardRequest=Symfony\Component\HttpFoundation\Request::create('/','GET');
+    $emptyDashboard=json_decode($api->dashboard($companyId,$dashboardRequest)->getContent(),true);
+    check(($emptyDashboard['summary']['status']??null)==='no_analysis', 'Dashboard without saved runs should say no analysis');
+    $dashboardRunId=str_repeat('f',32);
+    $dashboardResult=['candidates'=>[['execution_mode'=>'model','summary'=>'Сохранённая модельная оценка','claims'=>[]]],'provider'=>['profile'=>'hackathon']];
+    $db->prepare('INSERT INTO news_runs(id,company_id,context_version,policy_version,status,created_at,result_json) VALUES(?,?,?,?,?,?,?)')->execute([$dashboardRunId,$companyId,2,0,'completed',gmdate('c',time()+1),json_encode($dashboardResult,JSON_UNESCAPED_UNICODE)]);
+    $savedDashboard=json_decode($api->dashboard($companyId,$dashboardRequest)->getContent(),true);
+    check(($savedDashboard['summary']['model_status']??null)==='model_done' && ($savedDashboard['summary']['text']??null)==='Сохранённая модельная оценка', 'Dashboard should use persisted model candidate, not provider configuration');
+    $db->prepare('UPDATE news_runs SET context_version=1 WHERE id=?')->execute([$dashboardRunId]);
+    $staleDashboard=json_decode($api->dashboard($companyId,$dashboardRequest)->getContent(),true);
+    check(($staleDashboard['summary']['status']??null)==='stale' && str_contains((string)($staleDashboard['summary']['text']??''),'предыдущей версии'), 'Dashboard must mark results from an older profile as historical');
+    $timestampBase=(new DateTimeImmutable('now',new DateTimeZone('UTC')))->modify('+60 seconds')->format('Y-m-d\\TH:i:s');
+    $runOrderCases=[
+        [str_repeat('e',32),$timestampBase.'+00:00','Legacy seconds result'],
+        [str_repeat('d',32),$timestampBase.'.100000+00:00','Older microsecond result'],
+        [str_repeat('0',32),$timestampBase.'.200000+00:00','Newest microsecond result'],
+    ];
+    foreach($runOrderCases as [$orderedRunId,$createdAt,$candidateSummary]){
+        $orderedResult=['candidates'=>[['execution_mode'=>'model','summary'=>$candidateSummary,'claims'=>[]]]];
+        $db->prepare('INSERT INTO news_runs(id,company_id,context_version,policy_version,status,created_at,result_json) VALUES(?,?,?,?,?,?,?)')->execute([$orderedRunId,$companyId,2,0,'completed',$createdAt,json_encode($orderedResult,JSON_UNESCAPED_UNICODE)]);
+    }
+    $orderedDashboard=json_decode($api->dashboard($companyId,$dashboardRequest)->getContent(),true);
+    check(($orderedDashboard['summary']['text']??null)==='Newest microsecond result', 'Dashboard must order same-second runs by their UTC microsecond timestamps before random IDs');
     $created=$api->createMetric($companyId,$request('POST',['title'=>'Выручка','description'=>'За период','unit'=>'₽','direction'=>'up']));
     check($created->getStatusCode()===201, 'Metric creation failed');
     $metricId=json_decode($created->getContent(),true)['id'];
@@ -103,6 +132,29 @@ try {
     check($newsApi->startRun($companyId,$request('POST',[]))->getStatusCode()===403, 'Viewer could start a news run');
     $_SESSION=['uid'=>bin2hex(random_bytes(16)),'seen'=>time()];
     check($api->metrics($companyId)->getStatusCode()===401, 'Unknown user could read');
+    // Re-running organizer setup may refresh an untouched import, but never a user version.
+    $setupFile=$dir.'/setup.json';
+    $preparedProfile=['schema_version'=>'company-context-v2','name'=>'Prepared company','facts'=>[]];
+    $writeSetup=function(string $targetId,string $synthetic,array $profile)use($setupFile):void {
+        file_put_contents($setupFile,json_encode(['schema_version'=>'judging-core-setup-v1','profiles'=>[
+            ['company_id'=>$targetId,'synthetic_u_id'=>$synthetic,'context'=>$profile]],'sources'=>[]],JSON_THROW_ON_ERROR));
+    };
+    $writeSetup($companyId,'company-1',$preparedProfile);
+    check(runCommand(['bin/prepare-judging.php',$setupFile,'user@example.test'],$database)[0]===0,'User profile setup failed');
+    $q=$db->prepare('SELECT version,facts_json FROM company_context_versions WHERE company_id=? ORDER BY version DESC LIMIT 1');$q->execute([$companyId]);$protected=$q->fetch();$q->closeCursor();
+    check((int)$protected['version']===2 && json_decode($protected['facts_json'],true)['activities']===['Другое'],'Organizer setup overwrote a user-edited context');
+    $companyTwo=$company;$companyTwo['SYNTHETIC_U']='company-2';
+    csv($dir.'/second-company.csv',$headers,[array_values($companyTwo)]);
+    check(runCommand(['bin/import-case.php','v2',$dir.'/second-company.csv'],$database)[0]===0,'Second fixture company import failed');
+    $secondId=$db->query("SELECT id FROM companies WHERE synthetic_u='company-2'")->fetchColumn();
+    $writeSetup($secondId,'company-2',$preparedProfile);
+    check(runCommand(['bin/prepare-judging.php',$setupFile,'user@example.test'],$database)[0]===0,'Initial profile setup failed');
+    $preparedProfile['description']='Updated parser projection, same source';
+    $writeSetup($secondId,'company-2',$preparedProfile);
+    check(runCommand(['bin/prepare-judging.php',$setupFile,'user@example.test'],$database)[0]===0,'Imported profile refresh failed');
+    check(runCommand(['bin/prepare-judging.php',$setupFile,'user@example.test'],$database)[0]===0,'Idempotent profile setup failed');
+    $q->execute([$secondId]);$refreshed=$q->fetch();$q->closeCursor();
+    check((int)$refreshed['version']===2 && json_decode($refreshed['facts_json'],true)['ai_profile']['description']===$preparedProfile['description'],'Pure import refresh must create exactly one new version');
     echo "Core integration tests passed\n";
 } finally {
     foreach (glob($dir.'/*') ?: [] as $file) unlink($file);

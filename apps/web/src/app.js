@@ -8,6 +8,7 @@ import { contextualProduct } from "./bank-products.js";
 import { volumeSources } from "./volume-demo.js";
 import { renderMarkup } from "./core-ui.jsx";
 import { createCoreClient, CoreApiError } from "./core-client.js";
+import { resolveCoreNewsView } from "./core-news-view.js";
 const $ = (s) => document.querySelector(s),
   esc = (s) =>
     String(s ?? "").replace(
@@ -117,6 +118,7 @@ let coreMode = false,
   coreDashboardData = null,
   coreMetrics = [],
   coreNewsSources = [],
+  coreNewsPolicyVersion = 0,
   coreNewsDocuments = [],
   coreMetricEvents = [],
   coreMetricEventsId = "",
@@ -415,7 +417,7 @@ function coreCompanyLabel(company) {
   return company?.synthetic_u || company?.name || company?.id || "Компания";
 }
 function coreStatusLabel(status) {
-  return ({ no_analysis: "Сводка пока не готова", partial: "Нужны уточнения", ready: "Готово", unknown: "Не установлено", observed: "Есть наблюдение", confirmed: "Подтверждено", proposed: "Предложено", blocked: "Проверка ограничена", error: "Не удалось проверить", published: "Опубликовано", failed: "Не удалось проверить", no_data: "Данных нет", not_evaluated: "Не проверено", unavailable: "Недоступно" })[status] || (status ? "Нужны уточнения" : "Не указано");
+  return ({ no_analysis: "Сводка пока не готова", partial: "Нужны уточнения", ready: "Готово", unknown: "Не установлено", observed: "Есть наблюдение", confirmed: "Подтверждено", proposed: "Предложено", blocked: "Проверка ограничена", error: "Не удалось проверить", published: "Опубликовано", failed: "Не удалось проверить", stale: "Исторический результат", running: "Проверка выполняется", completed: "Проверка завершена", no_change: "Новых выводов нет", no_data: "Данных нет", not_evaluated: "Не проверено", unavailable: "Недоступно" })[status] || (status ? "Нужны уточнения" : "Не указано");
 }
 function coreEventKind(kind) {
   return ({ source_document: "Новость", manual: "Добавлено вручную", official: "Официальное сообщение", forecast: "Прогноз", opinion: "Мнение" })[kind] || "Материал";
@@ -441,6 +443,7 @@ async function loadCoreCompanies(selectId = null) {
       coreCompany = null;
       coreContext = coreDashboardData = null;
       coreMetrics = coreNewsSources = coreNewsDocuments = [];
+      coreNewsPolicyVersion = 0;
     }
   } catch (e) {
     coreError = e.message;
@@ -456,6 +459,7 @@ async function loadCoreCompany(id, repaint = true) {
     if (coreCompany?.id !== id) {
       coreCompany = null; coreContext = coreDashboardData = null;
       coreMetrics = coreNewsSources = coreNewsDocuments = [];
+      coreNewsPolicyVersion = 0;
       coreMetricEvents = []; coreMetricEventsId = ""; coreMetricEventsLoading = false;
       coreAnalysisRun = null; coreAnalysisError = "";
     }
@@ -479,6 +483,7 @@ async function loadCoreCompany(id, repaint = true) {
     coreMetrics = metricsResult.metrics || [];
     coreDashboardData = dashboardResult;
     coreNewsSources = sourcesResult.sources || [];
+    coreNewsPolicyVersion = Number(sourcesResult.policy_version || 0);
     coreNewsDocuments = documentsResult.documents || [];
     coreAnalysisRun = latestRunResult;
     coreAnalysisError = "";
@@ -511,7 +516,7 @@ async function runCoreAnalysis() {
     if (coreCompany?.id !== companyId) return;
     coreAnalysisRun = e.payload?.run || coreAnalysisRun;
     coreAnalysisError = e.status === 409 && ["no_source_policy", "no_enabled_sources"].includes(e.payload?.error)
-      ? "Для компании не настроены источники. Выберите компанию кейса или настройте источники в Core."
+      ? "Источники для этой компании не настроены. Состав источников меняет администратор; список доступен для просмотра."
       : e.status === 409 && e.payload?.error === "analysis_in_progress"
         ? "Для этой компании уже выполняется анализ. Обновите страницу через минуту."
       : e.status === 403
@@ -590,7 +595,7 @@ function coreCompanyPage() {
   return `${intro("Моя компания", "Сведения о компании и сохранённый контекст.", B("Уточнить контекст","nav:context","primary","pencil"))}<div class="company-identity"><span class="company-avatar">${I("building")}</span><div><h2>${esc(coreCompanyLabel(coreCompany))}</h2><p>${esc(coreCompany?.mainokved_name || "Основная деятельность не указана")} · ${esc(coreCompany?.region || "Регион не указан")}</p></div></div><section class="profile-groups"><div class="profile-group"><h2>Контекст компании · версия ${coreContext?.version ?? 0}</h2><dl class="profile-facts">${lines.map(([key,items]) => `<div><dt>${esc(({activities:"Направления деятельности",products:"Продукты",markets:"Рынки",suppliers:"Поставщики",customers:"Клиенты",risks:"Риски",notes:"Примечания"})[key] || key)}</dt><dd>${items.map((x) => esc(x)).join("; ")}<span class="fact-origin">Сохранено</span></dd></div>`).join("") || '<div><dt>Контекст</dt><dd>Пока не уточнён</dd></div>'}</dl></div></section><div class="actions">${B("Изменить контекст","nav:context","secondary","pencil")}</div>`;
 }
 function coreNewsPage() {
-  return `${intro("Новости и источники", "Здесь показаны сохранённые материалы. Управление источниками и запуск сбора пока недоступны.")}<section class="card source-directory"><h2>Источники · ${coreNewsSources.length}</h2>${coreNewsSources.map((s) => `<article class="directory-row"><div class="row-grow"><h3>${esc(s.title || s.uri)}</h3><p class="source-meta">${esc(s.publisher || "Издатель не указан")} · ${esc(coreSourceRole(s.source_role))} · ${esc(coreClassification(s.classification))}</p><span class="source-kind">${s.enabled ? "Включён" : "Выключен"}</span></div></article>`).join("") || '<p>Источники не зарегистрированы.</p>'}</section><section class="card source-directory"><h2>Документы · ${coreNewsDocuments.length}</h2>${coreNewsDocuments.map((d) => `<article class="directory-row"><div class="row-grow"><h3>${esc(d.title || d.canonical_uri)}</h3><p class="source-meta">${esc(d.publisher || "Издатель не указан")} · ${esc(d.published_at || "Дата не указана")}</p><p>${esc(d.excerpt || "Текстовый фрагмент не сохранён.")}</p><span class="source-kind">${esc(coreClassification(d.classification))}</span></div></article>`).join("") || '<p>Документы не сохранены.</p>'}</section>`;
+  return `${intro("Новости и источники", "Здесь показаны сохранённые материалы. Страница доступна только для просмотра; состав источников настраивает администратор.")}<section class="card source-directory"><h2>Источники · ${coreNewsSources.length}</h2>${coreNewsSources.map((s) => `<article class="directory-row"><div class="row-grow"><h3>${esc(s.title || s.uri)}</h3><p class="source-meta">${esc(s.publisher || "Издатель не указан")} · ${esc(coreSourceRole(s.source_role))} · ${esc(coreClassification(s.classification))}</p><span class="source-kind">${s.enabled ? "Включён" : "Выключен"}</span></div></article>`).join("") || '<p>Источники не зарегистрированы.</p>'}</section><section class="card source-directory"><h2>Документы · ${coreNewsDocuments.length}</h2>${coreNewsDocuments.map((d) => `<article class="directory-row"><div class="row-grow"><h3>${esc(d.title || d.canonical_uri)}</h3><p class="source-meta">${esc(d.publisher || "Издатель не указан")} · ${esc(d.published_at || "Дата не указана")}</p><p>${esc(d.excerpt || "Текстовый фрагмент не сохранён.")}</p><span class="source-kind">${esc(coreClassification(d.classification))}</span></div></article>`).join("") || '<p>Документы не сохранены.</p>'}</section>`;
 }
 function coreUnsupportedPage() {
   return empty("Раздел пока недоступен", "Здесь не показываются демоданные. Доступны обзор, профиль компании и сохранённые новости.", B("К обзору","nav:home"));
@@ -606,7 +611,7 @@ function renderCore() {
   else if (coreError && !coreCompany) page = `<div class="card form-error">${esc(coreError)}</div>`;
   else if (!coreCompany) page = `<div class="card">${coreError ? `<p class="form-error">${esc(coreError)}</p>` : ""}<h2>Нет доступных компаний</h2><p>Для этой учётной записи пока нет доступных организаций.</p></div>`;
   else switch (view.page) {
-    case "home": case "overview": page = `${pulse.coreProfileSnapshot(coreCompany, coreContext)}${pulse.coreAnalysisPanel(coreAnalysisRun, coreAnalysisRunning, coreCompany.role !== "viewer")}${coreAnalysisError ? `<p class="form-error" role="alert">${esc(coreAnalysisError)}</p>` : ""}${pulse.coreDashboard(coreCompany, coreDashboardData)}`; break;
+    case "login": case "": case "home": case "overview": page = `${pulse.coreProfileSnapshot(coreCompany, coreContext)}${pulse.coreAnalysisPanel(coreAnalysisRun, coreAnalysisRunning, coreCompany.role !== "viewer", "core-analyze", coreContext?.version, coreNewsPolicyVersion)}${coreAnalysisError ? `<p class="form-error" role="alert">${esc(coreAnalysisError)}</p>` : ""}${pulse.coreDashboard(coreCompany, coreDashboardData)}`; break;
     case "metric": {
       loadCoreMetricEvents(view.id);
       page = pulse.coreMetricPage(coreMetrics.find((m) => m.id === view.id), coreMetricEventsId === view.id ? coreMetricEvents : [], coreCompany.role !== "viewer");
@@ -617,8 +622,11 @@ function renderCore() {
     case "context": page = coreContextForm(); break;
     case "events": case "sources": page = coreNewsPage(); break;
     case "news": {
-      const event = coreDashboardData?.events?.find((e) => e.id === view.id);
-      page = event ? `${back("events","К событиям")}<article class="news-reader"><header><h1>${esc(event.title)}</h1><p>${esc(coreEventKind(event.kind))} · ${esc(event.published_on)}</p></header><div class="reader-body"><p>${esc(event.summary || "Текст события не предоставлен.")}</p></div><section class="reader-source"><p>Статус оценки: ${esc(coreStatusLabel(event.assessment_status))}</p><p>${esc(event.assessment_summary || "Опубликованной оценки пока нет.")}</p></section></article>` : back("events","К событиям") + '<div class="card">Событие не найдено среди сохранённых данных.</div>';
+      const newsView = resolveCoreNewsView(view.id, coreDashboardData?.events || []);
+      if (newsView.kind === "list") { page = coreNewsPage(); break; }
+      if (newsView.kind === "missing") { page = back("events","К событиям") + '<div class="card">Событие не найдено среди сохранённых данных.</div>'; break; }
+      const event = newsView.event;
+      page = `${back("events","К событиям")}<article class="news-reader"><header><h1>${esc(event.title)}</h1><p>${esc(coreEventKind(event.kind))} · ${esc(event.published_on)}</p></header><div class="reader-body"><p>${esc(event.summary || "Текст события не предоставлен.")}</p></div><section class="reader-source"><p>Статус оценки: ${esc(coreStatusLabel(event.assessment_status))}</p><p>${esc(event.assessment_summary || "Опубликованной оценки пока нет.")}</p></section></article>`;
       break;
     }
     case "account": page = `<div class="form-page account-page">${intro("Мой профиль","Данные учётной записи.")}<section class="card account-identity"><div><h2>${esc(userName)}</h2><p>${esc(coreUser.email || "")}</p></div></section><div class="actions">${B("Выйти","core-logout","secondary")}</div></div>`; break;

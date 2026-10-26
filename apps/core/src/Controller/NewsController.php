@@ -16,7 +16,8 @@ final class NewsController {
     public function sources(string $id): JsonResponse {
         if($error=$this->access($id))return $error;
         $q=Database::connect()->prepare('SELECT id,uri,content_type,source_role,classification,title,publisher,published_at,enabled FROM news_sources WHERE company_id=? ORDER BY created_at,id');$q->execute([$id]);
-        return new JsonResponse(['sources'=>$q->fetchAll()]);
+        $revision=Database::connect()->prepare('SELECT revision FROM source_policy_heads WHERE company_id=?');$revision->execute([$id]);
+        return new JsonResponse(['sources'=>$q->fetchAll(),'policy_version'=>(int)($revision->fetchColumn() ?: 0)]);
     }
     #[Route('/api/companies/{id}/news/documents',methods:['GET'])]
     public function documents(string $id,Request $request): JsonResponse {

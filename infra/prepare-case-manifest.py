@@ -4,13 +4,26 @@ import argparse
 import hashlib
 import json
 import os
+import tempfile
 from pathlib import Path
 os.umask(0o077)
 ROOT=Path(__file__).resolve().parents[1]
 
 def write(path,value):
     path.parent.mkdir(parents=True,exist_ok=True)
-    path.write_text(json.dumps(value,ensure_ascii=False,indent=2)+'\n');path.chmod(0o600)
+    fd,temp_name=tempfile.mkstemp(prefix=f'.{path.name}.',suffix='.tmp',dir=path.parent)
+    temporary=Path(temp_name)
+    try:
+        with os.fdopen(fd,'w',encoding='utf-8') as stream:
+            stream.write(json.dumps(value,ensure_ascii=False,indent=2)+'\n')
+            stream.flush();os.fsync(stream.fileno())
+            os.fchmod(stream.fileno(),0o600)
+        os.replace(temporary,path)
+        os.chmod(path,0o600)
+    except BaseException:
+        try:temporary.unlink()
+        except OSError:pass
+        raise
 
 parser=argparse.ArgumentParser()
 parser.add_argument('--case-dir',type=Path,default=ROOT/'.local/data/case')

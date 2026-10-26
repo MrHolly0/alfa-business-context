@@ -14,6 +14,7 @@ import tempfile
 CASE_META_FILES = ("download-manifest.json", "ocr-manifest.json", "manifest.json")
 CASE_BUNDLE = "case-bundle.json"
 MAX_JSON_BYTES = 2_000_000
+MAX_APPROVAL_BYTES = 256_000
 MAX_OCR_BYTES = 8_000_000
 MAX_PDF_BYTES = 50_000_000
 MAX_OTHER_BYTES = 50_000_000
@@ -192,7 +193,7 @@ def _validate_case_inputs(case_root: Path, pinned_path: Path) -> tuple[list[dict
 
 
 def _validate_approval(path: Path, bundle_path: Path) -> dict:
-    approval = _json_file(path, MAX_JSON_BYTES)
+    approval = _json_file(path, MAX_APPROVAL_BYTES)
     bundle = _json_file(bundle_path, 4_000_000)
     if (not isinstance(approval, dict) or approval.get("schema_version") != "organizer-model-approval-v1" or
             approval.get("tenant_id") != "core-local" or not isinstance(approval.get("company_profiles"), dict) or
@@ -273,9 +274,9 @@ def prepare_case_volumes(case_root: Path, pinned_path: Path, case_target: Path, 
         if not approval_path.is_file():
             raise CaseVolumeError("approval_source_unsafe")
         _validate_approval(approval_path, (case_target / CASE_BUNDLE) if (case_target / CASE_BUNDLE).exists() else (case_root / CASE_BUNDLE))
-        size, digest = _hash_file(approval_path, MAX_JSON_BYTES)
+        size, digest = _hash_file(approval_path, MAX_APPROVAL_BYTES)
         _copy_verified(approval_path, approval_target / "model-approval.json", size=size, sha256=digest,
-                       mode=0o400, uid=uid, gid=gid, max_bytes=MAX_JSON_BYTES)
+                       mode=0o400, uid=uid, gid=gid, max_bytes=MAX_APPROVAL_BYTES)
         approval_status = "copied"
     elif (approval_target / "model-approval.json").exists():
         approval_status = "preserved"

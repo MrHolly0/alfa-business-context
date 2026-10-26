@@ -131,7 +131,30 @@ _KNOWN_COLUMNS = {
 }
 _PRODUCT_COLUMNS = {"LOAN", "LEASE", "LEASING", "CREDIT", "DEPOSIT", "ACQUIRING",
                     "PAYROLL", "GUARANTEE", "HAS_LOAN", "HAS_LEASE", "HAS_LEASING",
-                    "LOAN_ACTIVE", "LEASE_ACTIVE", "LEASING_ACTIVE"}
+                    "LOAN_ACTIVE", "LEASE_ACTIVE", "LEASING_ACTIVE",
+                    "CL_PRODUCT_RKO_MARK", "CL_PRODUCT_GAR_MARK", "CL_PRODUCT_LOA_MARK",
+                    "CL_PRODUCT_LEA_MARK", "CL_PRODUCT_DEP_MARK", "CL_PRODUCT_ZPP_MARK",
+                    "FACTORING_MARK"}
+_PRODUCT_COLUMN_LABELS = {
+    "CL_PRODUCT_RKO_MARK": "расчётно-кассовое обслуживание",
+    "CL_PRODUCT_GAR_MARK": "банковские гарантии",
+    "CL_PRODUCT_LOA_MARK": "кредитные продукты",
+    "CL_PRODUCT_LEA_MARK": "лизинг",
+    "CL_PRODUCT_DEP_MARK": "депозиты",
+    "CL_PRODUCT_ZPP_MARK": "зарплатный проект",
+    "FACTORING_MARK": "факторинг",
+}
+PRODUCT_MARKER_LABELS = _PRODUCT_COLUMN_LABELS
+PRODUCT_MARKER_FACT_CAVEAT = ("Это только значение маркера источника: оно не подтверждает актуальный договор, "
+                              "использование или текущую финансовую экспозицию.")
+PRODUCT_MARKER_POLICY = {
+    "fields": PRODUCT_MARKER_LABELS,
+    "source_mark_1": "Наблюдение строки об отметке продукта; не доказывает действующий договор, использование, ставку, валюту, сумму или текущую экспозицию.",
+    "source_mark_0": "Статус наличия неизвестен; ноль не доказывает отсутствие продукта, кредита или договора.",
+    "unknown_or_missing": "Статус неизвестен; не выводи наличие или отсутствие продукта.",
+    "follow_up": "Уточни актуальность и, если уместно, продукт/договор, ставку, валюту и сумму.",
+    "confirmed_scope": "Отсутствующий status означает confirmed только для элементов в этих списках подтверждённой проекции. Это правило не относится к hypotheses/unconfirmed research leads.",
+}
 _TRUE_VALUES = {"1", "true", "yes", "y", "да", "есть", "active", "активен", "подключен", "подключён"}
 _FALSE_VALUES = {"0", "false", "no", "n", "нет", "отсутствует", "inactive", "неактивен", "не подключен", "не подключён"}
 
@@ -224,9 +247,9 @@ def _flag(value: str | None) -> bool | None:
     if value is None or not value.strip():
         return None
     normalized = value.strip().casefold()
-    if normalized in _TRUE_VALUES:
+    if normalized in _TRUE_VALUES | {"1.0"}:
         return True
-    if normalized in _FALSE_VALUES:
+    if normalized in _FALSE_VALUES | {"0.0"}:
         return False
     return None
 
@@ -327,8 +350,9 @@ def _proposal(row: dict[str, str], *, tenant_id: str, filename: str, origin: str
     for column, raw_value in fact_values.items():
         value = _text(raw_value)
         if value:
+            caveat = (" " + PRODUCT_MARKER_FACT_CAVEAT) if column in _PRODUCT_COLUMN_LABELS else ""
             facts.append(CompanyFact(fact_id=f"csv-{row_index}-{column.lower()}",
-                text=f"Наблюдаемое поле {column}: {value}",
+                text=f"Наблюдаемое поле {column}: {value}.{caveat}",
                 provenance=_provenance(filename, row_index, column)))
             field_provenance[column] = _provenance(filename, row_index, column)
     if role:
@@ -386,13 +410,36 @@ def _proposal(row: dict[str, str], *, tenant_id: str, filename: str, origin: str
             provenance=_provenance(filename, row_index, column),
             evidence_refs=[_provenance(filename, row_index, column)],
         ))
-    assertions = [CompanyAssertion(
-        assertion_id=f"csv-{row_index}-product-{column.lower()}", kind="product",
-        label=f"{column}={'yes' if value else 'no' if value is False else 'unknown'}",
-        status="confirmed" if value is not None else "unknown",
-        provenance=_provenance(filename, row_index, column),
-        evidence_refs=[_provenance(filename, row_index, column)] if column in row else [],
-    ) for column, value in product_flags.items() if value is not None or column in row]
+    assertions = []
+    for column, value in product_flags.items():
+        if value is None and column not in row:
+            continue
+        provenance = _provenance(filename, row_index, column)
+        raw_value = row.get(column, "")[:500]
+        product_name = _PRODUCT_COLUMN_LABELS.get(column)
+        if product_name:
+            if value is True:
+                label = (f"Источник содержит отметку 1 о продукте «{product_name}» ({column}); "
+                         "отметка не подтверждает действующий договор, фактическое использование, "
+                         "ставку, валюту, сумму или текущую экспозицию.")
+                status = "confirmed"
+            elif value is False:
+                label = (f"Источник содержит значение 0 для отметки о продукте «{product_name}» ({column}); "
+                         "маркер наличия не установлен. Это не доказывает отсутствие продукта, кредита "
+                         "или договора; актуальность, ставка, валюта и сумма неизвестны.")
+                status = "unknown"
+            else:
+                label = (f"Значение маркера продукта «{product_name}» ({column}) не распознано: "
+                         f"{raw_value or 'пусто'}. Наличие продукта, актуальность, ставка, валюта и сумма неизвестны.")
+                status = "unknown"
+        else:
+            label = f"{column}={'yes' if value else 'no' if value is False else 'unknown'}"
+            status = "confirmed" if value is not None else "unknown"
+        assertions.append(CompanyAssertion(
+            assertion_id=f"csv-{row_index}-product-{column.lower()}", kind="product",
+            label=label, status=status, provenance=provenance,
+            evidence_refs=[provenance] if column in row else [],
+        ))
     context = CompanyContext(
         name=f"Анонимизированная компания {identifier}", industry=industry,
         description="Контекст предложен по обезличенной CSV-строке; не является сохранённым Core-профилем.",

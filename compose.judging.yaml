@@ -4,11 +4,11 @@ services:
     environment:
       INTELLIGENCE_ALLOW_HACKATHON_CASE_DATA: "1"
       INTELLIGENCE_CASE_APPROVAL_FILE: /case-approval/model-approval.json
-    command: ["serve", "--host", "0.0.0.0", "--mode", "model", "--config", "/config/judging.json", "--profile", "hackathon"]
-    volumes: !override
-      - intelligence-state:/app/.state
-      - service-auth:/run/intelligence-auth:ro
-      - ./apps/intelligence/examples/providers.judging.json:/config/judging.json:ro
+    command: ["serve", "--host", "0.0.0.0", "--mode", "model", "--config", "/config/providers.json", "--profile", "hackathon"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; from intelligence.case_permission import load_case_approval; assert load_case_approval() is not None; urllib.request.urlopen('http://127.0.0.1:8081/health', timeout=2).read()"]
+    volumes:
+      - ./apps/intelligence/examples/providers.judging.json:/config/providers.json:ro
       - case-approval:/case-approval:ro
   intelligence:
     volumes:
@@ -27,7 +27,10 @@ services:
     healthcheck:
       disable: true
     volumes:
-      - ./.local/data/case:/case:ro
+      - type: bind
+        source: ${CASE_DATA_DIR:-./.local/data/case}
+        target: /case
+        read_only: true
     user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     environment:
       CORE_ALLOW_PARTIAL_CASE: "1"
@@ -52,11 +55,51 @@ services:
     security_opt:
       - no-new-privileges:true
     volumes:
-      - ./.local/data/case:/host-case:ro
+      - type: bind
+        source: ${CASE_DATA_DIR:-./.local/data/case}
+        target: /host-case
+        read_only: true
       - ./infra/case-files.json:/config/case-files.json:ro
       - ./infra/prepare-case-volume.py:/scripts/prepare-case-volume.py:ro
       - case-data:/private-case
       - case-approval:/approval
+
+  case-ocr:
+    profiles: [tools]
+    build:
+      context: .
+      dockerfile: apps/intelligence/Dockerfile
+      target: runtime
+    entrypoint: ["python", "-m", "intelligence"]
+    command: ["case-ocr", "--case-dir", "/host-case"]
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=256m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: bind
+        source: ${CASE_DATA_DIR:-./.local/data/case}
+        target: /host-case
+
+  case-key-check:
+    profiles: [tools]
+    build:
+      context: .
+      dockerfile: apps/intelligence/Dockerfile
+      target: runtime
+    entrypoint: ["python", "-c"]
+    command: ["import os; print('configured' if os.environ.get('HACKATHON_API_KEY') else 'missing')"]
+    environment:
+      HACKATHON_API_KEY: ${HACKATHON_API_KEY:-}
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   case-data:

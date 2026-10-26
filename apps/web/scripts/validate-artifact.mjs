@@ -10,9 +10,14 @@ const html = await readFile(resolve(dist, "index.html"), "utf8");
 for (const asset of ["app.js", "core-ui.css", "product.css", "workspace.css", "compact.css"]) {
   await access(resolve(dist, asset));
 }
-assert.match(html, /src="\/app\.js"/, "index.html loads the compiled app");
-assert.match(html, /href="\/core-ui\.css"/, "index.html loads compiled UI styles");
-assert.match(html, /href="\/compact\.css"/, "index.html loads compact layout styles");
+assert.match(html, /src="\/app-[0-9a-f]{12}\.js"/, "index.html loads a fingerprinted app bundle");
+const stylesheetPaths = [...html.matchAll(/href="(\/[^"/]+-[0-9a-f]{12}\.css)"/g)].map((match) => match[1]);
+assert.ok(stylesheetPaths.length >= 1, "index.html loads fingerprinted stylesheets");
+const unversionedStylesheets = [...html.matchAll(/href="\/([^"/]+\.css)"/g)]
+  .filter((match) => !/-[0-9a-f]{12}\.css$/.test(match[1]));
+assert.equal(unversionedStylesheets.length, 0, "index.html does not load unhashed stylesheets");
+for (const path of stylesheetPaths) await access(resolve(dist, path.slice(1)));
+assert.match(html, /href="\/compact-[0-9a-f]{12}\.css"/, "index.html loads fingerprinted compact styles");
 assert.doesNotMatch(html, /\/src\/|\.jsx/, "index.html does not expose source modules");
 
 const app = await readFile(resolve(dist, "app.js"), "utf8");

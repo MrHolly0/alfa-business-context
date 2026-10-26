@@ -143,3 +143,44 @@ def test_case_collection_fetches_external_only_but_retains_authorized_bank_docs(
     assert any(item["document_revision_ref"] == bank_doc["document_revision_ref"] for item in documents)
     assert result.coverage["bank_documents_preloaded"] == 1
     assert result.provider["profile"] == "hackathon"
+
+
+def test_changed_profile_uses_local_bank_corpus_without_refetch_or_model(tmp_path, monkeypatch):
+    from intelligence.schemas import CompanyFact
+    _, original = _inputs(tmp_path)
+    calls = []
+    service = _service("https://api.alfahack-gateway26.ru/v1")
+    def forbidden_model(*args, **kwargs):
+        calls.append(True)
+        raise RuntimeError("private_profile_must_not_leave")
+    service.complete = forbidden_model
+    workflow = _workflow(tmp_path, {"analyst": service}, monkeypatch)
+    data = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n"
+    pdf_path = tmp_path / "pinned.pdf"
+    pdf_path.write_bytes(data)
+    document = workflow.store.ingest_private_case_pdf({"tenant_id": "core-local", "source_id": "bank",
+        "source_role": "bank", "canonical_uri": "https://bank.example/rss", "title": "Private case note",
+        "content": "", "content_type": "application/pdf", "published_at": NOW.isoformat(),
+        "fetched_at": NOW.isoformat(), "synthetic": False, "data_classification": "confidential"},
+        pdf_path, allowed_root=tmp_path, ocr_text="[page 1]\nPrivate bank note for local analysis.")
+    _install_approval(tmp_path, monkeypatch, original, documents=[{
+        "source_id": "bank", "document_revision_ref": document["document_revision_ref"],
+        "raw_sha256": hashlib.sha256(data).hexdigest(), "canonical_uri": "https://bank.example/rss"}])
+    changed_company = original.businesses[0].company.model_copy(update={"facts": [
+        *original.businesses[0].company.facts,
+        CompanyFact(fact_id="manual-edit", text="Additional private observation", provenance="Core user context"),
+    ]})
+    changed = original.model_copy(update={"context_version": 2,
+        "businesses": [original.businesses[0].model_copy(update={"context_version": 2, "company": changed_company})],
+        "budget": original.budget.model_copy(update={"max_model_calls": 3})})
+    urls = []
+    def fetch(url, headers, **kwargs):
+        urls.append(url)
+        return FetchResult(status=200, headers={"content-type": "application/rss+xml"}, body=FEED)
+    workflow.collector = NewsCollector(workflow.store, state_path=tmp_path / "collection.sqlite3", fetcher=fetch)
+    result = workflow.run(changed)
+    assert urls == ["https://feed.example/rss"]
+    assert calls == []
+    assert result.coverage["model_limitation"] == "organizer_profile_requires_approval"
+    assert result.coverage["bank_documents_preloaded"] == 1
+    assert any(item["source_role"] == "bank" for item in result.collection["documents"])

@@ -10,7 +10,7 @@ flowchart LR
   Web -->|reverse proxy /api/*| Core[Symfony Core / PHP 8.4 / Apache]
   Core --> CoreDB[(PostgreSQL: business_context_core)]
   AI[Python Intelligence API] --> AIDB[(PostgreSQL: business_context_ai)]
-  Core -->|HTTPS внутри сети: Bearer + tenant core-local\n/internal/v1/analyze, baseline по умолчанию| AI
+  Core -->|HTTP внутри Compose: Bearer + tenant core-local\n/internal/v1/analyze| AI
   Scheduler[Опциональный core-scheduler\nPHP CLI: run-due-news.php] --> CoreDB
   Scheduler -->|тот же прямой вызов Core → AI| AI
 ```
@@ -22,13 +22,13 @@ Compose штатно поднимает `core-migrate` (схема и demo seed)
 ## Фактические пользовательские сценарии
 
 - Core login проверяет email/password и выставляет HTTP-only, SameSite=Strict cookie с 30-минутным idle timeout. Core ограничивает список компаний членством пользователя и проверяет роль для операций записи. Демо-логин создан только для локального запуска.
-- UI после авторизации читает компании, контекст, метрики, dashboard и новости из Core. Контекст записывается с `expectedVersion`; конфликт возвращает `409`. Новости в UI — чтение источников, документов, запусков и уже сохранённой оценки; UI не запускает Python analysis job.
-- При вызове `php bin/run-news.php COMPANY_ID` Core собирает текущие контекст, разрешённые источники, их policy revision и `tenant_id` конфигурации. Core вызывает Python `POST /internal/v1/analyze` с внутренним Bearer; API допускает tenant `core-local` в Compose-конфигурации. Базовый режим `baseline` не обращается к LLM. Core сверяет версии перед сохранением news-run/result.
+- UI после авторизации читает компании, контекст, метрики, dashboard и новости из Core. Контекст записывается с `expectedVersion`; конфликт возвращает `409`. UI показывает источники, документы, запуски и сохранённые оценки; роли admin/editor могут запустить синхронную проверку через Core `POST /api/companies/{id}/news/runs`. Это прямой ограниченный вызов, не durable job.
+- При вызове из UI или `php bin/run-news.php COMPANY_ID` Core собирает контекст, разрешённые источники, их policy revision и `tenant_id`, затем вызывает Python `POST /internal/v1/analyze` по внутреннему HTTP с Bearer; API допускает tenant `core-local` в Compose-конфигурации. В обычном baseline режиме модель не вызывается. Для разрешённого judging-case модельный путь включается только при валидной операторской авторизации и Alfa gateway; профиль и закрытые банковские материалы не направляются в другие провайдеры. Core сверяет версии перед сохранением результата.
 - При `--profile scheduler` контейнер PHP CLI циклически вызывает существующий `bin/run-due-news.php`. Он выбирает компании с включёнными источниками и не запускает их чаще раза в час. Пустой demo seed не содержит источников, поэтому перед сбором оператор должен добавить разрешённый источник.
 
 ## Что не следует принимать за реализованное
 
-В Core пока нет общей таблицы/очереди пользовательских Analysis Jobs, атомарного claim, heartbeat/lease, generation fencing и принятия Python результата через result endpoint. Текущий PHP news runner — ограниченная интеграция прямого HTTP вызова; она не использует Python worker как Core job executor. Не утверждать, что UI инициирует анализ, что SSE/outbox есть, или что состоялся полный job lifecycle. Python `intelligence-worker` и fixture Core Stand — отдельный контрактный/разработческий путь и не подключены к этому продуктовому Core queue.
+В Core пока нет общей таблицы/очереди пользовательских Analysis Jobs, атомарного claim, heartbeat/lease, generation fencing и принятия Python результата через result endpoint. Текущий PHP news runner — ограниченная синхронная интеграция прямого HTTP вызова; она не использует Python worker как Core job executor. Не утверждать, что durable queue, lease lifecycle, SSE/outbox или worker publication flow подключены. Python `intelligence-worker` и fixture Core Stand — отдельный контрактный/разработческий путь и не подключены к этому продуктовому Core queue.
 
 `CORE_INTELLIGENCE_TENANT_ID=core-local` — локальный deployment scope для внутреннего API; это не tenant пользователя, переданный браузером. Пользовательская изоляция Core сейчас основана на membership к company ID. В промышленном deployment отдельно нужны проверенные SSO/identity, tenant-модель, deployment secrets, сеть/сертификаты, audit/retention и оценка безопасности. Наличие Postgres roles и защищённых cookie не равно production security approval.
 

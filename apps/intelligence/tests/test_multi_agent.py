@@ -68,6 +68,63 @@ def test_three_roles_share_one_session_and_planner_queries_drive_search(tmp_path
     assert projected["evidence_omitted"] == len(result.evidence) - len(critic_payload["evidence"])
 
 
+def test_malformed_critic_json_gets_one_shared_budgeted_repair(tmp_path):
+    from intelligence.llm.types import ProviderError
+    corpus = store(tmp_path)
+    standard = roles(corpus)
+    calls = 0
+    def malformed_once(_messages):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ProviderError("malformed_json_output", "bad JSON", billing_uncertain=True,
+                                usage=Usage(prompt_tokens=120, completion_tokens=18))
+        return {"decision":"accept", "issues":[], "clarifications":[], "searches":[]}
+    critic = Role("critic", malformed_once)
+    result = MultiAgentPipeline(corpus, role_services={"researcher":None,
+        "analyst":standard["analyst"], "critic":critic}).run(req(budget={"max_model_calls":3}))
+    assert len(critic.calls) == 2
+    assert result.usage["model_calls"] == 3
+    assert result.usage["critic_review"]["mode"] == "semantic"
+    assert result.usage["critic_review"]["decision"] == "accept"
+    assert any(item["stage"] == "critic_json_repair_succeeded" for item in result.trace)
+    assert result.usage["attempts"][-1]["role"] == "critic"
+    assert result.usage["errors"].count("malformed_json_output") == 1
+
+
+def test_malformed_critic_json_is_not_approved_when_repair_has_no_call_budget(tmp_path):
+    from intelligence.llm.types import ProviderError
+    corpus = store(tmp_path)
+    standard = roles(corpus)
+    def malformed(_messages):
+        raise ProviderError("malformed_json_output", "bad JSON", billing_uncertain=True,
+                            usage=Usage(prompt_tokens=120, completion_tokens=18))
+    critic = Role("critic", malformed)
+    result = MultiAgentPipeline(corpus, role_services={"researcher":None,
+        "analyst":standard["analyst"], "critic":critic}).run(req(budget={"max_model_calls":2}))
+    assert len(critic.calls) == 1
+    assert result.usage["critic_review"]["mode"] == "structural_only"
+    assert result.usage["critic_review"]["decision"] == "not_evaluated"
+    assert result.status == "partial"
+    assert "semantic_critic_not_run" in result.coverage.limitations
+    assert any(item["stage"] == "critic_json_repair_skipped" for item in result.trace)
+
+
+def test_critic_with_unknown_grounding_refs_cannot_leave_candidate_ready(tmp_path):
+    corpus = store(tmp_path)
+    standard = roles(corpus)
+    critic = Role("critic", lambda _messages: {"decision":"accept", "issues":[
+        {"target_id":"made-up-claim", "reason":"Unsupported concern.", "evidence_refs":["made-up-evidence"]}],
+        "clarifications":[], "searches":[]})
+    result = MultiAgentPipeline(corpus, role_services={"researcher":None,
+        "analyst":standard["analyst"], "critic":critic}).run(req(budget={"max_model_calls":3}))
+    assert result.usage["critic_review"]["invalid_issue_count"] == 1
+    assert result.status == "partial"
+    assert any("неизвестной целью или ссылкой" in item for item in result.clarifications)
+    review = next(item for item in result.trace if item["stage"] == "critic_review")
+    assert review["invalid_issue_count"] == 1
+
+
 def test_analyst_profile_expansions_are_bounded_bank_search_terms(tmp_path, monkeypatch):
     from intelligence.analysts import AnalystConfig
     corpus = store(tmp_path)

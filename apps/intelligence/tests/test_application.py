@@ -22,7 +22,11 @@ class EvidenceTransport:
         evidence=payload['RETRIEVED_EVIDENCE']
         ext=next(e for e in evidence if e['source_role']=='external')
         company=payload['REQUEST_CONTEXT']['company']
-        dep=next(d for d in company['dependencies'] if d['status']=='confirmed')
+        # The prompt projection omits the default status from confirmed lists;
+        # REQUEST_CONTEXT.company.context_projection_policy declares that
+        # absent status means confirmed only in these lists.
+        assert 'confirmed only here' in company['context_projection_policy']
+        dep=next(d for d in company['dependencies'] if d.get('status','confirmed')=='confirmed')
         claim={'claim_id':'hypothesis-1','kind':'model_hypothesis','text':'Задержка поставки может повлиять на производство при недостатке запасов.',
                'evidence_refs':[ext['evidence_id']],'context_refs':[dep['dependency_id']],
                'assumptions':['Запасов не хватит на период задержки.'],'alternatives':['Действующий запас покрывает задержку.'],

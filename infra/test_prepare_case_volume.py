@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).with_name("prepare-case-volume.py")
@@ -15,6 +17,11 @@ SPEC = importlib.util.spec_from_file_location("prepare_case_volume", SCRIPT)
 assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+
+DOWNLOAD_SPEC = importlib.util.spec_from_file_location("download_case", Path(__file__).with_name("download-case.py"))
+assert DOWNLOAD_SPEC and DOWNLOAD_SPEC.loader
+DOWNLOAD_MODULE = importlib.util.module_from_spec(DOWNLOAD_SPEC)
+DOWNLOAD_SPEC.loader.exec_module(DOWNLOAD_MODULE)
 
 
 class PrepareCaseVolumeTests(unittest.TestCase):
@@ -86,6 +93,40 @@ class PrepareCaseVolumeTests(unittest.TestCase):
         with self.assertRaises(MODULE.CaseVolumeError):
             MODULE.prepare_case_volumes(self.source, self.pinned_path, self.target, self.approval_target,
                 uid=os.getuid(), gid=os.getgid())
+
+
+class DownloadCaseTests(PrepareCaseVolumeTests):
+    def test_download_is_hash_pinned_atomic_and_mode_600(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary)
+            payload = b"small offline fixture"
+            entry = {"filename": "fixture.csv", "size": len(payload),
+                     "sha256": hashlib.sha256(payload).hexdigest(), "drive_id": "fixture-drive-001"}
+            response = io.BytesIO(payload)
+            response.__enter__ = lambda: response
+            response.__exit__ = lambda *_: None
+            with patch.object(DOWNLOAD_MODULE.urllib.request, "urlopen", return_value=response) as urlopen:
+                self.assertEqual(DOWNLOAD_MODULE.download(entry, target), "fixture.csv")
+                self.assertEqual(DOWNLOAD_MODULE.download(entry, target), "fixture.csv")
+            urlopen.assert_called_once()
+            copied = target / "fixture.csv"
+            self.assertEqual(copied.read_bytes(), payload)
+            self.assertEqual(copied.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(list(target.iterdir()), [copied])
+
+    def test_download_hash_mismatch_leaves_no_partial_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary)
+            payload = b"unexpected fixture"
+            entry = {"filename": "fixture.csv", "size": len(payload), "sha256": "0" * 64,
+                     "drive_id": "fixture-drive-001"}
+            response = io.BytesIO(payload)
+            response.__enter__ = lambda: response
+            response.__exit__ = lambda *_: None
+            with patch.object(DOWNLOAD_MODULE.urllib.request, "urlopen", return_value=response):
+                with self.assertRaises(ValueError):
+                    DOWNLOAD_MODULE.download(entry, target)
+            self.assertEqual(list(target.iterdir()), [])
 
     def test_approval_must_match_imported_bundle_and_is_read_only(self):
         MODULE.prepare_case_volumes(self.source, self.pinned_path, self.target, self.approval_target,

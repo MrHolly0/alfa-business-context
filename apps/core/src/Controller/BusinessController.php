@@ -140,10 +140,33 @@ final class BusinessController {
         $from=$request->query->get('from');$to=$request->query->get('to');
         if (($from && !$this->date($from)) || ($to && !$this->date($to)) || ($from && $to && $from>$to)) return new JsonResponse(['error'=>'Invalid period'],400);
         $db=Database::connect();$metrics=$this->latestMetrics($db,$id,$from,$to);
+        $q=$db->prepare('SELECT COALESCE(MAX(version),0) FROM company_context_versions WHERE company_id=?');$q->execute([$id]);$contextVersion=(int)$q->fetchColumn();
+        $q=$db->prepare('SELECT revision FROM source_policy_heads WHERE company_id=?');$q->execute([$id]);$policyVersion=(int)($q->fetchColumn() ?: 0);
+        $q=$db->prepare('SELECT id,context_version,policy_version,status,created_at,result_json FROM news_runs WHERE company_id=? ORDER BY created_at DESC,id DESC LIMIT 1');$q->execute([$id]);$run=$q->fetch();
+        $summary=['status'=>'no_analysis','text'=>null,'model_status'=>'not_run','candidate_count'=>0,'model_candidate_count'=>0];
+        if($run){
+            $result=json_decode((string)($run['result_json'] ?? ''),true);
+            $candidates=is_array($result['candidates'] ?? null)?$result['candidates']:[];
+            $modelCandidates=array_values(array_filter($candidates,static fn($candidate)=>is_array($candidate) && ($candidate['execution_mode'] ?? null)==='model'));
+            $superseded=(int)$run['context_version']<$contextVersion || (int)$run['policy_version']<$policyVersion;
+            $firstSummary=null;
+            foreach($candidates as $candidate){if(is_array($candidate) && is_string($candidate['summary'] ?? null) && trim($candidate['summary'])!==''){$firstSummary=trim($candidate['summary']);break;}}
+            $summary=[
+                'status'=>$superseded?'stale':$run['status'],
+                'text'=>$superseded?'Последняя сохранённая проверка относится к предыдущей версии профиля или источников.':$firstSummary,
+                'model_status'=>$modelCandidates?'model_done':($candidates?'baseline_only':'not_run'),
+                'candidate_count'=>count($candidates),
+                'model_candidate_count'=>count($modelCandidates),
+                'created_at'=>$run['created_at'],
+                'context_version'=>(int)$run['context_version'],
+                'policy_version'=>(int)$run['policy_version'],
+                'provider'=>$result['provider'] ?? null,
+            ];
+        }
         $sql='SELECT e.id,e.title,e.summary,e.kind,e.published_on,e.source_label,e.source_url,(SELECT a.status FROM news_assessments a WHERE a.event_id=e.id ORDER BY a.created_at DESC,a.id DESC LIMIT 1) AS assessment_status,(SELECT a.summary FROM news_assessments a WHERE a.event_id=e.id ORDER BY a.created_at DESC,a.id DESC LIMIT 1) AS assessment_summary FROM business_events e WHERE e.company_id=?';$params=[$id];
         if($from){$sql.=' AND e.published_on>=?';$params[]=$from;}if($to){$sql.=' AND e.published_on<=?';$params[]=$to;}
         $sql.=' ORDER BY e.published_on DESC,e.id LIMIT 50';$q=$db->prepare($sql);$q->execute($params);
-        return new JsonResponse(['period'=>['from'=>$from,'to'=>$to],'summary'=>['status'=>'no_analysis','text'=>null],'metrics'=>$metrics,'events'=>$q->fetchAll()]);
+        return new JsonResponse(['period'=>['from'=>$from,'to'=>$to],'summary'=>$summary,'metrics'=>$metrics,'events'=>$q->fetchAll()]);
     }
     #[Route('/api/companies/{id}/events',methods:['POST'])]
     public function addEvent(string $id,Request $request): JsonResponse {

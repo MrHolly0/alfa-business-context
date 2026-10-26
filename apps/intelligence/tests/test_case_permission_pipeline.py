@@ -171,6 +171,13 @@ def test_multi_agent_confidential_roles_need_the_same_exact_case_approval(tmp_pa
         request, data_classification="confidential", case_approval=token)
     assert all(len(service.calls) == 1 for service in roles.values())
     assert result.usage["model_calls"] == 3
+    critic_payload = json.loads(roles["critic"].calls[0][-1]["content"])
+    assert "company_context" in critic_payload
+    assert "synthetic_company" not in critic_payload
+    assert [item["fact_id"] for item in critic_payload["company_context"]["facts"]] == ["csv-1"]
+    projection = next(item for item in result.trace if item["stage"] == "critic_prompt_projected")
+    assert projection["company_context_included"] is True
+    assert projection["company_fact_count"] == 1
 
 
 def test_multi_agent_never_sends_confidential_case_material_to_openrouter(tmp_path, monkeypatch):
