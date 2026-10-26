@@ -1,15 +1,17 @@
 # Подключение Symfony к Core и Python Intelligence
 
-Эта инструкция описывает текущую Symfony/PHP Core интеграцию и дальнейший контракт с Python. Core уже владеет локальными пользователями, company access, контекстом и новостными записями. Для новостей PHP CLI сейчас напрямую вызывает Python `POST /internal/v1/analyze`; общего Core jobs enqueue/claim/heartbeat/result/failure lifecycle в PHP пока нет. JSON-примеры лежат в `apps/intelligence/examples/symfony/` и относятся к AI/worker контрактам, а не к уже развёрнутым PHP job endpoints.
+Эта инструкция описывает текущую Symfony/PHP Core интеграцию и дальнейший контракт с Python. Core уже владеет локальными пользователями, company access, контекстом и новостными записями. Пользователь с ролью `owner` или `editor` может запустить сбор и анализ синхронно через `POST /api/companies/{id}/news/runs`; общего Core jobs enqueue/claim/heartbeat/result/failure lifecycle по-прежнему нет. JSON-примеры лежат в `apps/intelligence/examples/symfony/` и относятся к AI/worker контрактам, а не к PHP job endpoints.
 
 Рабочее состояние Python Intelligence хранится в отдельной PostgreSQL-базе `business_context_ai`, с отдельными app/migration roles и scoped `store_key`/RLS. Это внутреннее изменение persistence: поля `ai-job-v1`, `ai-result-v1`, HTTP-маршруты Worker и Core не меняются из-за перехода на PostgreSQL. Canonical profile, queue, budget allocation и publication по-прежнему принадлежат Symfony/Core; общих AI/Core SQL-таблиц нет. Локальный SQLite Core Stand остаётся только fixture. См. [роли, миграции и окружения](postgresql.md).
 
 ## Что реализовано сейчас
 
 - Web обращается к Symfony через same-origin nginx proxy; Core auth — cookie-сессия, company scope — membership, а сохранение профиля использует версию контекста.
-- `bin/run-news.php COMPANY_ID` читает Core context/source policy, строит ограниченный `ai-data-task-v1` и выполняет прямой HTTP вызов `POST /internal/v1/analyze` с общим bearer и `CORE_INTELLIGENCE_TENANT_ID` (Compose default `core-local`). Режим по умолчанию — baseline.
+- `POST /api/companies/{id}/news/runs` принимает JSON `{}` или `{"maxEvents":1}`. Он синхронный и возвращает `200 {"run":{"id","status","context_version","policy_version","created_at","finished_at","error_code","result"}}`; `result` содержит provider metadata (если задано), coverage, events, candidates и collection. Только роли `admin`/`editor` могут запускать; `viewer` получает `403`. Некорректное тело — `400`, активный запуск/нет включённой политики источников — `409`, отказ внутреннего workflow или устаревшие версии — `502` с сохранённым run при наличии.
+- Endpoint вызывает `bin/run-news.php COMPANY_ID --max-events 1`. Runner резервирует один запуск на компанию транзакционной DB-проверкой под company-row lock, завершает транзакцию до внутреннего HTTP и сверяет source-policy/context версии перед публикацией. DataTask ограничивает анализ одним событием, тремя модельными вызовами и отключает auto-optimize. Обычный внутренний HTTP timeout — 180 секунд, Core runner — 190 секунд; в `CORE_JUDGING_CASE=1` пределы равны 600/610 секундам, чтобы вместить несколько вызовов Alfa LLM. UI показывает состояние запроса без выдуманного прогресса.
+- `CORE_JUDGING_CASE=1` включает операторский путь профиля `facts_json.ai_profile` из принятой версии контекста, с ручными полями, наложенными с provenance этой же версии. Intelligence применяет case policy к сетевому сбору; Core всё равно передаёт полный source-policy snapshot. В обычном режиме используется legacy-контекст и классификация ограничивает внешний model route. Для confidential case-профиля отдельный явный allowlist ограничивает исключение операторским флагом, tenant, происхождением импорта и разрешённым Alfa gateway; это не открывает отправку такого профиля в любой другой провайдер.
 - `bin/run-due-news.php` и opt-in Compose profile `scheduler` периодически вызывают тот же PHP news runner для компаний с enabled sources.
-- Python worker/`CoreClient` и `CoreStand` описывают и проверяют job protocol отдельно; PHP Core пока не реализует соответствующие worker endpoints и общую durable queue.
+- Python worker/`CoreClient` и `CoreStand` описывают и проверяют job protocol отдельно; PHP Core не реализует worker endpoints и общую durable queue.
 
 ## Целевой поток после появления Core job lifecycle
 
@@ -76,7 +78,7 @@ Symfony enqueue hook — бизнес-интеграция, а не Python API. 
 | Контур | Проверено | Остаётся подключить и проверить |
 |---|---|---|
 | Python и стенд Core | Получение/lease/result, приём onboarding, постановка optimize с квотой и частотой, scoped collect/analyze, publication proof и устранение повторов | Это локальные контрактные сценарии; публикация стенда не является публикацией Symfony |
-| Symfony Core | Cookie-auth, memberships, контекст с CAS, метрики, news records, прямой `run-news.php` → Python baseline вызов, опциональный scheduler | Durable jobs, worker endpoints, lease/fencing, retry policy, cancellation, публикация worker candidate и job UI |
+| Symfony Core | Cookie-auth, memberships, контекст с CAS, метрики, news records, синхронный ACL-защищённый `POST /news/runs`, DB-backed ограничение параллельного запуска и stale-version check, опциональный scheduler | Durable jobs, worker endpoints, lease/fencing, retry policy, cancellation, фоновый прогресс и публикация worker candidate |
 | Шлюз Альфы | Ранее metadata endpoints отвечали 200, ключ объявлял лимит 500; генеративный вызов не выполнялся | Подтверждённая модель, тарификация/верхний резерв, генерация и учёт реального расхода через этот шлюз |
 | Другой модельный API | Настоящие вызовы OpenRouter/GLM, включая небольшой турнир и косвенное исследование | Это не проверка Альфы и не независимая оценка качества |
 

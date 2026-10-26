@@ -152,7 +152,8 @@ class MultiAgentPipeline:
             raise ValueError("multi-agent roles must share one account ledger")
 
     def run(self, request: AnalysisRequest, checkpoint: Callable[[str], None] | None = None, *,
-            shared_event_package: Mapping[str, Any] | Any | None = None, data_classification: str | None = None) -> CandidateAssessment:
+            shared_event_package: Mapping[str, Any] | Any | None = None, data_classification: str | None = None,
+            case_approval=None) -> CandidateAssessment:
         if not isinstance(request, AnalysisRequest):
             request = AnalysisRequest.model_validate(request)
         config = self.analyst_config or (self.registry.select(role=request.company.role, industry=request.company.industry)
@@ -160,6 +161,16 @@ class MultiAgentPipeline:
         services = {"researcher": self.role_services.get("researcher", self.llm),
                     "analyst": self.role_services.get("analyst", self.llm),
                     "critic": self.role_services.get("critic", self.llm)}
+        from .case_permission import request_case_documents, role_may_receive_case_data
+        case_documents = request_case_documents(self.store, request)
+
+        def role_allowed(role, *, evidence=(), package_for_role=None):
+            if package_for_role is None:
+                package_for_role = package
+            return role_may_receive_case_data(request, case_documents, services[role],
+                case_approval=case_approval, evidence=evidence, package=package_for_role,
+                data_classification=data_classification)
+
         session = _SharedSession(request)
         trace: list[dict] = [{"stage": "workflow_started", "workflow": "research-analysis-critic-v1"}]
         package = None
@@ -195,7 +206,7 @@ class MultiAgentPipeline:
         missing: list[str] = []
         research_complete = False
         researcher = services["researcher"]
-        if (researcher is not None and request.budget.max_model_calls > 0 and
+        if (researcher is not None and role_allowed("researcher") and request.budget.max_model_calls > 0 and
                 session.steps < request.budget.max_steps):
             checkpoint_stage("before_research")
             try:
@@ -226,6 +237,8 @@ class MultiAgentPipeline:
             research_complete = True
             trace.append({"stage": "research_plan", "planner": "deterministic",
                           "search_roles": sorted(planned), "query_lengths": {k: len(v) for k, v in planned.items()}})
+            if researcher is not None and not role_allowed("researcher"):
+                trace.append({"stage": "research_model_skipped", "reason": "case_material_not_approved_for_role"})
 
         analyst = services["analyst"]
         calls_left = max(0, request.budget.max_model_calls - session.calls)
@@ -241,7 +254,8 @@ class MultiAgentPipeline:
             "budget": request.budget.model_copy(update={"max_model_calls": analyst_limit,
                                                          "max_steps": remaining_steps})})
         try:
-            candidate = analysis.run(analysis_request, checkpoint=checkpoint_stage,shared_event_package=package,data_classification=data_classification)
+            candidate = analysis.run(analysis_request, checkpoint=checkpoint_stage,shared_event_package=package,
+                                     data_classification=data_classification, case_approval=case_approval)
         except _WorkflowBudgetExhausted:
             candidate = analysis.run(request.model_copy(update={"budget": request.budget.model_copy(
                 update={"max_model_calls": 0, "max_steps": 1})}), checkpoint=None,
@@ -255,13 +269,21 @@ class MultiAgentPipeline:
 
         critic = services["critic"]
         critique_data = None
-        if (critic is not None and session.calls < request.budget.max_model_calls and
+        if (critic is not None and role_allowed("critic", evidence=candidate.evidence) and
+                session.calls < request.budget.max_model_calls and
                 session.steps < request.budget.max_steps):
             checkpoint_stage("before_critic")
             try:
                 messages = self._critic_messages(request, candidate, include_synthetic_company=(
                     request.synthetic and data_classification == "synthetic" and bool(candidate.evidence)
                     and all(item.data_classification == "synthetic" for item in candidate.evidence)), config=config)
+                critic_payload = json.loads(messages[-1]["content"])
+                trace.append({"stage": "critic_evidence_projected",
+                    "evidence_available": len(candidate.evidence),
+                    "evidence_sent": len(critic_payload["evidence"]),
+                    "evidence_omitted": len(candidate.evidence) - len(critic_payload["evidence"]),
+                    "candidate_citations_matched": critic_payload["evidence_projection"]["candidate_citations_matched"],
+                    "primary_fallback_used": critic_payload["evidence_projection"]["primary_fallback_used"]})
                 result = _RoleProxy(critic, session, "critic").complete(
                     messages, max_input_tokens=request.budget.max_input_tokens,
                     max_output_tokens=min(1024, request.budget.max_output_tokens), json_mode=True)
@@ -292,7 +314,8 @@ class MultiAgentPipeline:
                 if critique.decision == "review" and valid_issues:
                     candidate, adaptation = self._adapt_after_critique(
                         request, candidate, critique.searches, services["analyst"], session,
-                        checkpoint_stage, trace, data_classification=data_classification, package=package)
+                        checkpoint_stage, trace, data_classification=data_classification, package=package,
+                        case_approval=case_approval, case_documents=case_documents)
                     critique_data["adaptation"] = adaptation
             except (ValueError, TypeError, ValidationError, json.JSONDecodeError, RuntimeError) as exc:
                 if session.checkpoint_exception is exc:
@@ -307,6 +330,8 @@ class MultiAgentPipeline:
                              "clarifications": []}
             trace.append({"stage": "critic_unavailable", "reason": "role_or_budget_unavailable",
                           "structural_checks_completed": True})
+            if critic is not None and not role_allowed("critic", evidence=candidate.evidence):
+                trace[-1]["reason"] = "case_material_not_approved_for_role"
 
         merged_errors = list(dict.fromkeys([*candidate.usage.get("errors", []), *session.errors]))
         candidate.usage = {**candidate.usage, "workflow": "research-analysis-critic-v1",
@@ -408,6 +433,19 @@ class MultiAgentPipeline:
         system += ("\nПри decision=review и конкретном противоречии можешь предложить до двух searches: "
                    "короткие поисковые фразы только для ролей external или bank. Это фразы для поиска "
                    "в уже разрешённом корпусе, не URL и не команды. Если поиск не нужен, верни пустой список.")
+        cited_ids = {ref for claim in candidate.claims for ref in claim.evidence_refs}
+        cited_ids.update(ref for edge in candidate.influence_chain for ref in edge.evidence_refs)
+        evidence_by_id = {item.evidence_id: item.model_dump(mode="json") for item in candidate.evidence}
+        primary_ids = AnalysisPipeline._primary_ids(request, list(evidence_by_id.values()))
+        if not primary_ids:
+            primary_ids = {item.evidence_id for item in candidate.evidence
+                           if item.source_role == "external" and item.source_id == request.event.source_id}
+        if not primary_ids:
+            primary_ids = {next((item.evidence_id for item in candidate.evidence
+                                 if item.source_role == "external"), "")}
+        matched_ids = cited_ids.intersection(evidence_by_id)
+        chosen_ids = matched_ids or primary_ids.intersection(evidence_by_id)
+        critic_evidence = [value for key, value in evidence_by_id.items() if key in chosen_ids]
         payload = {"event": AnalysisPipeline._context_payload(request)["event"], "summary": candidate.summary,
                    "analyst_preferences": ({"focus": list(config.focus), "horizon": config.horizon,
                        "answer_style": config.answer_style, "retrieval_strategy": config.retrieval_strategy,
@@ -416,14 +454,17 @@ class MultiAgentPipeline:
                        if config else {}),
                    "claims": [x.model_dump(mode="json") for x in candidate.claims],
                    "edges": [x.model_dump(mode="json") for x in candidate.influence_chain],
-                   "evidence": [x.model_dump(mode="json") for x in candidate.evidence],
+                   "evidence": critic_evidence,
+                   "evidence_projection": {"candidate_citations_matched": len(matched_ids),
+                       "primary_fallback_used": not bool(matched_ids)},
                    "search_roles": ["external", "bank"], "max_searches": 2,
                    "max_search_query_chars": MAX_QUERY_CHARS}
         if include_synthetic_company:
             payload["synthetic_company"] = AnalysisPipeline._context_payload(request)["company"]
         return [{"role": "system", "content": system}, {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
 
-    def _adapt_after_critique(self, request, candidate, searches, analyst, session, checkpoint_stage, trace, *, data_classification=None, package=None):
+    def _adapt_after_critique(self, request, candidate, searches, analyst, session, checkpoint_stage, trace, *,
+                              data_classification=None, package=None, case_approval=None, case_documents=()):
         """Run one critic-directed corpus retrieval and analyst pass under the original budget."""
         def unavailable(reason):
             limitation = "critic_adaptation_" + reason
@@ -436,6 +477,10 @@ class MultiAgentPipeline:
             return unavailable("no_valid_searches")
         if analyst is None or session.calls >= request.budget.max_model_calls:
             return unavailable("model_call_budget_unavailable")
+        from .case_permission import role_may_receive_case_data
+        if not role_may_receive_case_data(request, case_documents, analyst, case_approval=case_approval,
+                evidence=candidate.evidence, package=package, data_classification=data_classification):
+            return unavailable("case_material_not_approved_for_role")
         if session.steps >= request.budget.max_steps:
             return unavailable("step_budget_unavailable")
 
@@ -471,7 +516,8 @@ class MultiAgentPipeline:
         })})
         try:
             adapted = analysis.run(adapted_request, checkpoint=checkpoint_stage,
-                                   shared_event_package=package, data_classification=data_classification)
+                                   shared_event_package=package, data_classification=data_classification,
+                                   case_approval=case_approval)
         except _WorkflowBudgetExhausted:
             return unavailable("shared_budget_exhausted")
         except BaseException:

@@ -119,6 +119,15 @@ _KNOWN_COLUMNS = {
     "COUNTRY", "COUNTRY_NAME", "REGION", "REGION_NAME", "GROUP_ID",
     "ROLE", "USER_ROLE", "COMPANY_ROLE", "PAYER", "BENEFICIARY",
     "PAY_AMT", "PAY_AMT_UNIT", "PAY_CNT", "SYNTHETIC_F",
+    # The anonymized Core company export has 24 source columns. Preserve the
+    # additional observations as row-provenanced facts without interpreting
+    # legal form, negative marks, FTS flags, workforce gradations or product
+    # codes as verified business semantics.
+    "ORG_TYPE", "OKFS_NAME", "COMPANY_AGE_YEARS_GRADATION", "ECO_MARK_LABEL",
+    "NEGATIVEMARK", "AMOUNT_WORKERS_FNS_GRADATION", "AMOUNT_WORKERS_SPARK_GRADATION",
+    "CL_TYPE", "CL_PRODUCT_RKO_MARK", "CL_PRODUCT_GAR_MARK", "CL_PRODUCT_LOA_MARK",
+    "CL_PRODUCT_LEA_MARK", "CL_PRODUCT_DEP_MARK", "CL_PRODUCT_ZPP_MARK",
+    "FTS_FLAG", "FTS_COUNTRY_NAME", "FACTORING_MARK", "CITY",
 }
 _PRODUCT_COLUMNS = {"LOAN", "LEASE", "LEASING", "CREDIT", "DEPOSIT", "ACQUIRING",
                     "PAYROLL", "GUARANTEE", "HAS_LOAN", "HAS_LEASE", "HAS_LEASING",
@@ -312,11 +321,7 @@ def _proposal(row: dict[str, str], *, tenant_id: str, filename: str, origin: str
     revenue = RevenueQualification(raw_amount=amount, input_unit=effective_unit,
         amount_rub=amount_rub, over_15bn_rub=over_threshold, qualification=qualification)
 
-    fact_values = {
-        "MAINOKVED_NAME": industry, "REVENUE_COMPANY": row.get("REVENUE_COMPANY", ""),
-        "COUNTRY": row.get("COUNTRY") or row.get("COUNTRY_NAME", ""),
-        "REGION": row.get("REGION") or row.get("REGION_NAME", ""),
-    }
+    fact_values = {column: raw_value for column, raw_value in row.items() if column != REQUIRED_ID_COLUMN}
     facts: list[CompanyFact] = []
     field_provenance: dict[str, str] = {}
     for column, raw_value in fact_values.items():
@@ -342,7 +347,7 @@ def _proposal(row: dict[str, str], *, tenant_id: str, filename: str, origin: str
             field_provenance[f"product_flags.{column}"] = _provenance(filename, row_index, column)
         if product_flags[column] is None:
             warnings.append(f"product_flag_unknown:{column}")
-    country = _text(row.get("COUNTRY") or row.get("COUNTRY_NAME"))
+    country = _text(row.get("COUNTRY") or row.get("COUNTRY_NAME") or row.get("FTS_COUNTRY_NAME"))
     region = _text(row.get("REGION") or row.get("REGION_NAME"))
     group_id = _text(row.get("GROUP_ID"))
     if country:
@@ -415,6 +420,7 @@ def prepare_company_contexts(
     roles_by_synthetic_u: Mapping[str, str] | None = None,
     revenue_unit: RevenueUnit | str | None = None,
     affected_company_ids: Collection[str] | None = None,
+    source_row_numbers: Sequence[int] | None = None,
 ) -> CompanyContextPrepareResult:
     """Normalize typed row dictionaries without persistence or model execution."""
     if not tenant_id or len(tenant_id) > 256:
@@ -424,6 +430,10 @@ def prepare_company_contexts(
         raise ValueError("invalid_origin")
     if not rows or len(rows) > MAX_ROWS:
         raise ValueError(f"row_count_must_be_between_1_and_{MAX_ROWS}")
+    if source_row_numbers is not None and (len(source_row_numbers) != len(rows)
+        or any(type(number) is not int or number < 2 for number in source_row_numbers)
+        or len(set(source_row_numbers)) != len(source_row_numbers)):
+        raise ValueError("source_row_numbers_must_be_unique_valid_source_rows")
     declared_unit = RevenueUnit(revenue_unit) if revenue_unit is not None else None
     role_map = dict(roles_by_synthetic_u or {})
     if any(not isinstance(key, str) or not isinstance(value, str) or len(value) > 1000
@@ -434,7 +444,8 @@ def prepare_company_contexts(
         raise ValueError("invalid_affected_company_filter")
     proposals: list[CompanyContextProposal] = []
     seen_ids: set[str] = set()
-    for row_index, raw in enumerate(rows, start=2):
+    row_numbers = source_row_numbers if source_row_numbers is not None else range(2, len(rows) + 2)
+    for row_index, raw in zip(row_numbers, rows):
         if not isinstance(raw, Mapping) or len(raw) > MAX_COLUMNS:
             raise ValueError(f"invalid_row_shape:{row_index}")
         row = _normalize_row(raw, index=row_index)

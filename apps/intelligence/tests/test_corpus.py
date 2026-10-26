@@ -3,10 +3,16 @@ from __future__ import annotations
 import tempfile
 import threading
 import unittest
+import base64
+import hashlib
+from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from pypdf import PdfWriter
+
 from intelligence.corpus import CorpusStore
+from intelligence.parsers import MAX_PDF_BYTES
 from intelligence.sqlite_import import import_database
 
 
@@ -70,6 +76,47 @@ class CorpusStoreTests(unittest.TestCase):
         self.assertEqual([first["document_revision_ref"]], [r["document_revision_ref"] for r in old])
         old_evidence = self.store.search(tenant_id="t1", source_ids=["news"], as_of="2026-01-15T00:00:00Z", query="поставках")[0]
         self.assertIsNone(self.store.get_evidence(tenant_id="t1", source_ids=["news"], as_of="2026-03-01T00:00:00Z", evidence_id=old_evidence["evidence_id"]))
+
+    def test_private_case_pdf_file_import_preserves_large_original_hash_and_scope(self):
+        writer = PdfWriter()
+        writer.add_blank_page(width=100, height=100)
+        output = BytesIO()
+        writer.write(output)
+        prefix = output.getvalue()
+        payload = prefix + b" " * (MAX_PDF_BYTES + 1 - len(prefix))
+        self.assertTrue(payload.startswith(b"%PDF-"))
+        case_root = Path(self.tmp.name) / "case"
+        case_root.mkdir()
+        pdf_path = case_root / "bank.pdf"
+        pdf_path.write_bytes(payload)
+        document = self.doc(source="case-bank-1", uri="https://case-data.invalid/bank.pdf", role="bank")
+        document.update(content="", content_type="application/pdf", data_classification="confidential")
+
+        ocr_text = "[page 1]\nПоставки стали сократились; OCR требует проверки по оригинальной странице."
+        imported = self.store.ingest_private_case_pdf(document, pdf_path, allowed_root=case_root, ocr_text=ocr_text)
+
+        self.assertTrue(imported["document_revision_ref"].endswith(":1"))
+        self.assertEqual(hashlib.sha256(payload).hexdigest(), imported["raw_sha256"])
+        self.assertTrue(Path(imported["raw_ref"]).is_file())
+        self.assertEqual(payload, Path(imported["raw_ref"]).read_bytes())
+        repeated = self.store.ingest_private_case_pdf(document, pdf_path, allowed_root=case_root, ocr_text=ocr_text)
+        self.assertEqual(imported["document_revision_ref"], repeated["document_revision_ref"])
+        changed_bytes = prefix + b"\t" * (MAX_PDF_BYTES + 1 - len(prefix))
+        pdf_path.write_bytes(changed_bytes)
+        changed = self.store.ingest_private_case_pdf(document, pdf_path, allowed_root=case_root, ocr_text=ocr_text)
+        self.assertEqual(2, changed["revision"])
+        self.assertNotEqual(imported["raw_sha256"], changed["raw_sha256"])
+        evidence = self.store.search(tenant_id="t1", source_ids=["case-bank-1"], role="bank",
+                                     as_of="2026-02-01T00:00:00Z", query="стали сократились", limit=3)
+        self.assertEqual(changed["document_revision_ref"], evidence[0]["document_revision_ref"])
+        self.assertTrue(evidence[0]["locator"].startswith("page:1;"))
+        api_document = {**document, "content": base64.b64encode(payload).decode("ascii")}
+        with self.assertRaisesRegex(ValueError, "base64 exceeds|exceeds .* bytes"):
+            self.store.ingest({**api_document, "source_id": "case-bank-api", "canonical_uri": "https://case-data.invalid/api.pdf"})
+        outside = Path(self.tmp.name) / "outside.pdf"
+        outside.write_bytes(payload[:len(prefix)])
+        with self.assertRaisesRegex(ValueError, "outside_allowed_root"):
+            self.store.ingest_private_case_pdf(document, outside, allowed_root=case_root)
 
     def test_exact_duplicates_are_linked_and_reprints_do_not_fill_ranking(self):
         first = self.store.ingest(self.doc())

@@ -5,13 +5,14 @@ import hashlib
 import base64
 import json
 import re
+import stat
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
-from .parsers import parse_content
+from .parsers import MAX_PRIVATE_CASE_PDF_BYTES, MAX_PRIVATE_OCR_TEXT_CHARS, ParseResult, parse_content, parse_pdf_bytes
 from .storage import Database
 
 def _aware(value: Any, field: str) -> str:
@@ -77,6 +78,54 @@ class CorpusStore:
         return self.database.connection()
 
     def ingest(self, document: dict) -> dict:
+        return self._ingest(document)
+
+    def ingest_private_case_pdf(self, document: dict, path: str | Path, *, allowed_root: str | Path,
+                                ocr_text: str | None = None, expected_sha256: str | None = None) -> dict:
+        """Trusted local-only import for private case PDFs up to 50 MB.
+
+        The source file must be inside the explicit case-data root. This method
+        is not called by the HTTP API; public document ingestion keeps the
+        standard 20 MB parser cap.
+        """
+        case_root = Path(allowed_root).resolve(strict=True)
+        source_path = Path(path).resolve(strict=True)
+        if not source_path.is_relative_to(case_root) or not source_path.is_file():
+            raise ValueError("private_case_pdf_outside_allowed_root")
+        if "raw_ref" in document or "raw_sha256" in document:
+            raise ValueError("private_case_pdf_metadata_cannot_override_original")
+        if document.get("content_type") != "application/pdf":
+            raise ValueError("private_case_file_must_be_pdf")
+        if document.get("content") not in (None, ""):
+            raise ValueError("private_case_pdf_content_must_come_from_local_file")
+        file_stat = source_path.stat()
+        if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_size < 1 or file_stat.st_size > MAX_PRIVATE_CASE_PDF_BYTES:
+            raise ValueError("private_case_pdf_size_or_type_invalid")
+        with source_path.open("rb") as stream:
+            payload = stream.read(MAX_PRIVATE_CASE_PDF_BYTES + 1)
+        if len(payload) != file_stat.st_size or len(payload) > MAX_PRIVATE_CASE_PDF_BYTES:
+            raise ValueError("private_case_pdf_size_changed_or_exceeded")
+        if not payload.startswith(b"%PDF-"):
+            raise ValueError("private_case_file_is_not_pdf")
+        raw_sha256 = hashlib.sha256(payload).hexdigest()
+        if expected_sha256 is not None and (not re.fullmatch(r"[a-f0-9]{64}", expected_sha256)
+                                            or raw_sha256 != expected_sha256):
+            raise ValueError("private_case_pdf_expected_hash_mismatch")
+        if ocr_text is not None:
+            if not isinstance(ocr_text, str) or not ocr_text.strip() or len(ocr_text) > MAX_PRIVATE_OCR_TEXT_CHARS:
+                raise ValueError("private_case_ocr_text_empty_or_too_large")
+            if not re.search(r"(?m)^\[page [1-9][0-9]*\]$", ocr_text):
+                raise ValueError("private_case_ocr_page_markers_required")
+            if not any(line.strip() and not re.fullmatch(r"\[page [1-9][0-9]*\]", line.strip())
+                       for line in ocr_text.splitlines()):
+                raise ValueError("private_case_ocr_text_has_no_page_content")
+        metadata = {**document, "content": document.get("content", "")}
+        result = self._ingest(metadata, trusted_pdf_bytes=payload, trusted_extracted_text=ocr_text)
+        managed_raw = (Path(self.path).parent / "raw" / "corpus" / _hash(document["tenant_id"]) / raw_sha256).resolve()
+        return {**result, "raw_sha256": raw_sha256, "raw_ref": str(managed_raw)}
+
+    def _ingest(self, document: dict, *, trusted_pdf_bytes: bytes | None = None,
+                trusted_extracted_text: str | None = None) -> dict:
         required = ("tenant_id", "source_id", "source_role", "canonical_uri", "title", "content", "content_type", "published_at", "fetched_at", "synthetic")
         missing = [key for key in required if key not in document]
         if missing:
@@ -90,7 +139,17 @@ class CorpusStore:
         published_at = _aware(document["published_at"], "published_at")
         fetched_at = _aware(document["fetched_at"], "fetched_at")
         content_type = document["content_type"]
-        parsed = parse_content(document["content"], content_type)
+        if trusted_pdf_bytes is not None:
+            if content_type != "application/pdf":
+                raise ValueError("trusted file bytes are only valid for PDF ingestion")
+            if trusted_extracted_text is None:
+                parsed = parse_pdf_bytes(trusted_pdf_bytes, max_bytes=MAX_PRIVATE_CASE_PDF_BYTES)
+            else:
+                parsed = ParseResult(trusted_extracted_text, warnings=("private local OCR rus+eng; verify quoted text against page image",))
+            trusted_raw_sha256 = hashlib.sha256(trusted_pdf_bytes).hexdigest()
+        else:
+            parsed = parse_content(document["content"], content_type)
+            trusted_raw_sha256 = None
         if parsed.items:
             item_results = []
             for item in parsed.items:
@@ -143,16 +202,20 @@ class CorpusStore:
                     (doc_id, tenant_id, source_id, source_role, canonical_uri, title,
                      str(document.get("publisher", "")), str(document.get("language", "ru")), int(bool(document["synthetic"])), now))
             previous = db.execute("""SELECT revision, content_hash, title, published_at, fetched_at, content_type, publisher, language,
+                    (SELECT p.raw_sha256 FROM ai_corpus.document_provenance p
+                     WHERE p.document_revision_ref=ai_corpus.revisions.document_revision_ref) AS raw_sha256,
                     (SELECT p.data_classification FROM ai_corpus.document_provenance p
                      WHERE p.document_revision_ref=ai_corpus.revisions.document_revision_ref) AS data_classification
                     FROM ai_corpus.revisions WHERE document_id=%s ORDER BY revision DESC LIMIT 1""", (doc_id,)).fetchone()
-            if previous and (previous["content_hash"], previous["title"], previous["published_at"], previous["content_type"], previous["publisher"], previous["language"],previous["data_classification"]) == (content_hash, title, published_at, content_type, publisher, language,"synthetic" if document["synthetic"] else document.get("data_classification","confidential")):
+            same_metadata = previous and (previous["content_hash"], previous["title"], previous["published_at"], previous["content_type"], previous["publisher"], previous["language"],previous["data_classification"]) == (content_hash, title, published_at, content_type, publisher, language,"synthetic" if document["synthetic"] else document.get("data_classification","confidential"))
+            same_private_original = trusted_raw_sha256 is None or (previous and previous["raw_sha256"] == trusted_raw_sha256)
+            if previous and same_metadata and same_private_original:
                 ref = f"{doc_id}:{previous['revision']}"
                 duplicate = db.execute("""SELECT d.document_id FROM ai_corpus.revisions r
                     JOIN ai_corpus.documents d USING(store_key,document_id)
                     WHERE r.content_hash=%s AND d.document_id<>%s AND d.tenant_id=%s AND d.source_role=%s
                     ORDER BY r.fetched_at,d.document_id LIMIT 1""", (content_hash, doc_id, tenant_id, source_role)).fetchone()
-                self._save_original(document, ref, db)
+                self._save_original(document, ref, db, raw_bytes=trusted_pdf_bytes)
                 return {"document_id": doc_id, "revision": previous["revision"], "document_revision_ref": ref, "content_hash": content_hash, "duplicate_of": duplicate["document_id"] if duplicate else None, "evidence_count": db.execute("SELECT count(*) FROM ai_corpus.evidence WHERE document_revision_ref=%s", (ref,)).fetchone()[0], "parse_warnings": list(parsed.warnings), "synthetic": bool(document["synthetic"])}
             revision = (previous["revision"] + 1) if previous else 1
             ref = f"{doc_id}:{revision}"
@@ -167,7 +230,7 @@ class CorpusStore:
                 (document_revision_ref,document_id,revision,content_hash,title,published_at,fetched_at,content_type,extracted_text,warnings,publisher,language)
                 VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (ref, doc_id, revision, content_hash, title, published_at, fetched_at, content_type, extracted, json.dumps(parsed.warnings), publisher, language))
-            self._save_original(document, ref, db)
+            self._save_original(document, ref, db, raw_bytes=trusted_pdf_bytes)
             for ordinal, (locator, quote) in enumerate(_chunks(extracted)):
                 evidence_id = "ev_" + _hash(f"{ref}\0{ordinal}\0{quote}")[:40]
                 db.execute("""INSERT INTO ai_corpus.evidence
@@ -279,9 +342,9 @@ class CorpusStore:
         return self._result(row, 0.0)
 
 
-    def _save_original(self, document, ref, db):
+    def _save_original(self, document, ref, db, *, raw_bytes: bytes | None = None):
         """Store an immutable original and a server receipt; client fetched_at is not receipt time."""
-        raw = base64.b64decode(document["content"], validate=True) if document["content_type"] == "application/pdf" else document["content"].encode("utf-8")
+        raw = raw_bytes if raw_bytes is not None else (base64.b64decode(document["content"], validate=True) if document["content_type"] == "application/pdf" else document["content"].encode("utf-8"))
         # Only the internal collector can pass an upstream raw reference. Never read
         # arbitrary paths from an ingest payload, even when a matching hash is supplied.
         raw_ref = document.get("raw_ref")

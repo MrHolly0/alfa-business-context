@@ -71,13 +71,16 @@ final class BusinessController {
             if (!in_array($key,$allowed,true) || !is_array($items) || count($items)>30) return new JsonResponse(['error'=>'Invalid facts'],400);
             foreach($items as $item) if (!$this->string($item,300)) return new JsonResponse(['error'=>'Invalid fact'],400);
         }
-        $json=json_encode($v['facts'],JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);
-        if (strlen($json)>30000) return new JsonResponse(['error'=>'Context too large'],400);
         $db=Database::connect();$db->beginTransaction();
         try {
             Database::lockCompany($db,$id);
-            $q=$db->prepare('SELECT MAX(version) FROM company_context_versions WHERE company_id=?');$q->execute([$id]);$current=(int)$q->fetchColumn();
+            $q=$db->prepare('SELECT version,facts_json FROM company_context_versions WHERE company_id=? ORDER BY version DESC LIMIT 1');$q->execute([$id]);$prior=$q->fetch();$current=(int)($prior['version'] ?? 0);
             if ($current!==$v['expectedVersion']) {$db->rollBack();return new JsonResponse(['error'=>'Version conflict','currentVersion'=>$current],409);}
+            $facts=$v['facts'];
+            $priorFacts=$prior ? json_decode($prior['facts_json'],true) : null;
+            if (is_array($priorFacts) && is_array($priorFacts['ai_profile'] ?? null)) $facts['ai_profile']=$priorFacts['ai_profile'];
+            $json=json_encode($facts,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);
+            if (strlen($json)>30000) {$db->rollBack();return new JsonResponse(['error'=>'Context too large'],400);}
             $new=$current+1;
             $db->prepare('INSERT INTO company_context_versions(id,company_id,version,facts_json,source,confirmed_by,created_at) VALUES(?,?,?,?,?,?,?)')->execute([bin2hex(random_bytes(16)),$id,$new,$json,'user',$a['user']['id'],gmdate('c')]);
             $db->commit();return new JsonResponse(['version'=>$new],201);

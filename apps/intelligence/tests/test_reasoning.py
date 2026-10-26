@@ -35,7 +35,7 @@ def test_hackathon_profile_rejects_reasoning_parameter():
         _from_mapping("hackathon",{"base_url":"https://changellenge.up.railway.app/v1",
             "api_key_env":"HACKATHON_KEY","model":"google/gemma-4-26b-a4b-it",
             "budget_scope":"shared","currency":"RUB","daily_limit":"500",
-            "input_per_million":"0","output_per_million":"0","timeout_seconds":20,
+            "input_per_million":"1.00","output_per_million":"1.00","timeout_seconds":20,
             "max_output_tokens":4096,"reasoning_effort":"none"})
 
 
@@ -60,6 +60,6 @@ def test_router_rejects_unknown_effort_and_hackathon_route_effort(tmp_path):
     with pytest.raises(ValueError,match="reasoning_effort"):
         ModelRouter(config(),tmp_path/"ledger.sqlite3",routes={"analyst":{"reasoning_effort":"max"}})
     hackathon=ProviderConfig("hackathon","https://changellenge.up.railway.app/v1","HACKATHON_KEY",
-        "google/gemma-4-26b-a4b-it","shared","RUB",Decimal("500"),Decimal("0"),Decimal("0"),20,4096)
+        "google/gemma-4-26b-a4b-it","shared","RUB",Decimal("500"),Decimal("1.00"),Decimal("1.00"),20,4096)
     with pytest.raises(ValueError,match="OpenRouter profile"):
         ModelRouter(hackathon,tmp_path/"ledger.sqlite3",routes={"analyst":{"reasoning_effort":"low"}}).services()

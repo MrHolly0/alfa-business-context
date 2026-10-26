@@ -1,12 +1,14 @@
-# API и сообщения: текущий прототип и проектный контракт
+# API и сообщения: runtime и проектный контракт
 
-Реализованная Python-сторона, JSON-модели и внутренние маршруты описаны в [intelligence contracts](intelligence/README.md). Ниже — проектный draft пользовательского PHP API и будущей инфраструктуры; эти маршруты не являются запущенным backend. JSON в `examples/` синтетический; `*-draft-1` не является runtime-форматом.
+Реализованные PHP/Python стороны, JSON-модели и внутренние маршруты описаны в [Symfony Core](../apps/core/README.md) и [intelligence contracts](intelligence/README.md). JSON в `examples/` синтетический; `*-draft-1` не является runtime-форматом.
 
-## Текущее состояние
+## Текущий Core runtime API
 
-Web-контейнер раздаёт только статический интерфейс через nginx. Node.js используется для сборки и тестов, не как backend runtime. PHP Core пока не подключён; запросы `/api/` получают `503`. Python AI/Data реализует внутренние `POST /internal/v1/analyze`, `POST /internal/v1/search`, `POST /internal/v1/rank`, `POST /internal/v1/sources/probe`, документы/originals и execution inspection. Это внутренние сервисные маршруты, не public user API и не замена Core authorization.
+Web использует same-origin Symfony API с cookie-сессией и проверкой company membership. Текущие маршруты начинаются с `/api/` и описаны в `apps/core/README.md`; таблица `/api/v1` ниже остаётся проектным draft и не является runtime контрактом.
 
-Примеры ниже задают будущий формат обмена, а не работающие маршруты.
+`POST /api/companies/{id}/news/runs` синхронно запускает ограниченный Core→Intelligence workflow. Запрос — `{}` или `{"maxEvents":1}`, доступ есть только у `admin` и `editor`; завершившийся ответ `200` содержит сохранённый `run`, ошибки проверки тела — `400`, права — `403`, конфликт/активный запуск — `409`, сбой workflow — `502`. Это ограниченный прямой вызов, не durable job/worker очередь. Подробности timeout, source policy, snapshot fence и результата — в [Core README](../apps/core/README.md).
+
+Python AI/Data реализует внутренние `POST /internal/v1/analyze`, `/search`, `/rank`, `/sources/probe`, документы/originals и execution inspection. Это сервисные маршруты; пользовательский доступ и бизнес-статус принадлежат Core.
 
 ## Public user API `/api/v1` — canonical draft
 

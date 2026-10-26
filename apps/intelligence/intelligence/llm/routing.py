@@ -53,7 +53,8 @@ class ModelRouter:
             profile = base_config.get("profile")
             allowed = {"profile", "base_url", "api_key_env", "model", "budget_scope", "currency",
                        "daily_limit", "input_per_million", "output_per_million", "timeout_seconds",
-                       "max_output_tokens", "allow_paid", "max_request_cost", "lifetime_limit"}
+                       "max_output_tokens", "allow_paid", "max_request_cost", "lifetime_limit",
+                       "pricing_mode", "attempt_reserve_rub", "max_calls_total", "reasoning_effort"}
             if set(base_config) - allowed or not isinstance(profile, str):
                 raise ValueError("base_config must be a validated provider profile mapping")
             self.base_config = _from_mapping(profile, {k:v for k,v in base_config.items() if k != "profile"})

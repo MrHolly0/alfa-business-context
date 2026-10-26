@@ -52,9 +52,13 @@ test("Core client serializes dashboard range and reads server news endpoints", a
   await client.dashboard("c1", { from: "2026-01-01", to: "2026-01-31" });
   await client.newsSources("c1");
   await client.newsDocuments("c1", { from: "2026-01-01" });
+  await client.newsRuns("c1");
+  await client.newsRun("c1", "run/1");
   assert.equal(calls[0][0], "/api/companies/c1/dashboard?from=2026-01-01&to=2026-01-31");
   assert.equal(calls[1][0], "/api/companies/c1/news/sources");
   assert.equal(calls[2][0], "/api/companies/c1/news/documents?from=2026-01-01");
+  assert.equal(calls[3][0], "/api/companies/c1/news/runs");
+  assert.equal(calls[4][0], "/api/companies/c1/news/runs/run%2F1");
   assert.ok(calls.every(([, credentials]) => credentials === "same-origin"));
 });
 
@@ -74,4 +78,18 @@ test("Core client posts metrics and observations and reads metric event links", 
   assert.equal(JSON.parse(calls[1].options.body).value, "125.50");
   assert.equal(calls[2].path, "/api/companies/c1/metrics/m1/events");
   assert.equal(calls[3].path, "/api/companies/c1/news/events/e1/assessment");
+});
+
+test("Core client starts a bounded company news analysis through Core", async () => {
+  let request;
+  const client = createCoreClient(async (path, options) => {
+    request = { path, options };
+    return { ok: true, status: 200, json: async () => ({ run: { id: "run-1", status: "completed" } }) };
+  });
+  const result = await client.analyzeNews("company/one", 1);
+  assert.equal(request.path, "/api/companies/company%2Fone/news/runs");
+  assert.equal(request.options.method, "POST");
+  assert.equal(request.options.credentials, "same-origin");
+  assert.deepEqual(JSON.parse(request.options.body), { maxEvents: 1 });
+  assert.equal(result.run.id, "run-1");
 });

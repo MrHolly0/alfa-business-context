@@ -84,6 +84,14 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(sum(item is not None for item in result), 5)
         self.assertEqual(self.ledger.summary("dev", "RUB", self.now)["reserved"], Decimal("10"))
 
+    def test_lifetime_call_limit_counts_settled_and_uncertain_attempts(self):
+        first = self.ledger.reserve("finite-calls", "RUB", Decimal("500"), Decimal("10"),
+            now=self.now, lifetime_limit=Decimal("500"), max_total_calls=1)
+        self.ledger.mark_uncertain(first, self.now)
+        with self.assertRaises(BudgetExceeded):
+            self.ledger.reserve("finite-calls", "RUB", Decimal("500"), Decimal("10"),
+                now=self.now, lifetime_limit=Decimal("500"), max_total_calls=1)
+
     def test_zero_tariff_and_zero_budget_are_allowed(self):
         reservation = self.ledger.reserve("dev", "RUB", Decimal(0), Decimal(0), now=self.now)
         self.ledger.settle(reservation, Decimal(0), "rate_estimate", now=self.now)

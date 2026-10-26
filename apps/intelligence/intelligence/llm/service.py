@@ -38,7 +38,8 @@ class LLMService:
         self.config = config
         self.ledger = ledger
         self.transport = transport or ChatCompletionTransport(config)
-        self.pricing = Pricing(config.input_per_million, config.output_per_million, config.currency)
+        self.pricing = (None if config.pricing_mode == "fixed_reserve" else
+                        Pricing(config.input_per_million, config.output_per_million, config.currency))
         if projected_hackathon_pricing and projected_hackathon_pricing.currency != "RUB":
             raise ValueError("projected hackathon pricing must be in RUB")
         self.projected_hackathon_pricing = projected_hackathon_pricing
@@ -64,12 +65,13 @@ class LLMService:
 
         # Reserve the full configured output cap before the network call. Token counts
         # are planning estimates; the configured cap also goes to the transport.
-        reserve = self.pricing.estimate(max_input_tokens, output_cap)
+        reserve = (self.config.attempt_reserve_rub if self.config.pricing_mode == "fixed_reserve"
+                   else self.pricing.estimate(max_input_tokens, output_cap))
         if self.config.is_paid_openrouter and reserve > self.config.max_request_cost:
             raise ValueError("estimated paid OpenRouter request cost exceeds max_request_cost")
         reservation_id = self.ledger.reserve(self.config.budget_scope, self.config.currency,
             self.config.daily_limit, reserve, request_id=str(uuid4()),
-            lifetime_limit=self.config.lifetime_limit)
+            lifetime_limit=self.config.lifetime_limit, max_total_calls=self.config.max_calls_total)
         try:
             result = self.transport.complete(messages, json_mode=json_mode, max_output_tokens=output_cap)
         except ProviderError as exc:
@@ -81,7 +83,8 @@ class LLMService:
                     usage_meta = asdict(usage)
                     usage_meta["reported_cost"] = str(usage.reported_cost)
                     self.ledger.settle(reservation_id, usage.reported_cost, "provider_reported", usage=usage_meta)
-                elif usage.reported_cost is None and usage.prompt_tokens is not None and usage.completion_tokens is not None:
+                elif (self.config.pricing_mode != "fixed_reserve" and usage.reported_cost is None
+                      and usage.prompt_tokens is not None and usage.completion_tokens is not None):
                     estimate = self.pricing.estimate(usage.prompt_tokens, usage.completion_tokens)
                     self.ledger.settle(reservation_id, estimate, "rate_estimate", usage=asdict(usage))
                 else:
@@ -97,6 +100,7 @@ class LLMService:
             raise
 
         usage = result.usage
+        external_billing = None
         if usage is None:
             self.ledger.mark_uncertain(reservation_id)
             cost = None
@@ -104,13 +108,19 @@ class LLMService:
         elif usage.reported_cost is not None:
             if usage.cost_currency != self.config.currency:
                 self.ledger.mark_uncertain(reservation_id)
-                raise ProviderError("cost_currency_mismatch", "Provider cost currency does not match the configured budget currency", billing_uncertain=True)
-            cost = usage.reported_cost
-            cost_source = "provider_reported"
-            usage_meta = asdict(usage)
-            usage_meta["reported_cost"] = str(usage.reported_cost)
-            self.ledger.settle(reservation_id, cost, cost_source, usage=usage_meta)
-        elif usage.prompt_tokens is not None and usage.completion_tokens is not None:
+                cost = None
+                cost_source = "unknown"
+                external_billing = {"reported_cost": str(usage.reported_cost),
+                                    "currency": usage.cost_currency,
+                                    "source": "provider_reported_unconverted"}
+            else:
+                cost = usage.reported_cost
+                cost_source = "provider_reported"
+                usage_meta = asdict(usage)
+                usage_meta["reported_cost"] = str(usage.reported_cost)
+                self.ledger.settle(reservation_id, cost, cost_source, usage=usage_meta)
+        elif (self.config.pricing_mode != "fixed_reserve" and usage.prompt_tokens is not None
+              and usage.completion_tokens is not None):
             cost = self.pricing.estimate(usage.prompt_tokens, usage.completion_tokens)
             cost_source = "rate_estimate"
             self.ledger.settle(reservation_id, cost, cost_source, usage=asdict(usage))
@@ -124,9 +134,13 @@ class LLMService:
             "content": result.content,
             "model": result.model,
             "profile": self.config.profile,
+            "pricing_mode": self.config.pricing_mode,
+            "attempt_reserve_rub": self.config.attempt_reserve_rub,
+            "max_calls_total": self.config.max_calls_total,
             "response_id": result.response_id,
             "finish_reason": result.finish_reason,
             "usage": asdict(usage) if usage is not None else None,
+            "external_billing": external_billing,
             "cost": cost,
             "cost_currency": self.config.currency if cost is not None else None,
             "cost_source": cost_source,
@@ -134,7 +148,7 @@ class LLMService:
         }
         same_model = (self.projected_hackathon_model is not None and
                       self.projected_hackathon_model.removesuffix(":free") == self.config.model.removesuffix(":free"))
-        if (self.projected_hackathon_pricing and usage is not None and same_model
+        if (self.config.pricing_mode != "fixed_reserve" and self.projected_hackathon_pricing and usage is not None and same_model
                 and usage.prompt_tokens is not None and usage.completion_tokens is not None):
             projected = self.projected_hackathon_pricing.estimate(usage.prompt_tokens, usage.completion_tokens)
             report["projected_hackathon_cost_rub"] = projected

@@ -2,7 +2,10 @@ FROM python:3.12.14-slim AS runtime-base
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/app
 WORKDIR /app
 COPY apps/intelligence/requirements.lock /tmp/requirements.lock
-RUN pip install --no-cache-dir --require-hashes -r /tmp/requirements.lock
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends poppler-utils tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir --require-hashes -r /tmp/requirements.lock
 COPY apps/intelligence/intelligence ./intelligence
 COPY apps/intelligence/examples ./examples
 COPY apps/intelligence/evaluation ./evaluation

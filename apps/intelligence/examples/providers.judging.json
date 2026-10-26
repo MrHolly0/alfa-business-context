@@ -1,0 +1,21 @@
+{
+  "default_profile": "hackathon",
+  "profiles": {
+    "hackathon": {
+      "base_url": "https://changellenge.up.railway.app/v1",
+      "api_key_env": "HACKATHON_API_KEY",
+      "model": "google/gemma-4-26b-a4b-it",
+      "budget_scope": "alfa-hackathon-team",
+      "currency": "RUB",
+      "daily_limit": "500",
+      "lifetime_limit": "500",
+      "pricing_mode": "fixed_reserve",
+      "attempt_reserve_rub": "10",
+      "max_calls_total": 50,
+      "input_per_million": null,
+      "output_per_million": null,
+      "timeout_seconds": 90,
+      "max_output_tokens": 4096
+    }
+  }
+}

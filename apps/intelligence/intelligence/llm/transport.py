@@ -147,7 +147,15 @@ class ChatCompletionTransport:
                 or cached < 0 or cached > prompt):
             cached = None
         cost = None
+        cost_currency = None
         if self.config.profile == "openrouter" and "cost" in raw:
+            cost_currency = "USD"
+        elif self.config.profile == "hackathon" and "cost" in raw:
+            # Never infer the gateway's currency from a generic cost number.
+            reported_currency = raw.get("cost_currency", raw.get("currency"))
+            if isinstance(reported_currency, str) and reported_currency.strip().upper() in {"RUB", "USD"}:
+                cost_currency = reported_currency.strip().upper()
+        if cost_currency is not None and "cost" in raw:
             try:
                 if isinstance(raw["cost"], bool):
                     raise InvalidOperation
@@ -158,4 +166,4 @@ class ChatCompletionTransport:
                 cost = None
         if prompt is None and cost is None:
             return None
-        return Usage(prompt, completion, cached, cost, "USD" if cost is not None else None)
+        return Usage(prompt, completion, cached, cost, cost_currency if cost is not None else None)

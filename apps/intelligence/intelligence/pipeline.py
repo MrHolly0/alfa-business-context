@@ -24,6 +24,8 @@ PIPELINE_VERSION = "bounded-pipeline-v2"
 MAX_MODEL_EVENT_CHARS = 2_000
 MAX_QUERY_CHARS = 320
 MAX_EVIDENCE = 16
+MAX_PROMPT_EVIDENCE = 7
+MAX_PROMPT_EVIDENCE_QUOTE_CHARS = 400
 _REPAIR_DIAGNOSTIC_CODES = frozenset({
     "invalid_model_shape", "duplicate_claim_id", "unknown_evidence_id", "unknown_context_id",
     "context_outside_validity_window", "context_not_confirmed_or_active", "impact_requires_primary_event_evidence",
@@ -71,7 +73,8 @@ class AnalysisPipeline:
         self.model_call_limit: int | None = None
 
     def run(self, request: AnalysisRequest, checkpoint: Callable[[str], None] | None = None, *,
-            shared_event_package: Mapping[str, Any] | Any | None = None, data_classification: str | None = None) -> CandidateAssessment:
+            shared_event_package: Mapping[str, Any] | Any | None = None, data_classification: str | None = None,
+            case_approval=None) -> CandidateAssessment:
         if not isinstance(request, AnalysisRequest):
             request = AnalysisRequest.model_validate(request)
         config = self.analyst_config or (self.registry.select(role=request.company.role, industry=request.company.industry)
@@ -127,8 +130,14 @@ class AnalysisPipeline:
             if self.llm is None:
                 candidate = self._baseline(request, evidence, trace, usage, package=package)
             else:
-                candidate = self._model_candidate(request, evidence, trace, usage, step, config, package=package, data_classification=data_classification)
+                candidate = self._model_candidate(request, evidence, trace, usage, step, config,
+                    package=package, data_classification=data_classification, case_approval=case_approval)
             candidate = self._validate_candidate(candidate, request, evidence, usage, trace, event_ingest, config, package=package)
+            projection = usage.get("prompt_projection")
+            if projection and (projection.get("evidence_omitted") or projection.get("evidence_quote_excerpts_truncated")):
+                candidate.coverage.limitations = list(dict.fromkeys([
+                    *candidate.coverage.limitations, "model_prompt_evidence_subset_or_excerpted"
+                ]))[:30]
             if package:
                 candidate.shared_package_ref = package.get("package_id")
                 candidate.usage["shared_package_ref"] = package.get("package_id")
@@ -291,10 +300,27 @@ class AnalysisPipeline:
         return {e["evidence_id"] for e in evidence if e["source_role"] == "external"
                 and e["source_id"] == request.event.source_id and e["quote"] in original}
 
-    def _model_candidate(self, request, evidence, trace, usage, step, config=None, *, package=None, data_classification=None) -> dict:
+    def _model_candidate(self, request, evidence, trace, usage, step, config=None, *, package=None,
+                         data_classification=None, case_approval=None) -> dict:
         profile=getattr(getattr(self.llm,"config",None),"profile",None)
-        if profile in {"openrouter", "hackathon"} and (not (request.synthetic or data_classification in {"public","synthetic"}) or
-                any(item.get("data_classification","confidential") not in {"public","synthetic"} for item in evidence)):
+        safe_task_classification = (data_classification in {"public", "synthetic"}
+                                    or (data_classification is None and request.synthetic))
+        private_material = (not safe_task_classification
+                            or any(item.get("data_classification", "confidential") not in {"public", "synthetic"}
+                                   for item in evidence)
+                            or bool(package and (package.get("data_classification", "confidential") not in {"public", "synthetic"}
+                                or any(source.get("data_classification", "confidential") not in {"public", "synthetic"}
+                                       for source in package.get("sources", [])))))
+        permitted_case = None
+        if private_material and case_approval is not None:
+            try:
+                from .case_permission import approved_case_data, request_case_documents
+                documents = request_case_documents(self.store, request)
+                permitted_case = approved_case_data(request, documents, self.llm,
+                    case_approval=case_approval, evidence=evidence, package=package)
+            except Exception:
+                permitted_case = None
+        if profile in {"openrouter", "hackathon"} and private_material and permitted_case is None:
             usage["errors"].append("external_model_data_classification_denied")
             return self._empty_payload(evidence)
         if not self._primary_ids(request, evidence, package=package):
@@ -306,46 +332,26 @@ class AnalysisPipeline:
         if max_calls < 1:
             usage["errors"].append("model_call_budget_zero")
             return self._empty_payload(evidence)
-        context = self._context_payload(request)
         company_projection = project_company_context(request.company, as_of=request.as_of)
-        if context["event_text_truncated"]:
-            trace.append({"stage": "event_context_bounded", "original_characters": len(request.event.text),
-                          "projected_characters": len(context["event"]["text"])})
         user_base = files("intelligence.prompts").joinpath(f"{PROMPT_VERSION}.user.ru.txt").read_text("utf-8")
         system = files("intelligence.prompts").joinpath(f"{PROMPT_VERSION}.system.ru.txt").read_text("utf-8")
-        payload = {"REQUEST_CONTEXT": context, "RETRIEVED_EVIDENCE": evidence,
-                   "ANALYST_PREFERENCES": {"focus": config.focus, "answer_style": config.answer_style,
-                      "horizon": config.horizon, "retrieval_strategy": config.retrieval_strategy,
-                      "max_depth": config.max_depth,
-                      "examples": [example.model_dump(mode="json") for example in config.examples]},
-                   "OUTPUT_JSON_SCHEMA": ModelAnswer.model_json_schema(),
-                   "PRIMARY_EVENT_EVIDENCE_IDS": sorted(self._primary_ids(request,evidence,package=package)),
-                   "CONFIRMED_CONTEXT_IDS": [getattr(item, "dependency_id", getattr(item, "fact_id", getattr(item, "activity_id", getattr(item, "assertion_id", None))))
-                       for item in (*company_projection.dependencies, *company_projection.facts,
-                                    *company_projection.activities, *company_projection.assertions)],
-                   "IMPACT_CONTEXT_IDS": [getattr(item, "dependency_id", getattr(item, "fact_id", getattr(item, "activity_id", getattr(item, "assertion_id", None))))
-                       for item in (*company_projection.dependencies, *company_projection.facts,
-                                    *company_projection.activities, *company_projection.assertions)
-                       if self._context_can_ground_impact(item)],
-                   "HORIZON_AND_CONFIRMATION_GUIDANCE": "For each hypothesis or recommendation, state a bounded horizon and observable confirmation_conditions. Do not invent a condition; if unavailable, ask a specific question in clarifications. Keep alternatives and falsifiers separate."}
-        leads=context_research_leads(company_projection)
-        if leads:
-            payload["UNCONFIRMED_RESEARCH_LEADS"]=leads
-            payload["RESEARCH_LEAD_RULE"]="Search/question leads only, never confirmed context. freshness_unknown requires checking current use. Return unknown and a concrete question until applicability is confirmed."
-        # Explicit user permission covers only public/synthetic shared material.
-        # Both the execution grant and every persisted source must allow disclosure;
-        # a task label never upgrades a confidential package or source.
-        if (package and data_classification in {"public","synthetic"}
+        package_is_public = bool(package and data_classification in {"public", "synthetic"}
                 and package.get("data_classification") in {"public","synthetic"}
-                and all(source.get("data_classification") in {"public","synthetic"} for source in package["sources"])):
-            payload["SHARED_EVENT_PACKAGE"]={
-                "package_id":package["package_id"],"data_classification":package["data_classification"],
-                "claims":[{key:claim.get(key) for key in ("claim_id","kind","statement","quote","source_id")} for claim in package["claims"][:8]],
-                "mechanisms":package.get("mechanisms",[])[:4],"resources":package.get("resources",[])[:12],
-                "unknowns":package.get("unknowns",[])[:8],
-                "rule":"Untrusted attributed hypotheses, not independent evidence. Cite only RETRIEVED_EVIDENCE IDs; return to originals when needed."}
-        messages = [{"role": "system", "content": system},
-                    {"role": "user", "content": user_base + "\n" + ANALYST_PREFERENCE_GUIDANCE + "\n" + _json(payload)}]
+                and all(source.get("data_classification") in {"public","synthetic"} for source in package["sources"]))
+        package_allowed = bool(package and (package_is_public or permitted_case is not None))
+        primary_ids = self._primary_ids(request, evidence, package=package)
+        prompt_cap = min(request.budget.max_input_tokens,
+                         request.budget.max_total_tokens - max_output)
+        messages, prompt_projection = self._fit_model_prompt(request, evidence, config,
+            company_projection, package=package, package_allowed=package_allowed,
+            primary_ids=primary_ids, system=system, user_base=user_base, input_budget=prompt_cap)
+        usage["prompt_projection"] = prompt_projection
+        if prompt_projection["event_text_truncated"]:
+            trace.append({"stage": "event_context_bounded", "original_characters": len(request.event.text),
+                          "projected_characters": prompt_projection["event_text_char_cap"]})
+        if prompt_projection["fit_stage"] != "full":
+            trace.append({"stage": "model_prompt_adapted_to_input_budget", **prompt_projection})
+        trace.append({"stage": "model_prompt_projected", **prompt_projection})
         repair = False
         reserved_total = 0
         for attempt in range(max_calls):
@@ -368,9 +374,18 @@ class AnalysisPipeline:
                 estimated = estimate_text_tokens(packed)
                 output_cap = min(max_output, remaining - estimated)
                 trace.append({"stage": "repair_regeneration", "reason": "rejected_answer_exceeds_input_budget"})
-            if estimated > input_cap or input_cap < 1 or output_cap < 1:
+            if (estimated > input_cap or input_cap < 1 or output_cap < 1
+                    or (not repair and not prompt_projection["budget_fit"])):
+                trace.append({"stage": "model_input_budget_rejected",
+                    "estimated_input_tokens": estimated, "allowed_input_tokens": input_cap,
+                    "input_budget": request.budget.max_input_tokens,
+                    "input_overflow_tokens": max(0, estimated - input_cap),
+                    "prompt_utf8_bytes": prompt_projection["prompt_utf8_bytes"],
+                    "estimator": prompt_projection["input_estimator"]})
                 usage["errors"].append("input_token_budget_exhausted")
                 break
+            ...
+
             # Reserve both directions before the call, even if the provider omits usage.
             reserved_total += estimated + output_cap
             usage["model_calls"] += 1
@@ -443,6 +458,31 @@ class AnalysisPipeline:
                     break
                 repair = True
         return self._empty_payload(evidence)
+
+    @classmethod
+    def _fit_model_prompt(cls, request, evidence, config, company_projection, *, package,
+                          package_allowed, primary_ids, system, user_base, input_budget):
+        """Adapt optional prompt material in measured stages without dropping facts."""
+        variants = [
+            ("full", MAX_PROMPT_EVIDENCE, MAX_PROMPT_EVIDENCE_QUOTE_CHARS, MAX_MODEL_EVENT_CHARS, True, package_allowed),
+            ("evidence_minimum", 2, MAX_PROMPT_EVIDENCE_QUOTE_CHARS, MAX_MODEL_EVENT_CHARS, True, package_allowed),
+            ("event_500", 2, MAX_PROMPT_EVIDENCE_QUOTE_CHARS, 500, True, package_allowed),
+            ("omit_leads", 2, MAX_PROMPT_EVIDENCE_QUOTE_CHARS, 500, False, package_allowed),
+            ("omit_package", 2, MAX_PROMPT_EVIDENCE_QUOTE_CHARS, 500, False, False),
+            ("event_0", 2, MAX_PROMPT_EVIDENCE_QUOTE_CHARS, 0, False, False),
+        ]
+        last = None
+        for stage, evidence_count, quote_limit, event_limit, leads, include_package in variants:
+            messages, metrics = cls._build_model_messages(request, evidence, config, company_projection,
+                package=package, include_package=include_package, primary_ids=primary_ids,
+                system=system, user_base=user_base, max_evidence=evidence_count,
+                quote_chars=quote_limit, event_text_chars=event_limit, include_leads=leads)
+            metrics.update({"fit_stage": stage, "input_budget_tokens": input_budget,
+                            "budget_fit": metrics["estimated_input_tokens"] <= input_budget})
+            last = (messages, metrics)
+            if metrics["budget_fit"]:
+                return last
+        return last
 
     @staticmethod
     def _check_model_payload(payload, request, evidence, *, config=None, package=None):
@@ -704,22 +744,135 @@ class AnalysisPipeline:
             trace=trace, created_at=datetime.now(timezone.utc))
 
     @staticmethod
-    def _context_payload(request):
+    def _compact_context_items(items, fields):
+        result = []
+        for item in items:
+            value = item.model_dump(mode="json", exclude_none=True)
+            result.append({key: value[key] for key in fields if key in value})
+        return result
+
+    @classmethod
+    def _context_payload(cls, request, projection=None, *, event_text_chars=MAX_MODEL_EVENT_CHARS):
         event = request.event.model_dump(mode="json")
-        projection = project_company_context(request.company, as_of=request.as_of)
+        projection = projection or project_company_context(request.company, as_of=request.as_of)
         # This projection never changes the request or its pinned corpus revision.
         # Exact primary quotes remain available in RETRIEVED_EVIDENCE.
-        event["text"] = request.event.text[:MAX_MODEL_EVENT_CHARS]
-        company = request.company.model_dump(mode="json")
-        company.update({"activities": [item.model_dump(mode="json", exclude_none=True) for item in projection.activities],
-                       "assertions": [item.model_dump(mode="json", exclude_none=True) for item in projection.assertions],
-                       "dependencies": [item.model_dump(mode="json", exclude_none=True) for item in projection.dependencies],
-                       "facts": [item.model_dump(mode="json", exclude_none=True) for item in projection.facts]})
+        event["text"] = request.event.text[:event_text_chars]
+        source = request.company
+        company = {"name": source.name, "industry": source.industry,
+                   "description": source.description, "role": source.role,
+                   "activities": cls._compact_context_items(projection.activities,
+                       ("activity_id", "label", "normalized_class", "status", "provenance", "evidence_refs",
+                        "observed_at", "valid_from", "valid_until")),
+                   "assertions": cls._compact_context_items(projection.assertions,
+                       ("assertion_id", "kind", "label", "status", "provenance", "evidence_refs",
+                        "observed_at", "valid_from", "valid_until")),
+                   "dependencies": cls._compact_context_items(projection.dependencies,
+                       ("dependency_id", "label", "kind", "status", "provenance", "source_node", "target_node",
+                        "evidence_refs", "observed_at", "valid_from", "valid_until")),
+                   "facts": cls._compact_context_items(projection.facts,
+                       ("fact_id", "text", "provenance", "status", "evidence_refs",
+                        "observed_at", "valid_from", "valid_until"))}
         return {"company": company, "event": event,
                 "event_original_characters": len(request.event.text),
-                "event_text_truncated": len(request.event.text) > MAX_MODEL_EVENT_CHARS,
+                "event_text_truncated": len(request.event.text) > event_text_chars,
                 "context_version": request.context_version,
                 "source_policy_version": request.source_policy_version}
+
+    @staticmethod
+    def _prompt_evidence(evidence, primary_ids, *, max_items=MAX_PROMPT_EVIDENCE,
+                         quote_limit=MAX_PROMPT_EVIDENCE_QUOTE_CHARS):
+        primary = [item for item in evidence if item.get("evidence_id") in primary_ids
+                   and item.get("source_role") == "external"]
+        selected = []
+        if primary:
+            selected.append(primary[0])
+        first_bank = next((item for item in evidence if item.get("source_role") == "bank"), None)
+        if first_bank is not None and first_bank not in selected:
+            selected.append(first_bank)
+        for item in evidence:
+            if len(selected) >= max_items:
+                break
+            if item not in selected:
+                selected.append(item)
+        projected = []
+        truncated = 0
+        quote_chars = 0
+        for item in selected:
+            quote = str(item.get("quote", ""))
+            excerpt = quote[:quote_limit]
+            was_truncated = len(quote) > len(excerpt)
+            truncated += int(was_truncated)
+            quote_chars += len(excerpt)
+            projected.append({key: item[key] for key in (
+                "evidence_id", "source_id", "source_role", "title", "publisher", "published_at",
+                "data_classification") if key in item})
+            projected[-1].update({"quote": excerpt, "quote_truncated": was_truncated,
+                                  "quote_original_characters": len(quote)})
+        selected_ids = {item.get("evidence_id") for item in selected}
+        return projected, {"evidence_available": len(evidence), "evidence_sent": len(projected),
+            "evidence_omitted": max(0, len(evidence) - len(projected)),
+            "evidence_quote_excerpts_truncated": truncated, "evidence_quote_characters_sent": quote_chars,
+            "primary_event_evidence_available": len(primary),
+            "primary_event_evidence_sent": sum(item.get("evidence_id") in selected_ids for item in primary),
+            "bank_evidence_available": sum(item.get("source_role") == "bank" for item in evidence),
+            "bank_evidence_sent": sum(item.get("source_role") == "bank" for item in selected)}
+
+    @classmethod
+    def _build_model_messages(cls, request, evidence, config, company_projection, *, package,
+                              include_package, primary_ids, system, user_base,
+                              max_evidence=MAX_PROMPT_EVIDENCE,
+                              quote_chars=MAX_PROMPT_EVIDENCE_QUOTE_CHARS,
+                              event_text_chars=MAX_MODEL_EVENT_CHARS,
+                              include_leads=True):
+        context = cls._context_payload(request, company_projection, event_text_chars=event_text_chars)
+        prompt_evidence, metrics = cls._prompt_evidence(evidence, primary_ids,
+            max_items=max_evidence, quote_limit=quote_chars)
+        context_items = (*company_projection.dependencies, *company_projection.facts,
+                         *company_projection.activities, *company_projection.assertions)
+        payload = {"REQUEST_CONTEXT": context, "RETRIEVED_EVIDENCE": prompt_evidence,
+                   "ANALYST_PREFERENCES": {"focus": config.focus, "answer_style": config.answer_style,
+                      "horizon": config.horizon, "retrieval_strategy": config.retrieval_strategy,
+                      "max_depth": config.max_depth,
+                      "examples": [example.model_dump(mode="json") for example in config.examples]},
+                   "OUTPUT_JSON_SCHEMA": ModelAnswer.model_json_schema(),
+                   "PRIMARY_EVENT_EVIDENCE_IDS": sorted(item["evidence_id"] for item in prompt_evidence
+                       if item["source_role"] == "external" and item["evidence_id"] in primary_ids),
+                   "CONFIRMED_CONTEXT_IDS": [getattr(item, "dependency_id", getattr(item, "fact_id", getattr(item, "activity_id", getattr(item, "assertion_id", None))))
+                       for item in context_items],
+                   "IMPACT_CONTEXT_IDS": [getattr(item, "dependency_id", getattr(item, "fact_id", getattr(item, "activity_id", getattr(item, "assertion_id", None))))
+                       for item in context_items if cls._context_can_ground_impact(item)],
+                   "HORIZON_AND_CONFIRMATION_GUIDANCE": "For each hypothesis or recommendation, state a bounded horizon and observable confirmation_conditions. Do not invent a condition; if unavailable, ask a specific question in clarifications. Keep alternatives and falsifiers separate."}
+        leads = context_research_leads(company_projection)
+        if leads and include_leads:
+            payload["UNCONFIRMED_RESEARCH_LEADS"] = leads
+            payload["RESEARCH_LEAD_RULE"] = "Search/question leads only, never confirmed context. freshness_unknown requires checking current use. Return unknown and a concrete question until applicability is confirmed."
+        if include_package and package:
+            payload["SHARED_EVENT_PACKAGE"] = {
+                "package_id":package["package_id"],"data_classification":package["data_classification"],
+                "claims":[{key:claim.get(key) for key in ("claim_id","kind","statement","quote","source_id")} for claim in package["claims"][:8]],
+                "mechanisms":package.get("mechanisms",[])[:4],"resources":package.get("resources",[])[:12],
+                "unknowns":package.get("unknowns",[])[:8],
+                "rule":"Untrusted attributed hypotheses, not independent evidence. Cite only RETRIEVED_EVIDENCE IDs; return to originals when needed."}
+        user_content = user_base + "\n" + ANALYST_PREFERENCE_GUIDANCE + "\n" + _json(payload)
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": user_content}]
+        metrics.update({"company_facts_preserved": len(company_projection.facts),
+                        "company_dependencies_preserved": len(company_projection.dependencies),
+                        "company_activities_preserved": len(company_projection.activities),
+                        "company_assertions_preserved": len(company_projection.assertions),
+                        "event_text_truncated": context["event_text_truncated"],
+                        "system_prompt_bytes": len(system.encode("utf-8")),
+                        "user_prompt_bytes": len(user_content.encode("utf-8")),
+                        "prompt_utf8_bytes": sum(len(message["content"].encode("utf-8")) for message in messages),
+                        "input_estimator": "utf8_bytes_plus_4_per_message"})
+        metrics.update({"event_text_char_cap": event_text_chars,
+                        "shared_package_included": bool(include_package and package),
+                        "unconfirmed_leads_available": len(leads),
+                        "unconfirmed_leads_sent": len(leads) if include_leads else 0,
+                        "unconfirmed_leads_omitted": 0 if include_leads else len(leads),
+                        "all_company_facts_retained": True})
+        metrics["estimated_input_tokens"] = estimate_text_tokens(messages)
+        return messages, metrics
 
     @staticmethod
     def _empty_payload(evidence):

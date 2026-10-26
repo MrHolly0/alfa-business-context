@@ -105,6 +105,14 @@ def main(argv=None):
     description=commands.add_parser('prepare-description',help='Предложить профиль по тексту без сохранения в Core и без модели')
     description.add_argument('--input',required=True)
     description.add_argument('--output')
+    case_ocr=commands.add_parser('case-ocr',help='OCR локального private-case архива без сети и модели')
+    case_ocr.add_argument('--case-dir',required=True)
+    case_ocr.add_argument('--download-manifest',default='download-manifest.json')
+    case_ocr.add_argument('--output',default='ocr-manifest.json')
+    case_import=commands.add_parser('case-import',help='Подготовить private case bundle и локально импортировать bank PDFs без модели')
+    case_import.add_argument('--manifest',required=True)
+    case_import.add_argument('--state-dir',default=str(DEFAULT_STATE))
+    case_import.add_argument('--output',default='case-bundle.json')
     prepare = commands.add_parser('prepare-context', help='Подготовить контекст из предоставленных строк CSV без изменения данных Core')
     prepare.add_argument('--input', required=True)
     prepare.add_argument('--output')
@@ -180,6 +188,18 @@ def main(argv=None):
         if args.command == 'prepare-description':
             from .description_context import DescriptionPrepareRequest,prepare_description
             write_json(prepare_description(DescriptionPrepareRequest.model_validate(read_json(args.input))),args.output)
+        elif args.command == 'case-ocr':
+            from .case_data import run_case_ocr
+            report=run_case_ocr(args.case_dir,download_manifest=args.download_manifest,output=args.output)
+            write_json(report)
+            return 0 if report['failed']==0 else 1
+        elif args.command == 'case-import':
+            from .case_data import import_private_case
+            report=import_private_case(args.manifest,state_dir=args.state_dir,output=args.output)
+            sys.stdout.write(json.dumps({"status":report["status"],"profiles_prepared":report["summary"]["profiles_prepared"],
+                "bank_documents_ready":report["summary"]["bank_documents_ready"],
+                "bank_documents_pending":report["summary"]["bank_documents_pending"],
+                "bank_documents_failed":report["summary"]["bank_documents_failed"]},ensure_ascii=False)+"\n")
         elif args.command == 'prepare-context':
             from .client_data import CompanyContextPrepareRequest,prepare_company_contexts
             request=CompanyContextPrepareRequest.model_validate(read_json(args.input))

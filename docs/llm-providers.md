@@ -48,20 +48,26 @@ INTELLIGENCE_CONFIG_FILE=./apps/intelligence/examples/providers.paid.template.js
 
 ## Хакатонный шлюз
 
-Основной адрес — `https://changellenge.up.railway.app/v1`, резервный — `https://api.alfahack-gateway26.ru/v1`. Используется один явно выбранный адрес, без скрытого повтора на резервный. Командный лимит — 500 ₽ в сутки, сброс в 03:00 МСК.
+Основной адрес — `https://changellenge.up.railway.app/v1`, резервный — `https://api.alfahack-gateway26.ru/v1`. Используется один явно выбранный адрес, без скрытого повтора на резервный. Командный ключ имеет лимит 500 ₽ в сутки, сброс в 03:00 МСК.
 
-Скопируйте `apps/intelligence/examples/providers.template.json` в `apps/intelligence/providers.local.json`, заполните `input_per_million` и `output_per_million` профиля `hackathon` в RUB. Пока тарифы `null`, запрос не выполняется: неизвестная цена не считается нулевой. В `.env` добавьте:
+Тарифы в `/v1/models`, `/model/info` и `/key/info` не опубликованы. Поэтому шаблон `hackathon` задаёт явный `pricing_mode: "fixed_reserve"`: резервирует 10 ₽ до каждого запроса, держит не более 500 ₽ локального lifetime бюджета и не допускает больше 50 вызовов на общем scope. В этот режим не подставляются фиктивные тарифы за токены.
+
+Резерв 10 ₽ — локальное распределение бюджета, **не подтверждённая верхняя цена одного обращения и не серверный price cap**. Если шлюз не вернёт фактическую стоимость с валютой RUB, ledger оставит полный резерв в статусе `uncertain`, а результат будет содержать `cost: null` и `cost_source: "unknown"`. Явная стоимость в другой валюте возвращается в `external_billing` без конвертации; RUB-резерв остаётся неопределённым. Валюта не выводится из поля spend без явного подтверждения.
+
+Для проверки профиля скопируйте `apps/intelligence/examples/providers.template.json` в `apps/intelligence/providers.local.json` или используйте его напрямую. Тарифные поля `input_per_million` и `output_per_million` остаются `null` только вместе с явным `fixed_reserve`; отдельно `null` или ноль не означают бесплатный вызов. В `.env` задайте путь и ключ, не помещая ключ в JSON:
 
 ```dotenv
 INTELLIGENCE_CONFIG_FILE=./apps/intelligence/providers.local.json
 HACKATHON_API_KEY=ваш_ключ
 ```
 
-Для запуска выберите `--profile hackathon --mode model`. Идентификаторы: `google/gemma-4-26b-a4b-it`, `z-ai/glm-5.3-flash`, `qwen/qwen3.6-35b-a3b`, `deepseek/deepseek-v4.1-flash`, `qwen/qwen3-vl-30b-a3b-instruct`, `moonshotai/kimi-k2.6`. Допуск ID не доказывает фактическую доступность в аккаунте.
+Для вызова используйте `--profile hackathon --mode model`. Идентификаторы: `google/gemma-4-26b-a4b-it`, `z-ai/glm-5.3-flash`, `qwen/qwen3.6-35b-a3b`, `deepseek/deepseek-v4.1-flash`, `qwen/qwen3-vl-30b-a3b-instruct`, `moonshotai/kimi-k2.6`. Оба разрешённых base URL на момент проверки вернули эти шесть ID и дополнительный `deepseek-cost-test`; дополнительный ID не входит в allowlist и не используется. Один синтетический запрос к Gemma прошёл с лимитом 256 output tokens. Это подтверждает доступность модели и transport, но не деловой анализ и не качество вывода.
+
+Для подготовки полного JSON-проверочного ответа есть `examples/providers.judging.json` с тем же Alfa-only scope, 10 ₽ fixed reserve, lifetime 500 ₽, общей границей 50 вызовов, timeout 90 секунд и output cap 4096. Увеличенный output cap не увеличивает резерв на попытку и не превращает его в цену. До получения тарифов длинный ответ остаётся под неизвестной фактической стоимостью; расход учитывается резервом, пока не подтверждён RUB cost.
 
 ## Как считаем
 
-До вызова резервируется стоимость входного и выходного лимита. После ответа записывается `provider_reported` либо тарифная оценка `rate_estimate` с фактическими token counts. При неопределённом исходе резерв сохраняется. Output cap передаётся провайдеру; оценка input по UTF-8 байтам с надбавкой — ограничитель планирования, не токенизатор шлюза.
+При известных тарифах до вызова резервируется стоимость входного и выходного лимита. В Alfa `fixed_reserve` резервируется фиксированная сумма; неизвестную стоимость после ответа не оценивают по token counts. Только явно возвращённая RUB стоимость закрывает RUB резерв как `provider_reported`. Иначе резерв сохраняется в `uncertain`. Output cap передаётся провайдеру; оценка input по UTF-8 байтам с надбавкой — ограничитель планирования, не токенизатор шлюза.
 
 У запроса есть пределы вызовов, шагов и токенов. Разрешена одна починка JSON в пределах тех же лимитов; transport не повторяет запрос сам. Использованные токены, стоимость, версии и trace возвращаются вместе с кандидатом. Неизвестный usage не заменяется нулём.
 

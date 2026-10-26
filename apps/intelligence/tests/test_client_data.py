@@ -67,6 +67,15 @@ class ClientDataTests(unittest.TestCase):
         )
         self.assertEqual(no_match.proposals, [])
 
+    def test_sparse_private_case_rows_keep_original_csv_row_numbers_in_provenance(self):
+        result = prepare_company_contexts(
+            [{"SYNTHETIC_U": "A", "MAINOKVED_NAME": "Производство"}, {"SYNTHETIC_U": "B", "REGION": "Сибирь"}],
+            tenant_id="t", filename="case.csv", origin="private-case",
+            source_row_numbers=[17, 80002],
+        )
+        self.assertEqual([17, 80002], [proposal.source_row for proposal in result.proposals])
+        self.assertEqual("case.csv#row=80002,column=REGION", result.proposals[1].field_provenance["REGION"])
+
     def test_csv_parser_checks_shape_and_uses_same_normalizer(self):
         result = parse_company_csv(
             "SYNTHETIC_U,MAINOKVED_NAME,LOAN\nA,Производство,да\n",
@@ -91,6 +100,36 @@ class ClientDataTests(unittest.TestCase):
         ])
         self.assertEqual([item.normalized_class for item in activities], ["manufacturing", "trade", None, "logistics", "software", None])
         self.assertTrue(all(item.provenance.startswith("multi.csv#row=2") for item in activities))
+
+    def test_full_anonymized_core_company_export_preserves_all_24_raw_fields(self):
+        headers = [
+            "SYNTHETIC_U", "ORG_TYPE", "OKFS_NAME", "COMPANY_AGE_YEARS_GRADATION",
+            "ECO_MARK_LABEL", "MAINOKVED_CODE", "MAINOKVED_NAME", "NEGATIVEMARK",
+            "AMOUNT_WORKERS_FNS_GRADATION", "AMOUNT_WORKERS_SPARK_GRADATION", "CL_TYPE",
+            "CL_PRODUCT_RKO_MARK", "CL_PRODUCT_GAR_MARK", "CL_PRODUCT_LOA_MARK",
+            "CL_PRODUCT_LEA_MARK", "CL_PRODUCT_DEP_MARK", "CL_PRODUCT_ZPP_MARK",
+            "FTS_FLAG", "FTS_COUNTRY_NAME", "FACTORING_MARK", "REVENUE_COMPANY",
+            "GROUP_ID", "CITY", "REGION",
+        ]
+        values = [
+            "U-1", "ООО", "Частная", "10-15", "Эко", "62.01", "Разработка ПО",
+            "unknown-mark", "100-500", "100-500", "Тип A", "1", "0", "неизвестно",
+            "да", "нет", "3", "flag-7", "Россия", "mark-X", "15000000", "G-1",
+            "Москва", "Центральный",
+        ]
+        row = ",".join(headers) + "\n" + ",".join(values) + "\n"
+        proposal = parse_company_csv(row, tenant_id="core-local", filename="df_Uid_data_hack.csv",
+                                     origin="private-case").proposals[0]
+        facts_by_field = {fact.fact_id.rsplit("-", 1)[-1].upper(): fact for fact in proposal.context.facts}
+        self.assertEqual(set(headers) - {"SYNTHETIC_U"}, set(facts_by_field))
+        self.assertEqual("df_Uid_data_hack.csv#row=2,column=CL_PRODUCT_RKO_MARK",
+                         facts_by_field["CL_PRODUCT_RKO_MARK"].provenance)
+        self.assertIn("unknown-mark", facts_by_field["NEGATIVEMARK"].text)
+        self.assertIn("mark-X", facts_by_field["FACTORING_MARK"].text)
+        self.assertEqual("unknown", proposal.revenue.qualification)
+        self.assertIsNone(proposal.product_flags["LOAN"])
+        self.assertFalse(any(assertion.kind == "product" and "CL_PRODUCT" in assertion.label
+                             for assertion in proposal.context.assertions))
 
     def test_input_contract_bounds_tenant_and_filename(self):
         data = {"tenant_id": "t", "filename": "case.csv", "origin": "operator", "rows": [{"SYNTHETIC_U": "A"}]}

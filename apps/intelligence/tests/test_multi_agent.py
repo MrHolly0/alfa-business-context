@@ -60,6 +60,12 @@ def test_three_roles_share_one_session_and_planner_queries_drive_search(tmp_path
     assert result.usage["model_calls"] == 3
     assert result.usage["total_tokens"] == 180
     assert result.status == "ready"
+    critic_payload = json.loads(role_services["critic"].calls[0][0][-1]["content"])
+    cited = {ref for claim in result.claims for ref in claim.evidence_refs}
+    cited.update(ref for edge in result.influence_chain for ref in edge.evidence_refs)
+    assert {item["evidence_id"] for item in critic_payload["evidence"]} == cited
+    projected = next(item for item in result.trace if item["stage"] == "critic_evidence_projected")
+    assert projected["evidence_omitted"] == len(result.evidence) - len(critic_payload["evidence"])
 
 
 def test_analyst_profile_expansions_are_bounded_bank_search_terms(tmp_path, monkeypatch):

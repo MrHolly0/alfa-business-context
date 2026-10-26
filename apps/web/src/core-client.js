@@ -51,5 +51,7 @@ export function createCoreClient(fetchImpl = globalThis.fetch) {
     newsDocuments: (id, period = {}) => request(companyPath(id, "/news/documents") + query(period)),
     newsAssessment: (id, eventId) => request(companyPath(id, `/news/events/${encodeURIComponent(eventId)}/assessment`)),
     newsRuns: (id) => request(companyPath(id, "/news/runs")),
+    newsRun: (id, runId) => request(companyPath(id, `/news/runs/${encodeURIComponent(runId)}`)),
+    analyzeNews: (id, maxEvents = 1) => request(companyPath(id, "/news/runs"), { method: "POST", body: { maxEvents } }),
   };
 }

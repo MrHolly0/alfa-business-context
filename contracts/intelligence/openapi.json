@@ -1989,6 +1989,18 @@
             "type": "object",
             "title": "Coverage"
           },
+          "provider": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
           "trace": {
             "items": {
               "additionalProperties": true,

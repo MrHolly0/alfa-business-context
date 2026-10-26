@@ -97,3 +97,5 @@ HTTP `409` дополнительно обозначает `stale_or_conflicting
 Невалидный/недоступный модельный разбор возвращает `execution_mode=baseline`, `status=partial` и явное ограничение; доступны цитаты источников, а непроверенный модельный текст не публикуется. `usage` по-прежнему содержит совершённые платные попытки.
 
 [Связанные примеры Symfony](../../docs/symfony-integration.md) содержат реальные fixture request/result envelopes, обработку follow-up, collect/analyze и publication proof. `AutoOptimizationPolicy` также ограничивает cooldown_seconds и max_jobs_per_company_per_day; Core фиксирует `skipped_frequency` при достижении частотного лимита.
+
+`ai-data-result-v1.provider` — необязательная информация о фактически настроенном профиле, base URL и model ID. Факт выполненных обращений смотрите в `coverage.model_attempts`; наличие настроенного провайдера само по себе не означает модельный результат. `candidates[].execution_mode` различает модель и локальный baseline.

@@ -36,14 +36,17 @@ class ProviderConfig:
     budget_scope: str
     currency: str
     daily_limit: Decimal
-    input_per_million: Decimal
-    output_per_million: Decimal
+    input_per_million: Decimal | None
+    output_per_million: Decimal | None
     timeout_seconds: float
     max_output_tokens: int
     allow_paid: bool = False
     max_request_cost: Decimal | None = None
     lifetime_limit: Decimal | None = None
     reasoning_effort: str | None = None
+    pricing_mode: str = "token_rates"
+    attempt_reserve_rub: Decimal | None = None
+    max_calls_total: int | None = None
 
     def __post_init__(self) -> None:
         _validate_base(self.profile, self.base_url)
@@ -63,16 +66,56 @@ class ProviderConfig:
             raise ValueError(f"{self.profile} currency must be {expected_currency}")
         limit = _decimal(self.daily_limit, "daily_limit")
         object.__setattr__(self, "daily_limit", limit)
+        if self.lifetime_limit is not None:
+            lifetime_limit = _decimal(self.lifetime_limit, "lifetime_limit")
+            object.__setattr__(self, "lifetime_limit", lifetime_limit)
+        if self.profile == "hackathon":
+            if self.lifetime_limit is None:
+                object.__setattr__(self, "lifetime_limit", Decimal("500"))
+            elif self.lifetime_limit > Decimal("500"):
+                raise ValueError("hackathon lifetime_limit cannot exceed 500 RUB")
+            if self.max_calls_total is None:
+                object.__setattr__(self, "max_calls_total", 50)
+            elif (isinstance(self.max_calls_total, bool) or not isinstance(self.max_calls_total, int)
+                  or not (1 <= self.max_calls_total <= 50)):
+                raise ValueError("hackathon max_calls_total must be from 1 to 50")
         if self.profile == "hackathon" and limit > Decimal("500"):
             raise ValueError("hackathon daily_limit cannot exceed 500 RUB")
-        object.__setattr__(self, "input_per_million", _decimal(self.input_per_million, "input_per_million"))
-        object.__setattr__(self, "output_per_million", _decimal(self.output_per_million, "output_per_million"))
+        if self.pricing_mode not in {"token_rates", "fixed_reserve"}:
+            raise ValueError("pricing_mode must be token_rates or fixed_reserve")
+        if self.pricing_mode == "fixed_reserve":
+            if self.profile != "hackathon":
+                raise ValueError("fixed_reserve pricing is supported only by the hackathon profile")
+            if self.input_per_million is not None or self.output_per_million is not None:
+                raise ValueError("fixed_reserve mode must not claim token rates")
+            attempt_reserve = _decimal(self.attempt_reserve_rub, "attempt_reserve_rub")
+            if attempt_reserve <= 0:
+                raise ValueError("fixed_reserve mode requires a positive attempt_reserve_rub")
+            if (isinstance(self.max_calls_total, bool) or not isinstance(self.max_calls_total, int)
+                    or self.max_calls_total <= 0 or self.max_calls_total > 50):
+                raise ValueError("fixed_reserve mode requires max_calls_total from 1 to 50")
+            if self.lifetime_limit is None or self.lifetime_limit <= 0 or self.lifetime_limit > Decimal("500"):
+                raise ValueError("fixed_reserve mode requires a positive lifetime_limit no greater than 500 RUB")
+            if attempt_reserve * self.max_calls_total > self.lifetime_limit or attempt_reserve > limit:
+                raise ValueError("fixed reserve and total call cap must fit within daily and lifetime budgets")
+            object.__setattr__(self, "attempt_reserve_rub", attempt_reserve)
+        else:
+            if self.attempt_reserve_rub is not None:
+                raise ValueError("attempt_reserve_rub is valid only in fixed_reserve mode")
+            if self.max_calls_total is not None:
+                if (isinstance(self.max_calls_total, bool) or not isinstance(self.max_calls_total, int)
+                        or self.max_calls_total <= 0):
+                    raise ValueError("max_calls_total must be a positive integer when configured")
+            input_rate = _decimal(self.input_per_million, "input_per_million")
+            output_rate = _decimal(self.output_per_million, "output_per_million")
+            if self.profile == "hackathon" and (input_rate <= 0 or output_rate <= 0):
+                raise ValueError("hackathon token rates must be explicit positive RUB per-million values; zero cannot represent unknown pricing")
+            object.__setattr__(self, "input_per_million", input_rate)
+            object.__setattr__(self, "output_per_million", output_rate)
         if not isinstance(self.allow_paid, bool):
             raise ValueError("allow_paid must be a boolean")
         if self.max_request_cost is not None:
             object.__setattr__(self, "max_request_cost", _decimal(self.max_request_cost, "max_request_cost"))
-        if self.lifetime_limit is not None:
-            object.__setattr__(self, "lifetime_limit", _decimal(self.lifetime_limit, "lifetime_limit"))
         if isinstance(self.timeout_seconds, bool) or not isinstance(self.timeout_seconds, (int, float)) or not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be a positive finite number")
         if isinstance(self.max_output_tokens, bool) or not isinstance(self.max_output_tokens, int) or self.max_output_tokens <= 0:
@@ -175,8 +218,12 @@ def _from_mapping(profile: str, value: dict[str, Any]) -> ProviderConfig:
     limit = _decimal(value.get("daily_limit"), "daily_limit")
     if profile == "hackathon" and limit > Decimal("500"):
         raise ValueError("hackathon daily_limit cannot exceed 500 RUB")
-    input_rate = _decimal(value.get("input_per_million"), "input_per_million")
-    output_rate = _decimal(value.get("output_per_million"), "output_per_million")
+    pricing_mode = value.get("pricing_mode", "token_rates")
+    if pricing_mode == "fixed_reserve":
+        input_rate = output_rate = None
+    else:
+        input_rate = _decimal(value.get("input_per_million"), "input_per_million")
+        output_rate = _decimal(value.get("output_per_million"), "output_per_million")
     timeout = value.get("timeout_seconds")
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("timeout_seconds must be a positive finite number")
@@ -191,9 +238,12 @@ def _from_mapping(profile: str, value: dict[str, Any]) -> ProviderConfig:
     raw_lifetime = value.get("lifetime_limit")
     lifetime_limit = None if raw_lifetime is None else _decimal(raw_lifetime, "lifetime_limit")
     reasoning_effort = value.get("reasoning_effort")
+    raw_attempt_reserve = value.get("attempt_reserve_rub")
+    attempt_reserve = None if raw_attempt_reserve is None else _decimal(raw_attempt_reserve, "attempt_reserve_rub")
+    max_calls_total = value.get("max_calls_total")
     return ProviderConfig(profile, base_url, api_key_env, model, scope.strip(), currency, limit,
                           input_rate, output_rate, float(timeout), max_tokens, allow_paid, request_cost,
-                          lifetime_limit, reasoning_effort)
+                          lifetime_limit, reasoning_effort, pricing_mode, attempt_reserve, max_calls_total)
 
 
 def load_config(path: str | Path, profile: str | None = None) -> ProviderConfig:

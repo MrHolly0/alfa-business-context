@@ -150,6 +150,7 @@ class DataResult(StrictModel):
     period_report: dict | None = None
     watch_results: list[WatchEvaluation] = Field(default_factory=list)
     coverage: dict = Field(default_factory=dict)
+    provider: dict | None = None
     trace: list[dict] = Field(default_factory=list)
     created_at: datetime
 
@@ -304,7 +305,7 @@ class _TaskLLM:
         except Exception as exc:
             self.attempts.append({'model':getattr(getattr(service,'config',None),'model',None),'error':getattr(exc,'code',type(exc).__name__),'billing_uncertain':getattr(exc,'billing_uncertain',False)})
             raise
-        self.attempts.append({'model':response.get('model'),'cost':str(response.get('cost')) if response.get('cost') is not None else None,
+        self.attempts.append({'profile':response.get('profile'),'model':response.get('model'),'cost':str(response.get('cost')) if response.get('cost') is not None else None,
             'currency':response.get('cost_currency'),'cost_source':response.get('cost_source'),'usage':response.get('usage')})
         self.check('after_model')
         return response
@@ -327,6 +328,28 @@ class DataWorkflow:
         self.registry=analyst_registry or PromptRegistry(self.state_dir/'analysts.sqlite3')
         self.collector=collector or NewsCollector(self.store,state_path=self.state_dir/'collection.sqlite3',raw_dir=self.state_dir/'raw'/'collection')
         self.max_concurrency=max(1,min(4,max_concurrency))
+    def _case_approval(self, task, documents=()):
+        """Operator approval pins company snapshots and exact organizer document revisions."""
+        from types import SimpleNamespace
+        from .case_permission import approved_case_data
+        if os.getenv('INTELLIGENCE_ALLOW_HACKATHON_CASE_DATA') != '1' or task.tenant_id != 'core-local':
+            return None
+        services=[item for item in [self.llm,*self.role_services.values()] if item is not None]
+        if not services or not task.businesses:
+            return None
+        approval=None
+        for business in task.businesses:
+            request=SimpleNamespace(tenant_id=task.tenant_id,company_id=business.company_id,
+                company=business.company,source_ids=task.source_policy.effective_source_ids(),
+                document_revision_refs=[document['document_revision_ref'] for document in documents])
+            for service in services:
+                approval=approved_case_data(request,documents,service)
+                if approval is None:return None
+        return approval
+
+    def _case_gateway_allowed(self, task):
+        return self._case_approval(task) is not None
+
     def run(self,task,checkpoint=None):
         task=task if isinstance(task,DataTask) else DataTask.model_validate(task)
         original_check=checkpoint or (lambda stage:None);original_check('before_workflow')
@@ -374,9 +397,14 @@ class DataWorkflow:
         def stage(name,payload):
             check(name);self.state.stage(task,name,payload);trace.append({'stage':name,**payload})
         result=DataResult(request_id=task.request_id,tenant_id=task.tenant_id,company_id=task.company_id,status='completed',versions={'context':task.context_version,'source_policy':policy.revision,'company_contexts':{business.company_id:business.context_version for business in task.businesses},'policy_id':policy.policy_id},created_at=self.clock())
-        # Confidential snapshots execute locally. No model payload is built or sent for them.
-        model_allowed=task.data_classification in {'synthetic','public'}
+        case_approval=self._case_approval(task)
+        case_gateway_allowed=case_approval is not None
+        model_allowed=task.data_classification in {'synthetic','public'} or case_gateway_allowed
         model=_TaskLLM(self.llm,task.budget,check,self.role_services) if model_allowed and (self.llm or self.role_services) else None
+        if model:
+            config=getattr(self.llm or next(iter(self.role_services.values())), 'config', None)
+            result.provider={'profile':getattr(config,'profile',None),'base_url':getattr(config,'base_url',None),
+                'model':getattr(config,'model',None),'pricing_mode':getattr(config,'pricing_mode',None)}
         if (self.llm or self.role_services) and not model_allowed:
             result.coverage['model_limitation']='confidential_external_model_disabled'
         if task.operation=='prepare_description':
@@ -390,7 +418,8 @@ class DataWorkflow:
             return result
         if task.operation=='collect':
             stage('before_collection',{'source_count':len(allowed)})
-            result.collection=self.collector.collect(policy,now=self.clock(),checkpoint=check)
+            result.collection=self.collector.collect(policy,now=self.clock(),checkpoint=check,
+                source_ids=[source.source_id for source in policy.effective_sources() if source.source_role=='external'] if case_gateway_allowed else None)
             stage('collection_complete',{'report_saved':True})
         analysis_as_of=(self.clock() if task.knowledge_mode=='latest' else task.as_of)
         if task.period and task.period.mode=='retrospective': analysis_as_of=self.clock()
@@ -417,7 +446,22 @@ class DataWorkflow:
         docs=self.store.list_documents(tenant_id=task.tenant_id,source_ids=allowed,as_of=analysis_as_of.isoformat(),policy=policy,as_known=bool(task.period and task.period.mode=='as_known'))
         docs=[d for d in docs if not d['canonical_uri'].startswith('urn:event:')]
         refs=[d['document_revision_ref'] for d in docs]
-        if model and any(document.get('data_classification','confidential') not in {'public','synthetic'} for document in docs):
+        if task.operation=='collect' and case_gateway_allowed:
+            present={document['document_revision_ref'] for document in result.collection['documents']}
+            result.collection['documents'].extend(document for document in docs if document['source_role']=='bank' and document['document_revision_ref'] not in present)
+            result.coverage['bank_documents_preloaded']=sum(document['source_role']=='bank' for document in docs)
+        if case_gateway_allowed:
+            case_approval=self._case_approval(task,docs)
+            case_gateway_allowed=case_approval is not None
+            if not case_gateway_allowed:
+                model=None
+                result.coverage['model_limitation']='organizer_approval_snapshot_mismatch'
+        unavailable_bank=[source.source_id for source in policy.effective_sources() if source.source_role=='bank' and source.source_id not in {document['source_id'] for document in docs}]
+        if unavailable_bank:
+            result.coverage['bank_sources_unavailable']=unavailable_bank
+            if result.collection is not None:
+                result.collection['pending_metadata'].extend({'source_id':source_id,'reason':'publication_date_or_import_not_available'} for source_id in unavailable_bank)
+        if model and not case_gateway_allowed and any(document.get('data_classification','confidential') not in {'public','synthetic'} for document in docs):
             model=None
             result.coverage['model_limitation']='persisted_source_classification_denied'
         result.watch_results=evaluate_conditions(task.watches,as_of=analysis_as_of,
@@ -610,7 +654,7 @@ class DataWorkflow:
                         # local research plan, preserving calls for analysis/repair/critique.
                         if business_model: role_adapters['researcher']=None
                         candidate=MultiAgentPipeline(self.store,analyst_service,registry=registry,
-                            analyst_config=config,role_services=role_adapters).run(request,checkpoint=check,shared_event_package=package,data_classification=task.data_classification)
+                            analyst_config=config,role_services=role_adapters).run(request,checkpoint=check,shared_event_package=package,data_classification=task.data_classification,case_approval=case_approval)
                         if selection.status=='no_signal_found':
                             # A valid quote/ID and a critic's agreement cannot establish
                             # a missing event-to-company relationship.

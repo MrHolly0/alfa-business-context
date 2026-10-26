@@ -1,6 +1,6 @@
 # AI/Data: поиск и анализ
 
-Python получает из Core разрешённый snapshot: source policy, контекст, даты и версии. Он собирает только выданные источники, сохраняет оригиналы в private filesystem, а документы, ревизии, события и evidence — в PostgreSQL. Затем возвращает кандидатов. Настоящий PHP Core пока отсутствует; контрактный fixture stand — только средство локальной проверки.
+Python получает из Core разрешённый snapshot: source policy, контекст, даты и версии. Он собирает только выданные источники, сохраняет оригиналы в private filesystem, а документы, ревизии, события и evidence — в PostgreSQL. Затем возвращает кандидатов. Symfony Core подключён через внутренний HTTP API; контрактный fixture stand остаётся отдельным средством тестирования. Режим данных организаторов, локальный OCR и запуск на моделях Альфы описаны в [инструкции для судей](../../docs/judging.md).
 
 ## Быстрый запуск без внешних источников и ключей
 
@@ -30,7 +30,7 @@ Python получает из Core разрешённый snapshot: source policy
   --output /tmp/alfa-data-result.json
 ```
 
-`run-task` исполняет `ai-data-task-v1` локально и обходит durable Core job lifecycle. В продуктовой интеграции Core создаёт `ai-job-v1`; worker делает claim/heartbeat/result и возвращает `ai-result-v1`. Детали полей — [контракты](../../contracts/intelligence/README.md) и [интеграция](../../docs/ai-integration.md). Persistence-команды `python -m intelligence db migrate`, `db check` и `db import-sqlite` управляют миграцией, проверкой подключения и ограниченным импортом.
+`run-task` исполняет `ai-data-task-v1` локально и обходит durable Core job lifecycle. Целевой job-контракт предусматривает `ai-job-v1`, claim/heartbeat/result и `ai-result-v1`; в текущем PHP Core этот lifecycle ещё не реализован. Рабочий продукт использует прямой `/internal/v1/analyze` с `ai-data-task-v1` и `ai-data-result-v1`. Детали полей — [контракты](../../contracts/intelligence/README.md) и [интеграция](../../docs/ai-integration.md). Persistence-команды `python -m intelligence db migrate`, `db check` и `db import-sqlite` управляют миграцией, проверкой подключения и ограниченным импортом.
 
 ## Контрактный Core stand
 
@@ -56,7 +56,7 @@ Scheduler создаёт обычные fixture jobs. Реальную очер�
 
 Внутренний FastAPI требует service bearer token и tenant allowlist. Основные маршруты: `/internal/v1/analyze` (legacy `AnalysisRequest` или `DataTask`), `/internal/v1/search`, `/internal/v1/rank`, `/internal/v1/company-context/prepare`, `/internal/v1/sources/probe`, `/internal/v1/originals` и `/internal/v1/executions/{request_id}`. Frontend обращается к PHP/Core, а не к Python API.
 
-`prepare-context` и `/company-context/prepare` преобразуют обезличенные строки в предложение CompanyContext; профиль не сохраняется автоматически и модель не вызывается. Единица выручки должна быть подтверждена явно. Исходный CSV кейса не предоставлен.
+`prepare-context` и `/company-context/prepare` преобразуют обезличенные строки в предложение CompanyContext; профиль не сохраняется автоматически и модель не вызывается. Единица выручки должна быть подтверждена явно. CSV кейса загружается отдельной [командой подготовки](../../docs/judging.md); исходники не включаются в Git.
 
 Для URL используется одноразовый grant Core (`probe-source`/`sources/probe`); probe — не подписка. `NewsCollector` принимает неизменяемый snapshot источников и ограничивает HTTPS, DNS/IP, redirect, время и размер ответа. `collect` может быть отдельной task operation. RSS/Atom, HTML, PDF и ограниченный JSON adapter поддерживаются кодом; оригинальные байты хранятся с hash в tenant-scoped private raw store.
 
@@ -64,7 +64,7 @@ Scheduler создаёт обычные fixture jobs. Реальную очер�
 
 Исследователь, аналитик и критик — этапы одного общего pipeline, а не три обязательных независимых агента. Поиск идёт в разрешённом corpus. Общий event impact package переиспользуется между бизнесами; кандидаты содержат версии, evidence, coverage, unknowns и `publication_revision_required`. Только Core решает, публиковать ли новую business revision.
 
-Обычный workflow использует baseline-конфигурацию или подходящую активную analyst config. `arena` — отдельный эксперимент с одинаковыми входами, hard gates, blind review, holdout/shadow и ручной публикацией/rollback. Малые синтетические прогонки подтверждают механику, но не выигрыш по качеству. Настроенные модели запускаются только явно; DataTask с конфиденциальными данными использует локальный baseline; в старом AnalysisRequest внешний вызов при закрытых основаниях блокируется с `partial`.
+Обычный workflow использует baseline-конфигурацию или подходящую активную analyst config. `arena` — отдельный эксперимент с одинаковыми входами, hard gates, blind review, holdout/shadow и ручной публикацией/rollback. Малые синтетические прогонки подтверждают механику, но не выигрыш по качеству. Настроенные модели запускаются только явно; Конфиденциальные данные по умолчанию анализируются локально. Исключение для материалов организаторов требует точного operator approval: tenant, hash профиля, версии и хеши PDF, разрешённый шлюз Альфы. Для OpenRouter это исключение не действует.
 
 ## Где менять код
 

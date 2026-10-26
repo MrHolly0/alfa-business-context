@@ -125,6 +125,9 @@ def main(argv=None) -> int:
             _dump({"valid": True, "profile": config.profile, "model": config.model,
                    "base_url": config.base_url, "budget_scope": config.budget_scope,
                    "currency": config.currency, "daily_limit": config.daily_limit,
+                   "lifetime_limit": config.lifetime_limit, "pricing_mode": config.pricing_mode,
+                   "attempt_reserve_rub": config.attempt_reserve_rub,
+                   "max_calls_total": config.max_calls_total,
                    "api_key_env": config.api_key_env})
             return 0
         if args.command == "budget":
@@ -134,6 +137,8 @@ def main(argv=None) -> int:
         projected = None
         if args.compare_hackathon:
             hack = load_config(args.config, "hackathon")
+            if hack.pricing_mode == "fixed_reserve":
+                raise ValueError("cannot project hackathon RUB cost while the gateway tariff is unknown")
             if hack.model.removesuffix(":free") != config.model.removesuffix(":free"):
                 raise ValueError("comparison requires the same model in both profiles")
             projected = Pricing(hack.input_per_million, hack.output_per_million, "RUB")

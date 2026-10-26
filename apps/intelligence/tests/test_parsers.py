@@ -6,7 +6,7 @@ from io import BytesIO
 
 from pypdf import PdfWriter
 
-from intelligence.parsers import MAX_PDF_BASE64_CHARS, MAX_PDF_BYTES, parse_content
+from intelligence.parsers import MAX_PDF_BASE64_CHARS, MAX_PDF_BYTES, MAX_PRIVATE_CASE_PDF_BYTES, parse_content, parse_pdf_bytes
 
 
 class ParserTests(unittest.TestCase):
@@ -82,5 +82,14 @@ class ParserTests(unittest.TestCase):
         over = base64.b64encode(self._pdf_of_size(MAX_PDF_BYTES + 1)).decode()
         with self.assertRaisesRegex(ValueError, "exceeds .* bytes"):
             parse_content(over, "application/pdf")
-        with self.assertRaisesRegex(ValueError, "base64 exceeds"):
+        with self.assertRaisesRegex(ValueError, "base64 exceeds|PDF exceeds 20000000 bytes"):
             parse_content("A" * (MAX_PDF_BASE64_CHARS + 1), "application/pdf")
+
+    def test_private_pdf_parser_has_explicit_larger_cap_without_raising_api_cap(self):
+        payload = self._pdf_of_size(MAX_PDF_BYTES + 1)
+        with self.assertRaisesRegex(ValueError, "base64 exceeds|PDF exceeds 20000000 bytes"):
+            parse_content(base64.b64encode(payload).decode(), "application/pdf")
+        parsed = parse_pdf_bytes(payload, max_bytes=MAX_PRIVATE_CASE_PDF_BYTES)
+        self.assertTrue(any("scanned" in warning for warning in parsed.warnings))
+        with self.assertRaisesRegex(ValueError, "invalid PDF byte limit"):
+            parse_pdf_bytes(payload, max_bytes=MAX_PRIVATE_CASE_PDF_BYTES + 1)

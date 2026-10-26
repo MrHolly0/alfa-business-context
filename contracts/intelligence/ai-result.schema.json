@@ -2011,6 +2011,19 @@
           "title": "Coverage",
           "type": "object"
         },
+        "provider": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        },
         "trace": {
           "items": {
             "additionalProperties": true,

@@ -1,4 +1,8 @@
 <?php
+if (getenv('DATABASE_URL') !== false && getenv('DATABASE_URL') !== '') {
+    fwrite(STDERR, "Core tests must not run with DATABASE_URL set; use `docker compose --profile test run --build --rm core-test`.\n");
+    exit(2);
+}
 require dirname(__DIR__).'/vendor/autoload.php';
 
 function check(bool $condition, string $message): void {
@@ -42,6 +46,12 @@ try {
     $db=App\Database::connect();
     $companyId=$db->query('SELECT id FROM companies')->fetchColumn();
     check($db->query('SELECT revenue_company_raw FROM companies')->fetchColumn()==='123', 'Revenue was modified');
+    $fenceRunId=bin2hex(random_bytes(16));
+    $db->prepare('INSERT INTO news_runs(id,company_id,context_version,policy_version,status,created_at) VALUES(?,?,?,?,?,?)')->execute([$fenceRunId,$companyId,1,1,'running',gmdate('c')]);
+    check(App\NewsRunFence::isActive($db,$companyId,$fenceRunId), 'Active news run did not pass its publication fence');
+    $db->prepare("UPDATE news_runs SET status='failed' WHERE id=?")->execute([$fenceRunId]);
+    check(!App\NewsRunFence::isActive($db,$companyId,$fenceRunId), 'Expired news run passed its publication fence');
+    $db->prepare('DELETE FROM news_runs WHERE id=?')->execute([$fenceRunId]);
     [$status,$userId,$error]=runCommand(['bin/create-user.php','user@example.test','Тест'], $database, "TestPassword12345\n");
     check($status===0, 'User creation failed: '.$error);
     check(password_verify('TestPassword12345', $db->query('SELECT password_hash FROM app_users')->fetchColumn()), 'Password is not hashed');
@@ -56,7 +66,11 @@ try {
     $request=fn(string $method,array $body=[])=>Symfony\Component\HttpFoundation\Request::create('/', $method, [], [], [], ['CONTENT_TYPE'=>'application/json'], json_encode($body,JSON_UNESCAPED_UNICODE));
     $context=$api->saveContext($companyId,$request('PUT',['expectedVersion'=>0,'facts'=>['activities'=>['Торговля']]]));
     check($context->getStatusCode()===201, 'Context save failed: '.$context->getContent());
-    check($api->saveContext($companyId,$request('PUT',['expectedVersion'=>0,'facts'=>['activities'=>['Другое']]]))->getStatusCode()===409, 'Context conflict not detected');
+    $db->prepare('UPDATE company_context_versions SET facts_json=? WHERE company_id=? AND version=1')->execute([json_encode(['activities'=>['Торговля'],'ai_profile'=>['schema_version'=>'company-context-v2','name'=>'Imported profile','dependencies'=>[],'facts'=>[],'activities'=>[],'assertions'=>[]]],JSON_UNESCAPED_UNICODE),$companyId]);
+    check($api->saveContext($companyId,$request('PUT',['expectedVersion'=>1,'facts'=>['activities'=>['Другое']]]))->getStatusCode()===201, 'Manual context overlay failed');
+    $savedContext=json_decode($api->context($companyId)->getContent(),true)['context'];
+    check(($savedContext['version']??null)===2 && ($savedContext['facts']['ai_profile']['name']??null)==='Imported profile' && ($savedContext['facts']['activities'][0]??null)==='Другое', 'Saving manual context discarded the imported profile');
+    check($api->saveContext($companyId,$request('PUT',['expectedVersion'=>1,'facts'=>['activities'=>['Другое']]]))->getStatusCode()===409, 'Context conflict not detected');
     $created=$api->createMetric($companyId,$request('POST',['title'=>'Выручка','description'=>'За период','unit'=>'₽','direction'=>'up']));
     check($created->getStatusCode()===201, 'Metric creation failed');
     $metricId=json_decode($created->getContent(),true)['id'];
@@ -74,11 +88,19 @@ try {
     check(count(json_decode($api->metricEvents($companyId,$metricId,Symfony\Component\HttpFoundation\Request::create('/'))->getContent(),true)['events'])===1, 'Metric events missing');
     check($api->feedback($companyId,$request('POST',['subjectType'=>'metric','subjectId'=>$metricId,'kind'=>'relevant','comment'=>'Полезно']))->getStatusCode()===201, 'Feedback failed');
     check($api->addDiscussion($companyId,$request('POST',['subjectType'=>'metric','subjectId'=>$metricId,'body'=>'Вопрос']))->getStatusCode()===201, 'Discussion failed');
+    $newsApi=new App\Controller\NewsController();
+    check($newsApi->startRun($companyId,$request('POST',['maxEvents'=>2]))->getStatusCode()===400, 'News run accepted an unbounded event request');
     $otherId=bin2hex(random_bytes(16));
+    $adminId=bin2hex(random_bytes(16));
+    $db->prepare('INSERT INTO app_users(id,email,password_hash,display_name,created_at) VALUES(?,?,?,?,?)')->execute([$adminId,'admin@example.test','x','Admin',gmdate('c')]);
+    $db->prepare('INSERT INTO company_memberships(user_id,company_id,role,created_at) VALUES(?,?,?,?)')->execute([$adminId,$companyId,'admin',gmdate('c')]);
+    $_SESSION=['uid'=>$adminId,'seen'=>time()];
+    check($newsApi->startRun($companyId,$request('POST',['maxEvents'=>2]))->getStatusCode()===400, 'Admin could not reach the analysis route validation');
     $db->prepare('INSERT INTO app_users(id,email,password_hash,display_name,created_at) VALUES(?,?,?,?,?)')->execute([$otherId,'viewer@example.test','x','Viewer',gmdate('c')]);
     $db->prepare('INSERT INTO company_memberships(user_id,company_id,role,created_at) VALUES(?,?,?,?)')->execute([$otherId,$companyId,'viewer',gmdate('c')]);
     $_SESSION=['uid'=>$otherId,'seen'=>time()];
     check($api->createMetric($companyId,$request('POST',['title'=>'Запрет','description'=>'Нет прав']))->getStatusCode()===403, 'Viewer could edit');
+    check($newsApi->startRun($companyId,$request('POST',[]))->getStatusCode()===403, 'Viewer could start a news run');
     $_SESSION=['uid'=>bin2hex(random_bytes(16)),'seen'=>time()];
     check($api->metrics($companyId)->getStatusCode()===401, 'Unknown user could read');
     echo "Core integration tests passed\n";

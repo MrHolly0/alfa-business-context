@@ -24,6 +24,10 @@ Web собирается на Node.js 22.15 и в runtime обслуживает
 
 Основная рабочая persistence граница Python — PostgreSQL через Psycopg; Core имеет отдельную PostgreSQL database/roles. SQLite остаётся в Python fixture/local state и legacy import путях, а также в PHP test fixtures. Это не утверждение, что production persistence обоих сервисов SQLite.
 
+## Локальное распознавание PDF
+
+Образ Python включает системные `poppler-utils`, `tesseract-ocr`, `tesseract-ocr-rus` и `tesseract-ocr-eng`. Они используются отдельными локальными процессами без сети. Tesseract распространяется по Apache-2.0; полные условия Poppler и языковых данных находятся в `/usr/share/doc/<package>/copyright` внутри образа. При распространении образа сохраняйте эти документы и учитывайте условия его системных компонентов.
+
 ## Сохранённые материалы
 
 - Lucide / исходные Feather-иконки: ISC/MIT, текст в `apps/web/public/assets/Lucide-LICENSE.txt`.

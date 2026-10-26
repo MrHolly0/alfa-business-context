@@ -72,3 +72,7 @@ docker compose --profile tools run --build --rm intelligence evaluate --mode bas
 Core работает из `apps/core`; зависимости фиксируются `composer.lock`. Web package находится в `apps/web` и собирается Node 22.15 в build stage; runtime — nginx. Изменение frontend проверяйте `npm --prefix apps/web test`, `npm run build`, `npm run validate`. Core unit/integration suite: `composer test` из `apps/core` либо Compose `core-test`. Не редактируйте `.env` с личными настройками для проверки проекта; пример переменных для репозитория — `.env.example`.
 
 См. [infra README](../infra/README.md), [Symfony/Core](../apps/core/README.md), [web](../apps/web/README.md), [архитектуру](architecture.md).
+
+## Данные организаторов и Альфа
+
+Отдельный режим готовит оригинальные CSV/PDF, локальный OCR, источники и модельный анализ без изменения `.env`. Команда и порядок проверки — в [инструкции для судей](judging.md). Для обычного запуска и тестов используется базовый Compose; внешний провайдер включается только judging overlay.

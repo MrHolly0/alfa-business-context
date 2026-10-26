@@ -9,7 +9,7 @@ final class CompanyController {
     #[Route('/api/companies',methods:['GET'])]
     public function list(): JsonResponse {
         if (!$user=$this->current()) return new JsonResponse(['error'=>'Unauthenticated'],401);
-        $q=Database::connect()->prepare('SELECT c.id,c.synthetic_u,c.mainokved_name,c.region,m.role FROM companies c JOIN company_memberships m ON m.company_id=c.id WHERE m.user_id=? ORDER BY c.synthetic_u');
+        $q=Database::connect()->prepare("SELECT c.id,c.synthetic_u,c.mainokved_name,c.region,m.role FROM companies c JOIN company_memberships m ON m.company_id=c.id WHERE m.user_id=? ORDER BY CASE WHEN c.synthetic_u='demo-company' THEN 1 ELSE 0 END,c.synthetic_u");
         $q->execute([$user['id']]);return new JsonResponse(['companies'=>$q->fetchAll()]);
     }
     #[Route('/api/companies/{id}',methods:['GET'])]

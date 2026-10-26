@@ -34,6 +34,64 @@ export function createPulse({ E, C, esc, I, B, state, root, persist, navigate, r
     const text = String(value || "").replace(/\s+/g, " ").trim();
     return text.length > limit ? `${text.slice(0, limit).trimEnd()}…` : text;
   }
+  function coreClaimKind(kind) {
+    return ({ external_fact:"Факт из материала", assumption:"Гипотеза", unknown:"Не установлено", opinion:"Мнение", forecast:"Прогноз", company_fact:"Факт профиля" })[kind] || "Утверждение";
+  }
+  function coreEvidenceHref(value) {
+    try { const url = new URL(String(value || "")); return url.protocol === "https:" ? url.href : "#"; }
+    catch { return "#"; }
+  }
+  function coreAnalysisPanel(run, running = false, canRun = false, onStart = "core-analyze") {
+    const result = run?.result || {};
+    const candidates = result.candidates || [];
+    const evidenceById = new Map(candidates.flatMap((candidate) => (candidate.evidence || []).map((evidence) => [evidence.evidence_id, evidence])));
+    const modelCandidate = candidates.find((candidate) => candidate.execution_mode === "model");
+    const provider = run?.provider || result.provider || modelCandidate?.provider || modelCandidate?.model_provider || null;
+    const providerName = typeof provider === "string" ? provider : provider?.display_name || provider?.name || provider?.id;
+    const status = run?.status || "";
+    const statusLabel = ({completed:"Анализ завершён",partial:"Часть материалов требует уточнения",no_change:"Новых выводов нет",unknown:"Результат не определён",failed:"Не удалось выполнить анализ",stale:"Данные изменились во время анализа"})[status] || (status ? "Проверка завершена" : "Анализ ещё не выполнялся");
+    const candidateRows = candidates.map((candidate) => `<article class="directory-row"><div class="row-grow"><div class="source-meta">${esc(candidate.execution_mode === "model" ? (providerName || "Модельный анализ") : "Базовая проверка")} · ${esc(coreStatusLabel(candidate.status))}</div><h3>${esc(candidate.summary || "Для этого материала нет текстового вывода.")}</h3>${(candidate.claims || []).map((claim) => {
+      const refs = (claim.evidence_refs || []).map((id) => evidenceById.get(id)).filter(Boolean);
+      const hypotheses = [...(claim.assumptions || []), ...(claim.alternatives || [])].filter(Boolean);
+      return `<section class="pulse-panel"><span class="source-kind">${esc(coreClaimKind(claim.kind))}</span><p>${esc(claim.text || "")}</p>${hypotheses.length ? `<p class="hint"><strong>Что проверить:</strong> ${hypotheses.map((x) => esc(typeof x === "string" ? x : x.text || JSON.stringify(x))).join("; ")}</p>` : ""}${refs.map((e) => `<blockquote><p>${esc(e.quote || "Фрагмент цитаты не предоставлен.")}</p>${coreEvidenceHref(e.canonical_uri) !== "#" ? `<a class="inline-link" href="${esc(coreEvidenceHref(e.canonical_uri))}" target="_blank" rel="noopener">${esc(e.title || e.canonical_uri || "Открыть источник")}</a>` : `<span>${esc(e.title || "Источник")}</span>`}<span class="hint"> · ${esc(e.published_at || "Дата не указана")} · ${esc(coreSourceRole(e.source_role))}</span></blockquote>`).join("")}</section>`;
+    }).join("")}</div></article>`).join("");
+    const coverage = result.coverage || {};
+    const collection = result.collection || {};
+    const reasons = [ ...(Array.isArray(collection.errors) ? collection.errors : []), ...(Array.isArray(collection.pending_metadata) ? collection.pending_metadata : []) ];
+    const reasonText = reasons.map((item) => typeof item === "string" ? item : item.reason || item.message || item.source_id || "Источник не обработан полностью.");
+    const clarifications = candidates.flatMap((candidate) => candidate.clarifications || []);
+    return `<section class="pulse-panel" id="core-analysis"><div class="pulse-section-title"><div><h2>Проверка материалов</h2><p>${esc(statusLabel)}${providerName ? ` · Провайдер: ${esc(providerName)}` : modelCandidate ? " · Провайдер не указан" : ""}</p></div>${canRun ? `<button class="btn primary" type="button" data-action="${onStart}" ${running ? "disabled aria-busy=\"true\"" : ""}>${running ? "Выполняется…" : "Проанализировать"}</button>` : ""}</div>${running ? '<p role="status" aria-live="polite">Проверяются доступные источники и материалы. Это может занять некоторое время.</p>' : ""}${run?.error_code ? `<p class="form-error">Код ошибки: ${esc(run.error_code)}</p>` : ""}${run ? `<p class="hint">Версия профиля: ${esc(run.context_version ?? "не указана")} · версия источников: ${esc(run.policy_version ?? "не указана")}${run.created_at ? ` · ${esc(run.created_at)}` : ""}</p>` : '<p>Нажмите «Проанализировать», чтобы проверить сохранённые источники.</p>'}${Object.keys(coverage).length ? `<details><summary>Покрытие и ограничения</summary><dl>${Object.entries(coverage).map(([key,value]) => `<div><dt>${esc(({documents:"Документы",events:"События",sources:"Источники",fetched:"Загружено",errors:"Ошибки источников",pending_metadata:"Требуют уточнения"})[key] || key.replaceAll("_"," "))}</dt><dd>${esc(typeof value === "object" ? JSON.stringify(value) : value)}</dd></div>`).join("")}</dl>${reasonText.length ? `<ul>${reasonText.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}</details>` : ""}${clarifications.length ? `<section><h3>Нужны уточнения</h3><ul>${clarifications.map((item) => `<li>${esc(typeof item === "string" ? item : item.question || item.text || JSON.stringify(item))}</li>`).join("")}</ul></section>` : ""}${candidateRows || (run ? '<p>В этом запуске нет оценок по материалам. Это не означает, что рисков нет.</p>' : "")}</section>`;
+  }
+  function coreProfileSnapshot(company, context) {
+    const facts = context?.facts || {};
+    const profile = facts.ai_profile && typeof facts.ai_profile === "object" ? facts.ai_profile : {};
+    const statements = (items) => (Array.isArray(items) ? items : []).map((item) => typeof item === "string" ? item : item?.label || item?.text || item?.description || "").filter(Boolean);
+    const activity = statements(facts.activities).length ? statements(facts.activities) : statements(profile.activities);
+    const assertions = Array.isArray(profile.assertions) ? profile.assertions : [];
+    const byKind = (kind) => assertions.filter((item) => item?.kind === kind).map((item) => item.label).filter(Boolean);
+    const groups = [
+      ["Направления деятельности", activity],
+      ["Продукты и услуги", statements(facts.products).length ? statements(facts.products) : [...(Array.isArray(profile.facts) ? profile.facts.filter((item) => /product|service/i.test(item?.kind || "")).map((item) => item?.text) : []), ...byKind("product"), ...byKind("service")]],
+      ["Рынки", statements(facts.markets).length ? statements(facts.markets) : byKind("market")],
+      ["Поставщики", statements(facts.suppliers).length ? statements(facts.suppliers) : byKind("supplier")],
+      ["Клиенты", statements(facts.customers).length ? statements(facts.customers) : byKind("customer_group")],
+      ["Риски и зависимости", [...statements(facts.risks), ...statements(profile.dependencies)]],
+      ["Примечания", statements(facts.notes)],
+    ];
+    const imported = [
+      ...(Array.isArray(profile.facts) ? profile.facts.map((item) => ({ text: item?.text, status: item?.status, provenance: item?.provenance })) : []),
+      ...(Array.isArray(profile.assertions) ? profile.assertions.map((item) => ({ text: item?.label, status: item?.status, provenance: item?.provenance })) : []),
+      ...(Array.isArray(profile.dependencies) ? profile.dependencies.map((item) => ({ text: item?.label, status: item?.status, provenance: item?.provenance })) : []),
+    ].filter((item) => item.text);
+    const statusLabel = (status) => ({ confirmed: "Подтверждено в исходном профиле", assumption: "Предположение", hypothesis: "Гипотеза", unknown: "Не подтверждено", contradiction: "Есть противоречие" })[status] || "Источник указал";
+    const importedDetails = imported.length ? `<details><summary>Факты и сведения из исходного профиля · ${imported.length}</summary><ul>${imported.map((item) => `<li>${esc(item.text)}<span class="fact-origin">${esc(statusLabel(item.status))}${item.provenance ? ` · ${esc(item.provenance)}` : ""}</span></li>`).join("")}</ul></details>` : "";
+    const description = typeof profile.description === "string" ? profile.description.trim() : "";
+    const shortDescription = description.length > 500 ? `${description.slice(0, 500).trimEnd()}…` : description;
+    const proposalMarker = "Контекст предложен по обезличенной CSV-строке; не является сохранённым Core-профилем.";
+    const savedOrganizerProfile = context?.source === "organizer_csv" && description.includes(proposalMarker);
+    const displayedDescription = savedOrganizerProfile ? "Профиль сохранён в Core из данных кейса." : shortDescription;
+    return `<section class="pulse-panel"><h2>Профиль компании · версия ${esc(context?.version ?? 0)}</h2><p>${esc(company?.mainokved_name || profile.industry || "Отрасль не указана")}${company?.region ? ` · ${esc(company.region)}` : ""}</p>${displayedDescription ? `<p>${esc(displayedDescription)}</p>` : ""}<dl class="profile-facts">${groups.map(([label,items]) => `<div><dt>${label}</dt><dd>${items.length ? items.slice(0, 3).map(esc).join("; ") : "Не указано"}${items.length > 3 ? ` · ещё ${items.length - 3}` : ""}</dd></div>`).join("")}</dl>${importedDetails}<p class="hint">Денежные показатели из исходных CSV не содержат подтверждённой единицы измерения.</p></section>`;
+  }
   function bar() { return `<div class="pulse-period" aria-label="Период обзора">${Object.entries(labels).map(([id,label])=>`<button type="button" data-action="pulse-period:${id}" aria-pressed="${period===id}">${label}</button>`).join('')}</div>`; }
   function sidebar() {
     const disabled=(label,icon,newItem=false)=>`<button class="navitem bank-disabled" disabled title="Недоступно в демонстрации">${I(icon)}<span>${label}</span>${newItem?'<small class="bank-new">НОВОЕ</small>':''}</button>`;
@@ -148,5 +206,5 @@ export function createPulse({ E, C, esc, I, B, state, root, persist, navigate, r
     }
     return false;
   }
-  return {sidebar,dashboard,metricPage,coreDashboard,coreMetricPage,action,help};
+  return {sidebar,dashboard,metricPage,coreDashboard,coreMetricPage,coreProfileSnapshot,coreAnalysisPanel,action,help};
 }

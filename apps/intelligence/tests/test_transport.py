@@ -73,7 +73,7 @@ class TransportTests(unittest.TestCase):
 
     def test_hackathon_request_omits_openrouter_usage_flag(self):
         config = ProviderConfig("hackathon", "https://changellenge.up.railway.app/v1", "TEST_LLM_KEY",
-            "google/gemma-4-26b-a4b-it", "team", "RUB", Decimal("500"), Decimal("0"), Decimal("0"), 4.5, 256)
+            "google/gemma-4-26b-a4b-it", "team", "RUB", Decimal("500"), Decimal("1"), Decimal("1"), 4.5, 256)
         opener = FakeOpener({"choices": [{"message": {"content": "ok"}}]})
         with patch.dict(os.environ, {"TEST_LLM_KEY": "x"}):
             ChatCompletionTransport(config, opener).complete([{"role": "user", "content": "hello"}])

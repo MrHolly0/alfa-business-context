@@ -135,11 +135,12 @@ class BudgetLedger:
     def reserve(self, scope: str, currency: str, limit: Decimal | int | str,
                 amount: Decimal | int | str, request_id: str | None = None,
                 now: datetime | None = None, *, lifetime_limit: Decimal | int | str | None = None,
-                max_calls: int | None = None) -> str:
+                max_calls: int | None = None, max_total_calls: int | None = None) -> str:
         scope, currency = self._scope(scope), self._currency(currency)
         limit, amount = _money(limit, "limit"), _money(amount, "amount")
         lifetime_limit = None if lifetime_limit is None else _money(lifetime_limit, "lifetime_limit")
         max_calls = _call_cap(max_calls)
+        max_total_calls = _call_cap(max_total_calls)
         if request_id is not None and (not isinstance(request_id, str) or not request_id.strip()):
             raise ValueError("request_id must be non-empty when provided")
         period_start, _ = _period(now)
@@ -167,6 +168,12 @@ class BudgetLedger:
                 ).fetchone()[0]
                 if used_calls >= max_calls:
                     raise BudgetExceeded(f"reservation would exceed call limit for scope {scope!r}")
+            if max_total_calls is not None:
+                total_calls = db.execute(
+                    "SELECT count(*) FROM ai_budget.reservations WHERE scope=%s", (scope,)
+                ).fetchone()[0]
+                if total_calls >= max_total_calls:
+                    raise BudgetExceeded(f"reservation would exceed lifetime call limit for scope {scope!r}")
             if lifetime_limit is not None:
                 lifetime_rows = db.execute(
                     "SELECT status,reserved_amount,actual_amount FROM ai_budget.reservations WHERE scope=%s",

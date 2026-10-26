@@ -1,7 +1,7 @@
 <?php
 require dirname(__DIR__).'/vendor/autoload.php';
 
-function runLocalCli(array $command,string $cwd): array {
+function runLocalCli(array $command,string $cwd,int $timeoutSeconds=600): array {
     $process=proc_open($command,[0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']],$pipes,$cwd);
     if(!is_resource($process))throw new RuntimeException('local_process_start_failed');
     fclose($pipes[0]);stream_set_blocking($pipes[1],false);stream_set_blocking($pipes[2],false);
@@ -11,7 +11,7 @@ function runLocalCli(array $command,string $cwd): array {
         if(strlen($output)>1_000_000 || strlen($errors)>1_000_000){proc_terminate($process,9);throw new RuntimeException('local_process_output_limit');}
         $status=proc_get_status($process);
         if(!$status['running']){$exitCode=$status['exitcode'];break;}
-        if(microtime(true)-$started>600){$timedOut=true;proc_terminate($process,15);usleep(200000);$status=proc_get_status($process);if($status['running'])proc_terminate($process,9);break;}
+        if(microtime(true)-$started>$timeoutSeconds){$timedOut=true;proc_terminate($process,15);usleep(200000);$status=proc_get_status($process);if($status['running'])proc_terminate($process,9);break;}
         usleep(100000);
     } while(true);
     $output.=stream_get_contents($pipes[1]);$errors.=stream_get_contents($pipes[2]);
@@ -21,7 +21,7 @@ function runLocalCli(array $command,string $cwd): array {
     return [$exitCode,$output,$errors];
 }
 
-function postToIntelligence(array $task,string $tenantId): array {
+function postToIntelligence(array $task,string $tenantId,?int $timeoutOverride=null): array {
     $base=getenv('INTELLIGENCE_BASE_URL');
     $token=getenv('INTELLIGENCE_SERVICE_TOKEN');
     if($token===false || $token===''){
@@ -35,7 +35,7 @@ function postToIntelligence(array $task,string $tenantId): array {
     $parts=parse_url($base);
     if(!$parts || !in_array($parts['scheme'] ?? '',['http','https'],true) || empty($parts['host']) || isset($parts['user']) || isset($parts['pass']) || isset($parts['query']) || isset($parts['fragment']) || !in_array($parts['path'] ?? '', ['', '/'],true))throw new RuntimeException('intelligence_base_url_invalid');
     $timeoutValue=getenv('INTELLIGENCE_TIMEOUT_SECONDS');
-    $timeout=$timeoutValue===false || $timeoutValue===''?180:filter_var($timeoutValue,FILTER_VALIDATE_INT);
+    $timeout=$timeoutOverride ?? ($timeoutValue===false || $timeoutValue===''?180:filter_var($timeoutValue,FILTER_VALIDATE_INT));
     if(!is_int($timeout) || $timeout<5 || $timeout>600)throw new RuntimeException('intelligence_timeout_invalid');
     $body=json_encode($task,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);
     if(strlen($body)>8_000_000)throw new RuntimeException('intelligence_request_too_large');
@@ -63,54 +63,74 @@ function postToIntelligence(array $task,string $tenantId): array {
     } finally {fclose($response);}
 }
 
-if ($argc<2 || $argc>5) {fwrite(STDERR,"Usage: php bin/run-news.php COMPANY_ID [--local-cli] [--fixture-feed FILE]\n");exit(2);}
-$companyId=$argv[1];$localCli=false;$fixture=null;
+if ($argc<2 || $argc>9) {fwrite(STDERR,"Usage: php bin/run-news.php COMPANY_ID [--local-cli] [--fixture-feed FILE] [--max-events N] [--request-id HEX]\n");exit(2);}
+$companyId=$argv[1];$localCli=false;$fixture=null;$maxEvents=10;$requestedRunId=null;$timeoutSeconds=null;
 for($i=2;$i<$argc;$i++){
     if($argv[$i]==='--local-cli' && !$localCli){$localCli=true;continue;}
     if($argv[$i]==='--fixture-feed' && $fixture===null && isset($argv[$i+1])){$fixture=$argv[++$i];continue;}
+    if($argv[$i]==='--max-events' && isset($argv[$i+1]) && ctype_digit($argv[$i+1])){$maxEvents=(int)$argv[++$i];if($maxEvents<1 || $maxEvents>10)exit("Invalid max events\n");continue;}
+    if($argv[$i]==='--request-id' && $requestedRunId===null && isset($argv[$i+1]) && preg_match('/^[a-f0-9]{32}$/',$argv[$i+1])){$requestedRunId=$argv[++$i];continue;}
+    if($argv[$i]==='--timeout' && isset($argv[$i+1]) && ctype_digit($argv[$i+1])){$timeoutSeconds=(int)$argv[++$i];if($timeoutSeconds<5 || $timeoutSeconds>600)exit("Invalid timeout\n");continue;}
     fwrite(STDERR,"Invalid run-news option\n");exit(2);
 }
 if($fixture!==null && !$localCli){fwrite(STDERR,"--fixture-feed is available only with explicit --local-cli\n");exit(2);}
 $deploymentTenantId=getenv('CORE_INTELLIGENCE_TENANT_ID') ?: 'core-local';
 if(!is_string($deploymentTenantId) || !preg_match('/^[A-Za-z0-9._:-]{1,128}$/',$deploymentTenantId)){fwrite(STDERR,"Invalid Core Intelligence tenant configuration\n");exit(2);}
-$lockPath=dirname(__DIR__).'/var/news-'.$companyId.'.lock';
+$lockPath=dirname(__DIR__).'/var/news-'.hash('sha256',$companyId).'.lock';
 $lock=fopen($lockPath,'c');if(!$lock || !flock($lock,LOCK_EX|LOCK_NB))exit("News run already active for this company\n");
 $db=App\Database::connect();
-$q=$db->prepare('SELECT id,synthetic_u,mainokved_name,org_type FROM companies WHERE id=?');$q->execute([$companyId]);$company=$q->fetch();if(!$company)exit("Unknown company\n");
-$q=$db->prepare('SELECT revision FROM source_policy_heads WHERE company_id=?');$q->execute([$companyId]);$policyVersion=(int)$q->fetchColumn();if(!$policyVersion)exit("No source policy\n");
-$q=$db->prepare('SELECT * FROM news_sources WHERE company_id=? AND enabled=1 ORDER BY id');$q->execute([$companyId]);$sources=$q->fetchAll();if(!$sources)exit("No enabled sources\n");
-// Materialize the initial empty profile as a real Core version. Otherwise the
-// first confirmed edit would reuse AI's fallback version 1 with different facts.
+$runId=$requestedRunId ?: bin2hex(random_bytes(16));$now=gmdate('c');
+// Reserve the run under the same company-row lock used by context and policy
+// writes. Commit before any external HTTP request so no DB lock spans the call.
 $db->beginTransaction();
 try {
     App\Database::lockCompany($db,$companyId);
+    $cutoff=gmdate('c',time()-600);
+    $db->prepare("UPDATE news_runs SET status='failed',error_code='run_expired',finished_at=? WHERE company_id=? AND status='running' AND created_at<?")->execute([$now,$companyId,$cutoff]);
+    $q=$db->prepare("SELECT id FROM news_runs WHERE company_id=? AND status='running' LIMIT 1");$q->execute([$companyId]);
+    if($q->fetchColumn()){$db->rollBack();exit("analysis_in_progress\n");}
+    $q=$db->prepare('SELECT id,synthetic_u,mainokved_name,org_type FROM companies WHERE id=?');$q->execute([$companyId]);$company=$q->fetch();if(!$company){$db->rollBack();exit("unknown_company\n");}
+    $q=$db->prepare('SELECT revision FROM source_policy_heads WHERE company_id=?');$q->execute([$companyId]);$policyVersion=(int)$q->fetchColumn();if(!$policyVersion){$db->rollBack();exit("no_source_policy\n");}
+    $q=$db->prepare('SELECT * FROM news_sources WHERE company_id=? AND enabled=1 ORDER BY id');$q->execute([$companyId]);$sources=$q->fetchAll();if(!$sources){$db->rollBack();exit("no_enabled_sources\n");}
     $q=$db->prepare('SELECT version,facts_json FROM company_context_versions WHERE company_id=? ORDER BY version DESC LIMIT 1');$q->execute([$companyId]);$context=$q->fetch();
     if(!$context){
         $db->prepare('INSERT INTO company_context_versions(id,company_id,version,facts_json,source,created_at) VALUES(?,?,?,?,?,?)')->execute([bin2hex(random_bytes(16)),$companyId,1,'{}','initial',gmdate('c')]);
         $context=['version'=>1,'facts_json'=>'{}'];
     }
+    $db->prepare('INSERT INTO news_runs(id,company_id,context_version,policy_version,status,created_at) VALUES(?,?,?,?,?,?)')->execute([$runId,$companyId,(int)$context['version'],$policyVersion,'running',$now]);
     $db->commit();
 } catch(Throwable $e){$db->rollBack();throw $e;}
 $contextVersion=(int)$context['version'];
 $confirmed=$context?json_decode($context['facts_json'],true):[];$facts=[];$activities=[];
-foreach(($confirmed['activities'] ?? []) as $i=>$value)$activities[]=['activity_id'=>'activity-'.$i,'label'=>$value,'status'=>'confirmed','provenance'=>'Core context version '.$contextVersion];
-foreach($confirmed as $key=>$items){if($key==='activities')continue;foreach($items as $i=>$value)$facts[]=['fact_id'=>$key.'-'.$i,'text'=>$value,'provenance'=>'Core context version '.$contextVersion,'status'=>'confirmed'];}
+$companyContext=null;
+if(getenv('CORE_JUDGING_CASE')==='1' && is_array($confirmed['ai_profile'] ?? null)) {
+    $companyContext=$confirmed['ai_profile'];
+    $companyContext['activities']??=[];$companyContext['facts']??=[];$companyContext['assertions']??=[];
+    foreach(($confirmed['activities'] ?? []) as $i=>$value)if(is_string($value) && trim($value)!=='')$companyContext['activities'][]=['activity_id'=>'manual-activity-'.$i,'label'=>trim($value),'status'=>'confirmed','provenance'=>'Core manual context version '.$contextVersion];
+    $assertionKinds=['products'=>'product','markets'=>'market','suppliers'=>'supplier','customers'=>'customer_group','risks'=>'other','notes'=>'other'];
+    foreach($assertionKinds as $group=>$kind)foreach(($confirmed[$group] ?? []) as $i=>$value)if(is_string($value) && trim($value)!=='')$companyContext['assertions'][]=['assertion_id'=>'manual-'.$group.'-'.$i,'kind'=>$kind,'label'=>trim($value),'status'=>'confirmed','provenance'=>'Core manual context version '.$contextVersion];
+} else {
+    foreach(($confirmed['activities'] ?? []) as $i=>$value)$activities[]=['activity_id'=>'activity-'.$i,'label'=>$value,'status'=>'confirmed','provenance'=>'Core context version '.$contextVersion];
+    foreach($confirmed as $key=>$items){if($key==='activities' || $key==='ai_profile' || !is_array($items))continue;foreach($items as $i=>$value)if(is_string($value))$facts[]=['fact_id'=>$key.'-'.$i,'text'=>$value,'provenance'=>'Core context version '.$contextVersion,'status'=>'confirmed'];}
+    $companyContext=['name'=>$company['synthetic_u'],'industry'=>$company['mainokved_name'] ?: '','description'=>$company['org_type'] ?: '','role'=>'','dependencies'=>[],'facts'=>$facts,'activities'=>$activities,'assertions'=>[]];
+}
 $grants=[];
 foreach($sources as $source){$grant=['source_id'=>$source['id'],'source_role'=>$source['source_role'],'data_classification'=>$source['classification'],'uri'=>$source['uri'],'content_type'=>$source['content_type'],'title'=>$source['title'],'publisher'=>$source['publisher'],'language'=>'ru','enabled'=>true,'poll_interval_seconds'=>3600,'timeout_seconds'=>15,'max_bytes'=>2000000,'fetch_articles'=>false,'article_hosts'=>json_decode($source['article_hosts_json'],true) ?: []];if($source['published_at'])$grant['published_at']=$source['published_at'];$grants[]=$grant;}
-$runId=bin2hex(random_bytes(16));$now=gmdate('c');
-$task=['schema_version'=>'ai-data-task-v1','request_id'=>$runId,'tenant_id'=>$deploymentTenantId,'company_id'=>$companyId,'context_version'=>$contextVersion,'source_policy_version'=>$policyVersion,'operation'=>'collect','trigger'=>'scheduled','knowledge_mode'=>'latest','as_of'=>$now,'source_policy'=>['policy_id'=>'core-'.$companyId,'revision'=>$policyVersion,'tenant_id'=>$deploymentTenantId,'issued_at'=>$now,'sources'=>$grants],'businesses'=>[['company_id'=>$companyId,'context_version'=>$contextVersion,'company'=>['name'=>$company['synthetic_u'],'industry'=>$company['mainokved_name'] ?: '','description'=>$company['org_type'] ?: '','role'=>'','dependencies'=>[],'facts'=>$facts,'activities'=>$activities,'assertions'=>[]]]],'data_classification'=>count(array_filter($sources,fn($s)=>$s['classification']!=='synthetic'))===0?'synthetic':'confidential','synthetic'=>count(array_filter($sources,fn($s)=>$s['classification']!=='synthetic'))===0,'auto_optimize'=>false];
-$db->prepare('INSERT INTO news_runs(id,company_id,context_version,policy_version,status,created_at) VALUES(?,?,?,?,?,?)')->execute([$runId,$companyId,$contextVersion,$policyVersion,'running',$now]);
+$allSynthetic=count(array_filter($sources,fn($s)=>$s['classification']!=='synthetic'))===0;
+$hasConfidential=count(array_filter($sources,fn($s)=>$s['classification']==='confidential'))>0;
+$dataClassification=$allSynthetic?'synthetic':($hasConfidential?'confidential':'public');
+$task=['schema_version'=>'ai-data-task-v1','request_id'=>$runId,'tenant_id'=>$deploymentTenantId,'company_id'=>$companyId,'context_version'=>$contextVersion,'source_policy_version'=>$policyVersion,'operation'=>'collect','trigger'=>'manual','knowledge_mode'=>'latest','as_of'=>$now,'source_policy'=>['policy_id'=>'core-'.$companyId,'revision'=>$policyVersion,'tenant_id'=>$deploymentTenantId,'issued_at'=>$now,'sources'=>$grants],'businesses'=>[['company_id'=>$companyId,'context_version'=>$contextVersion,'company'=>$companyContext]],'budget'=>['max_model_calls'=>3],'max_events'=>$maxEvents,'data_classification'=>$dataClassification,'synthetic'=>$allSynthetic,'auto_optimize'=>false];
 try {
     if($localCli){
         $root=dirname(__DIR__,3);$scratch=dirname(__DIR__).'/var/news';if(!is_dir($scratch))mkdir($scratch,0770,true);
         $taskPath=$scratch.'/'.$runId.'-task.json';$resultPath=$scratch.'/'.$runId.'-result.json';file_put_contents($taskPath,json_encode($task,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR));
         $python=getenv('INTELLIGENCE_PYTHON') ?: $root.'/apps/intelligence/.venv/bin/python';
         $command=[$python,$root.'/apps/intelligence/scripts/run_core_news.py','--task',$taskPath,'--output',$resultPath,'--state-dir',$root.'/apps/intelligence/.state/core-news/'.$companyId];if($fixture!==null){$command[]='--fixture-feed';$command[]=$fixture;}
-        [$code,$stdout,$stderr]=runLocalCli($command,$root);
+        [$code,$stdout,$stderr]=runLocalCli($command,$root,$timeoutSeconds ?? 600);
         if($code!==0)throw new RuntimeException('local_cli_failed');
         $result=json_decode(file_get_contents($resultPath),true,512,JSON_THROW_ON_ERROR);
     } else {
-        [$result,$stdout]=postToIntelligence($task,$deploymentTenantId);
+        [$result,$stdout]=postToIntelligence($task,$deploymentTenantId,$timeoutSeconds);
     }
 } catch(Throwable $e) {
     $db->prepare('UPDATE news_runs SET status=?,error_code=?,finished_at=? WHERE id=?')->execute(['failed',$localCli?'local_cli_failed':'intelligence_http_failed',gmdate('c'),$runId]);
@@ -123,6 +143,7 @@ try {
     // Context/source writers lock the same company row. The network has already
     // finished; only the short publication transaction is serialized here.
     App\Database::lockCompany($db,$companyId);
+if(!App\NewsRunFence::isActive($db,$companyId,$runId)){$db->rollBack();exit("run_no_longer_active\n");}
 $q=$db->prepare('SELECT revision FROM source_policy_heads WHERE company_id=?');$q->execute([$companyId]);$currentPolicy=(int)$q->fetchColumn();
 $q=$db->prepare('SELECT MAX(version) FROM company_context_versions WHERE company_id=?');$q->execute([$companyId]);$currentContext=(int)$q->fetchColumn() ?: 1;
 if($currentPolicy!==$policyVersion || $currentContext!==$contextVersion){$db->rollBack();$db->prepare('UPDATE news_runs SET status=?,error_code=?,finished_at=? WHERE id=?')->execute(['stale','snapshot_changed',gmdate('c'),$runId]);exit("Source policy or context changed during run\n");}
@@ -162,6 +183,6 @@ if($currentPolicy!==$policyVersion || $currentContext!==$contextVersion){$db->ro
         $signature=$signatures[$pythonEventId] ?? hash('sha256',$ref.json_encode($candidate['versions']));
         $db->prepare('INSERT INTO news_assessments(id,event_id,input_signature,status,execution_mode,summary,candidate_json,created_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(event_id,input_signature) DO NOTHING')->execute([bin2hex(random_bytes(16)),$eventId,$signature,$candidate['status'] ?? 'unknown',$candidate['execution_mode'] ?? 'baseline',$candidate['summary'] ?? '',json_encode($candidate,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR),gmdate('c')]);
     }
-    $db->prepare('UPDATE news_runs SET status=?,result_json=?,finished_at=? WHERE id=?')->execute([$result['status'],json_encode(['coverage'=>$result['coverage'] ?? [],'events'=>$result['events'] ?? [],'candidates'=>$result['candidates'] ?? [],'collection'=>['fetched'=>$result['collection']['fetched'] ?? 0,'errors'=>$result['collection']['errors'] ?? [],'pending_metadata'=>$result['collection']['pending_metadata'] ?? []]],JSON_UNESCAPED_UNICODE),gmdate('c'),$runId]);
+    $db->prepare('UPDATE news_runs SET status=?,result_json=?,finished_at=? WHERE id=?')->execute([$result['status'],json_encode(['provider'=>$result['provider'] ?? null,'coverage'=>$result['coverage'] ?? [],'events'=>$result['events'] ?? [],'candidates'=>$result['candidates'] ?? [],'collection'=>['fetched'=>$result['collection']['fetched'] ?? 0,'errors'=>$result['collection']['errors'] ?? [],'pending_metadata'=>$result['collection']['pending_metadata'] ?? []]],JSON_UNESCAPED_UNICODE),gmdate('c'),$runId]);
     $db->commit();echo json_encode(['run_id'=>$runId,'status'=>$result['status'],'documents_added'=>$added,'documents_seen'=>count($documents),'workflow'=>$stdout],JSON_UNESCAPED_UNICODE),"\n";
 } catch(Throwable $e){$db->rollBack();$db->prepare('UPDATE news_runs SET status=?,error_code=?,finished_at=? WHERE id=?')->execute(['failed','import_failed',gmdate('c'),$runId]);fwrite(STDERR,$e->getMessage()."\n");exit(1);}

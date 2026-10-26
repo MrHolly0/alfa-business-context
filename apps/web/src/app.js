@@ -121,6 +121,9 @@ let coreMode = false,
   coreMetricEvents = [],
   coreMetricEventsId = "",
   coreMetricEventsLoading = false,
+  coreAnalysisRun = null,
+  coreAnalysisRunning = false,
+  coreAnalysisError = "",
   coreCompanyGeneration = 0,
   coreBusy = false,
   coreError = "";
@@ -454,14 +457,22 @@ async function loadCoreCompany(id, repaint = true) {
       coreCompany = null; coreContext = coreDashboardData = null;
       coreMetrics = coreNewsSources = coreNewsDocuments = [];
       coreMetricEvents = []; coreMetricEventsId = ""; coreMetricEventsLoading = false;
+      coreAnalysisRun = null; coreAnalysisError = "";
     }
     render();
   }
   try {
-    const [companyResult, contextResult, metricsResult, dashboardResult, sourcesResult, documentsResult] = await Promise.all([
+    const [companyResult, contextResult, metricsResult, dashboardResult, sourcesResult, documentsResult, runsResult] = await Promise.all([
       coreClient.company(id), coreClient.context(id), coreClient.metrics(id), coreClient.dashboard(id),
-      coreClient.newsSources(id), coreClient.newsDocuments(id),
+      coreClient.newsSources(id), coreClient.newsDocuments(id), coreClient.newsRuns(id),
     ]);
+    if (generation !== coreCompanyGeneration) return;
+    const latestRun = (runsResult.runs || [])[0];
+    let latestRunResult = null;
+    if (latestRun?.id) {
+      try { latestRunResult = (await coreClient.newsRun(id, latestRun.id)).run || latestRun; }
+      catch (error) { if (error.status === 401) throw error; latestRunResult = latestRun; }
+    }
     if (generation !== coreCompanyGeneration) return;
     coreCompany = companyResult.company;
     coreContext = contextResult.context;
@@ -469,6 +480,8 @@ async function loadCoreCompany(id, repaint = true) {
     coreDashboardData = dashboardResult;
     coreNewsSources = sourcesResult.sources || [];
     coreNewsDocuments = documentsResult.documents || [];
+    coreAnalysisRun = latestRunResult;
+    coreAnalysisError = "";
     coreMetricEvents = []; coreMetricEventsId = ""; coreMetricEventsLoading = false;
     coreCompanies = coreCompanies.map((c) => c.id === id ? { ...c, ...coreCompany } : c);
     coreError = "";
@@ -482,6 +495,32 @@ async function loadCoreCompany(id, repaint = true) {
     }
   } finally {
     if (generation === coreCompanyGeneration && repaint) { coreBusy = false; render(); }
+  }
+}
+async function runCoreAnalysis() {
+  if (!coreCompany || coreAnalysisRunning || coreCompany.role === "viewer") return;
+  const companyId = coreCompany.id;
+  coreAnalysisRunning = true; coreAnalysisError = ""; render();
+  try {
+    const response = await coreClient.analyzeNews(companyId, 1);
+    if (coreCompany?.id !== companyId) return;
+    if (!response?.run) throw new Error("Сервис не вернул результат запуска.");
+    coreAnalysisRun = response.run;
+    await loadCoreCompany(companyId, false);
+  } catch (e) {
+    if (coreCompany?.id !== companyId) return;
+    coreAnalysisRun = e.payload?.run || coreAnalysisRun;
+    coreAnalysisError = e.status === 409 && ["no_source_policy", "no_enabled_sources"].includes(e.payload?.error)
+      ? "Для компании не настроены источники. Выберите компанию кейса или настройте источники в Core."
+      : e.status === 409 && e.payload?.error === "analysis_in_progress"
+        ? "Для этой компании уже выполняется анализ. Обновите страницу через минуту."
+      : e.status === 403
+        ? "Для этой компании запуск анализа сейчас недоступен."
+        : e.status === 502
+          ? "Не удалось завершить анализ. Проверьте статус запуска и доступность источников."
+          : e.message || "Не удалось запустить анализ.";
+  } finally {
+    if (coreCompany?.id === companyId) { coreAnalysisRunning = false; render(); }
   }
 }
 async function loadCoreMetricEvents(metricId) {
@@ -567,7 +606,7 @@ function renderCore() {
   else if (coreError && !coreCompany) page = `<div class="card form-error">${esc(coreError)}</div>`;
   else if (!coreCompany) page = `<div class="card">${coreError ? `<p class="form-error">${esc(coreError)}</p>` : ""}<h2>Нет доступных компаний</h2><p>Для этой учётной записи пока нет доступных организаций.</p></div>`;
   else switch (view.page) {
-    case "home": case "overview": page = pulse.coreDashboard(coreCompany, coreDashboardData); break;
+    case "home": case "overview": page = `${pulse.coreProfileSnapshot(coreCompany, coreContext)}${pulse.coreAnalysisPanel(coreAnalysisRun, coreAnalysisRunning, coreCompany.role !== "viewer")}${coreAnalysisError ? `<p class="form-error" role="alert">${esc(coreAnalysisError)}</p>` : ""}${pulse.coreDashboard(coreCompany, coreDashboardData)}`; break;
     case "metric": {
       loadCoreMetricEvents(view.id);
       page = pulse.coreMetricPage(coreMetrics.find((m) => m.id === view.id), coreMetricEventsId === view.id ? coreMetricEvents : [], coreCompany.role !== "viewer");
@@ -1703,6 +1742,10 @@ function perform(action, anchor) {
     error = ""; coreError = ""; coreMode = false; coreUser = null; demoSignedIn = true;
     try { sessionStorage.setItem("business-context-demo-session-v2", "1"); } catch {}
     navigate("home"); render(); return;
+  }
+  if (type === "core-analyze") {
+    runCoreAnalysis();
+    return;
   }
   if (type === "core-company-menu") {
     UI.show(anchor, `<div class="menu-caption">Доступные компании</div>` + coreCompanies.map((c) => UI.item(`<strong>${esc(coreCompanyLabel(c))}</strong><span class="hint">${esc(c.mainokved_name || c.region || "")}</span>`, "switch-core-company:" + c.id, "building")).join(""), "Выбор компании");

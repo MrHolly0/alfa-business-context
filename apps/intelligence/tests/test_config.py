@@ -15,7 +15,7 @@ def config(model="google/gemma-4-26b-a4b-it", profile="hackathon", **overrides):
         "budget_scope": "team",
         "currency": "USD" if profile == "openrouter" else "RUB",
         "daily_limit": "500" if profile == "hackathon" else "20",
-        "input_per_million": "0",
+        "input_per_million": "0.1",
         "output_per_million": "0.2",
         "timeout_seconds": 15,
         "max_output_tokens": 1000,
@@ -65,6 +65,36 @@ class ConfigTests(unittest.TestCase):
             self.load(config(output_per_million=None))
         with self.assertRaisesRegex(ValueError, "finite and non-negative"):
             self.load(config(input_per_million="-1"))
+
+    def test_hackathon_unknown_pricing_cannot_be_configured_as_zero(self):
+        with self.assertRaisesRegex(ValueError, "zero cannot represent unknown pricing"):
+            self.load(config(input_per_million="0"))
+        with self.assertRaisesRegex(ValueError, "zero cannot represent unknown pricing"):
+            self.load(config(output_per_million="0"))
+
+    def test_fixed_reserve_is_explicit_and_keeps_unknown_rates_null(self):
+        values = config()["profiles"]["hackathon"]
+        values.update({"pricing_mode": "fixed_reserve", "attempt_reserve_rub": "10",
+                       "max_calls_total": 50, "lifetime_limit": "500",
+                       "input_per_million": None, "output_per_million": None})
+        loaded = self.load({"default_profile": "hackathon", "profiles": {"hackathon": values}})
+        self.assertEqual(loaded.pricing_mode, "fixed_reserve")
+        self.assertEqual(loaded.attempt_reserve_rub, Decimal("10"))
+        self.assertEqual(loaded.max_calls_total, 50)
+        self.assertIsNone(loaded.input_per_million)
+        self.assertIsNone(loaded.output_per_million)
+
+    def test_fixed_reserve_requires_positive_reserve_and_finite_call_cap(self):
+        values = config()["profiles"]["hackathon"]
+        values.update({"pricing_mode": "fixed_reserve", "attempt_reserve_rub": "0",
+                       "max_calls_total": 50, "input_per_million": None,
+                       "output_per_million": None})
+        with self.assertRaisesRegex(ValueError, "positive attempt_reserve_rub"):
+            self.load({"default_profile": "hackathon", "profiles": {"hackathon": values}})
+        values["attempt_reserve_rub"] = "10"
+        values["max_calls_total"] = 51
+        with self.assertRaisesRegex(ValueError, "hackathon max_calls_total must be from 1 to 50"):
+            self.load({"default_profile": "hackathon", "profiles": {"hackathon": values}})
 
     def test_hackathon_limit_is_capped_at_500_rub(self):
         with self.assertRaisesRegex(ValueError, "500 RUB"):

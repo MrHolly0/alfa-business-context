@@ -13,7 +13,9 @@ from pypdf import PdfReader
 
 MAX_TEXT_CHARS = 2_000_000
 MAX_PDF_BYTES = 20_000_000
+MAX_PRIVATE_CASE_PDF_BYTES = 50_000_000
 MAX_PDF_PAGES = 100
+MAX_PRIVATE_OCR_TEXT_CHARS = 2_000_000
 MAX_PDF_BASE64_CHARS = ((MAX_PDF_BYTES + 2) // 3) * 4
 
 
@@ -124,32 +126,45 @@ def parse_content(content: str, content_type: str) -> ParseResult:
             payload = base64.b64decode(content, validate=True)
         except (binascii.Error, ValueError) as exc:
             raise ValueError("PDF content must be valid base64") from exc
-        if len(payload) > MAX_PDF_BYTES:
-            raise ValueError(f"PDF exceeds {MAX_PDF_BYTES} bytes")
-        try:
-            from io import BytesIO
-            reader = PdfReader(BytesIO(payload), strict=True)
-            if reader.is_encrypted:
-                raise ValueError("encrypted PDFs are not supported")
-            page_count = len(reader.pages)
-            warnings = []
-            if page_count > MAX_PDF_PAGES:
-                warnings.append(f"PDF page limit reached ({MAX_PDF_PAGES} of {page_count})")
-            extracted = []
-            has_text = False
-            for index, page in enumerate(reader.pages[:MAX_PDF_PAGES], start=1):
-                page_text = page.extract_text() or ""
-                has_text = has_text or bool(page_text.strip())
-                extracted.append(f"[page {index}]\n{page_text}")
-            result = _clean("\n".join(extracted)) if has_text else ""
-            if len(result) > MAX_TEXT_CHARS:
-                result = result[:MAX_TEXT_CHARS]
-                warnings.append(f"PDF text limit reached ({MAX_TEXT_CHARS} characters)")
-            if not has_text:
-                warnings.append("PDF contains no extractable text; it may be scanned")
-            return ParseResult(result, warnings=tuple(warnings))
-        except ValueError:
-            raise
-        except Exception as exc:
-            raise ValueError("invalid PDF") from exc
+        return parse_pdf_bytes(payload, max_bytes=MAX_PDF_BYTES)
     raise ValueError(f"unsupported content_type: {content_type}")
+
+
+def parse_pdf_bytes(payload: bytes, *, max_bytes: int = MAX_PDF_BYTES) -> ParseResult:
+    """Parse already-read PDF bytes with an explicit caller-selected byte cap.
+
+    Public/API paths keep the 20 MB default. The private case importer may opt
+    into its separate, stricter file-root boundary and 50 MB cap.
+    """
+    if not isinstance(payload, bytes):
+        raise ValueError("PDF payload must be bytes")
+    if type(max_bytes) is not int or max_bytes < 1 or max_bytes > MAX_PRIVATE_CASE_PDF_BYTES:
+        raise ValueError("invalid PDF byte limit")
+    if len(payload) > max_bytes:
+        raise ValueError(f"PDF exceeds {max_bytes} bytes")
+    try:
+        from io import BytesIO
+        reader = PdfReader(BytesIO(payload), strict=True)
+        if reader.is_encrypted:
+            raise ValueError("encrypted PDFs are not supported")
+        page_count = len(reader.pages)
+        warnings = []
+        if page_count > MAX_PDF_PAGES:
+            warnings.append(f"PDF page limit reached ({MAX_PDF_PAGES} of {page_count})")
+        extracted = []
+        has_text = False
+        for index, page in enumerate(reader.pages[:MAX_PDF_PAGES], start=1):
+            page_text = page.extract_text() or ""
+            has_text = has_text or bool(page_text.strip())
+            extracted.append(f"[page {index}]\n{page_text}")
+        result = _clean("\n".join(extracted)) if has_text else ""
+        if len(result) > MAX_TEXT_CHARS:
+            result = result[:MAX_TEXT_CHARS]
+            warnings.append(f"PDF text limit reached ({MAX_TEXT_CHARS} characters)")
+        if not has_text:
+            warnings.append("PDF contains no extractable text; it may be scanned")
+        return ParseResult(result, warnings=tuple(warnings))
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError("invalid PDF") from exc
