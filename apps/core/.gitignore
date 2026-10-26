@@ -1,0 +1,4 @@
+/vendor/
+/var/
+/config/reference.php
+/.env.local
