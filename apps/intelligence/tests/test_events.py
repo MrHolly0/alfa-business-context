@@ -219,8 +219,8 @@ def test_uncertain_extraction_reservation_never_blindly_retries(store):
     reservation_id=__import__("hashlib").sha256("\0".join(("tenant-a",first["event_id"],"policy-1","v1",
         allowed_hash,semantic,model,"event-claims-v2")).encode()).hexdigest()
     with store._connect() as db:
-        db.execute("INSERT INTO claim_extraction_reservations VALUES(?,?,?,?)",
-            ("tenant-a",reservation_id,"started","2026-10-24T00:00:00Z"))
+        db.execute("INSERT INTO claim_extraction_reservations(tenant_id,reservation_id,status,created_at,lease_until,owner_token) VALUES(%s,%s,'started',%s,%s,%s)",
+            ("tenant-a",reservation_id,"2026-10-24T00:00:00Z","2026-10-24T00:01:00Z","crashed-owner"))
     class NeverCall:
         config=SimpleNamespace(model=model,max_output_tokens=256)
         calls=0
@@ -253,6 +253,70 @@ def test_original_at_requested_event_revision_does_not_leak_future_correction(st
     assert old["content"]=="Исходная публикация сообщает о закрытии порта."
     assert old["document_revision_ref"]=="doc-original:1"
     assert current["content"]=="Исправление: порт открыт и работает."
+
+
+def test_clone_snapshot_freezes_one_tenant_under_a_new_logical_namespace(store):
+    first=store.ingest(publication(tenant="tenant-clone",uri="https://news.example/snapshot",
+        document_revision_ref="doc-snapshot:1",content="Исходное состояние события."))
+    namespace=store.namespace+":history:fixture"
+    clone=store.clone_snapshot(namespace,"tenant-clone")
+    snapshot=clone.get_event("tenant-clone",first["event_id"],source_policy_id="policy-1",
+        policy_version="v1",allowed_source_ids=["src-a"])
+    assert snapshot and snapshot["sources"][0]["content"]=="Исходное состояние события."
+    store.ingest(publication(tenant="tenant-clone",uri="https://news.example/snapshot",
+        document_revision_ref="doc-snapshot:2",content="Обновлённое состояние события."))
+    assert clone.get_event("tenant-clone",first["event_id"],source_policy_id="policy-1",
+        policy_version="v1",allowed_source_ids=["src-a"])["sources"][0]["content"]=="Исходное состояние события."
+    reused=store.clone_snapshot(namespace,"tenant-clone")
+    assert reused.get_event("tenant-clone",first["event_id"],source_policy_id="policy-1",
+        policy_version="v1",allowed_source_ids=["src-a"])["sources"][0]["content"]=="Исходное состояние события."
+
+
+def test_clone_snapshot_rejects_unmarked_populated_target(store):
+    namespace=store.namespace+":history:occupied"
+    target=EventStore(store.path,namespace=namespace)
+    target.ingest(publication(tenant="tenant-clone",uri="https://news.example/unrelated",
+        document_revision_ref="doc-unrelated:1",content="Не помеченное состояние."))
+    with pytest.raises(ValueError,match="historical_snapshot_namespace_conflict"):
+        store.clone_snapshot(namespace,"tenant-clone")
+
+
+@pytest.mark.skipif(not os.getenv("INTELLIGENCE_MIGRATION_DATABASE_URL"),
+                    reason="requires the isolated PostgreSQL migration test service")
+def test_clone_snapshot_reuses_imported_historical_namespace_as_frozen(tmp_path,monkeypatch):
+    import sqlite3
+    from intelligence import sqlite_import
+
+    state_root=tmp_path/"state"
+    historical_dir=state_root/"historical-events"
+    historical_dir.mkdir(parents=True)
+    monkeypatch.setenv("INTELLIGENCE_STATE_DIR",str(state_root))
+    signature="a"*64
+    historical_path=historical_dir/f"{signature}.sqlite3"
+    with sqlite3.connect(historical_path) as legacy:
+        legacy.execute("CREATE TABLE events (tenant_id TEXT NOT NULL,event_id TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(tenant_id,event_id))")
+        legacy.execute("INSERT INTO events VALUES (?,?,?)",("tenant-imported-history","event-frozen","2026-10-25T00:00:00Z"))
+    sqlite_import.import_database(historical_path,"events",historical_path,confirm_quiesced=True)
+
+    current=EventStore(state_root/"events.sqlite3")
+    current.ingest(publication(tenant="tenant-imported-history",uri="https://news.example/current",
+        document_revision_ref="doc-current:1",content="Текущая версия."))
+    historical=EventStore(historical_path)
+    reused=current.clone_snapshot(historical.namespace,"tenant-imported-history")
+    with reused._connect() as db:
+        event_ids=[row[0] for row in db.execute("SELECT event_id FROM events WHERE tenant_id=%s ORDER BY event_id",
+            ("tenant-imported-history",)).fetchall()]
+        marker=db.execute("SELECT snapshot_hash FROM snapshot_markers WHERE tenant_id=%s",
+            ("tenant-imported-history",)).fetchone()
+    assert event_ids==["event-frozen"]
+    assert marker and marker["snapshot_hash"]
+    current.ingest(publication(tenant="tenant-imported-history",uri="https://news.example/current-2",
+        document_revision_ref="doc-current:2",content="Ещё более новая версия."))
+    reused_again=current.clone_snapshot(historical.namespace,"tenant-imported-history")
+    with reused_again._connect() as db:
+        event_ids=[row[0] for row in db.execute("SELECT event_id FROM events WHERE tenant_id=%s ORDER BY event_id",
+            ("tenant-imported-history",)).fetchall()]
+    assert event_ids==["event-frozen"]
 
 
 def test_allowed_document_revision_refs_scope_package_and_original_reads(store):

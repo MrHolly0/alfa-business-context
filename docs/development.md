@@ -4,9 +4,13 @@
 
 ## Python
 
-Из `apps/intelligence` с Python 3.12+ и установленным uv:
+Нужны Python 3.12+, uv и отдельная PostgreSQL для AI/Data. Из корня:
 
 ```sh
+docker compose --profile database up -d --wait postgres
+docker compose --profile database run --build --rm intelligence-migrate
+cd apps/intelligence
+export INTELLIGENCE_DATABASE_URL='postgresql://intelligence_app:local-ai-only@127.0.0.1:55483/business_context_ai'
 uv sync --frozen
 uv run --frozen python -m intelligence --help
 uv run --frozen python -m intelligence demo-data --state-dir /tmp/alfa-demo-data
@@ -16,12 +20,33 @@ uv run --frozen python -m intelligence prepare-description --input examples/desc
   --output /tmp/description-proposal.json
 uv run --frozen python -m intelligence run-task --mode baseline \
   --input examples/data-task.json --state-dir /tmp/alfa-data-task
-uv run --frozen python -m pytest -q -p no:cacheprovider tests
 ```
 
 `demo-data` запускает локальную синтетическую фикстуру без HTTP и LLM. `run-task` выполняет разрешённый `ai-data-task-v1` напрямую и не проверяет Core queue/lease/publication lifecycle. Baseline не делает внешние model calls. Результат оценивает структуру/сценарий; качество на неизвестных реальных банковских данных этим не подтверждается.
 
 `prepare-description` возвращает детерминированное предложение, не меняя канонический профиль Core. `demo-personalization` сравнивает три синтетические компании на одинаковых событиях. Его приоритеты — поисковые эвристики, не вероятности. Ограничения и способы читать результаты описаны в [персонализации](personalization.md).
+
+### PostgreSQL для локальной разработки и тестов
+
+Обычные CLI/API/worker команды хранят рабочее состояние в PostgreSQL. Настроить локальный основной database profile можно так:
+
+```sh
+docker compose --profile database up -d --wait postgres
+docker compose --profile database run --build --rm intelligence-migrate
+```
+
+Хостовому процессу нужны `INTELLIGENCE_DATABASE_URL` с ролью приложения и `INTELLIGENCE_MIGRATION_DATABASE_URL` для миграций. Не передавайте миграционную роль API или worker. DSN и команды `db migrate`, `db check`, `db import-sqlite` описаны в [руководстве PostgreSQL](postgresql.md). `--state-dir` остаётся логическим корнем путей/namespaces и private файлов, а рабочие таблицы Intelligence живут в PostgreSQL.
+
+Тесты используют отдельную базу `business_context_ai_test`:
+
+```sh
+docker compose --profile test up -d --wait postgres
+docker compose --profile test run --build --rm intelligence-test-migrate
+cd apps/intelligence
+INTELLIGENCE_DATABASE_URL='postgresql://intelligence_app:local-ai-only@127.0.0.1:55483/business_context_ai_test' \
+INTELLIGENCE_MIGRATION_DATABASE_URL='postgresql://intelligence_migrator:local-migration-only@127.0.0.1:55483/business_context_ai_test' \
+  uv run --frozen python -m pytest -q -p no:cacheprovider tests
+```
 
 ### Fixture job stand
 
@@ -34,7 +59,7 @@ uv run --frozen python -m intelligence core-stand --fixture-mode \
 
 Для проверки автоматической постановки можно добавить `--auto-optimization-policy examples/auto-optimization-policy.json`. Пример разрешает только одну optimize-задачу с отдельным резервом $0.01; исполнение модели требует явно настроенного worker в модельном режиме. По умолчанию политики нет, intent остаётся `skipped_budget`.
 
-Это явный SQLite-backed stand на loopback, не PHP Core и не production job owner. Он создаёт локальный тестовый service token для fixture; пользовательские права, UI, SSE, публикация и PHP бизнес-таблицы здесь не реализованы.
+Это явный SQLite-backed stand на loopback, не PHP Core и не production job owner. Он создаёт локальный тестовый service token для fixture; пользовательские права, UI, SSE, публикация и PHP бизнес-таблицы здесь не реализованы. SQLite используется самим stand; worker и рабочие данные Intelligence используют PostgreSQL.
 
 Чтобы worker подключился к stand, задайте ему адрес и локальный тестовый token, показанный stand, а затем выполните:
 

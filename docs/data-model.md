@@ -1,6 +1,8 @@
 # Модель данных и владение
 
-Это целевая модель из product v3, а не схема текущей базы. Сегодня Python сохраняет локальные corpus/workflow/source polling данные в SQLite и raw blobs в private state; production Core/PostgreSQL и PHP user API в Compose не подключены. Core и AI могут использовать один PostgreSQL-кластер с раздельными schemas/roles, но данные принадлежат одному приложению. Межсервисных SQL joins/FKs и записи в чужие таблицы нет. Идентификаторы между сервисами — opaque strings; каждый JSON/API contract несёт версии и scope. Core остаётся источником истины по доступу, user actions, jobs и опубликованным оценкам.
+Core schema ниже — целевая модель product v3, а не установленная здесь PHP-схема. Python Intelligence уже использует отдельную PostgreSQL-базу `business_context_ai`; фактическая PHP реализация Core и его production user API в репозитории не поставляются. Core и AI остаются разными владельцами данных: межсервисных SQL joins/FKs и записи в чужие таблицы нет. Идентификаторы между сервисами — opaque strings; каждый JSON/API contract несёт версии и scope. Core остаётся источником истины по доступу, user actions, jobs и опубликованным оценкам.
+
+PostgreSQL хранилище Python развертывается миграциями в schemas `ai_corpus`, `ai_collection`, `ai_analysts`, `ai_company_analysts`, `ai_events`, `ai_tournaments`, `ai_budget`, `ai_artifacts` и `ai_workflow`. Все таблицы используют `store_key` и Row-Level Security. Документная метаинформация, ревизии, evidence и состояния workflow живут в PostgreSQL; оригинальные байты и raw receipts хранятся в файловом volume, а БД содержит refs и hashes. Исторический SQLite поддерживается только как read-only источник управляемого импорта и для fixture-only Core Stand. Подключение и роли описаны в [руководстве PostgreSQL](postgresql.md).
 
 ## Core schema — Symfony владеет
 
@@ -24,6 +26,8 @@
 | `audit_record` | `tenant_id`, `actor`, `action`, `object_ref`, `request_id`, `before/after_revision`, `at` | Кто и каким правом изменил объект; не полный Event Sourcing. |
 
 ## AI schema — Python владеет
+
+Таблица ниже описывает логические сущности AI, а не имена миграционных таблиц один к одному. AI PostgreSQL выделен в отдельную базу и не становится частью Core schema.
 
 | Сущность | Основные поля | Назначение |
 |---|---|---|

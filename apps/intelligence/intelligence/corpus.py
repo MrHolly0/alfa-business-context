@@ -5,40 +5,14 @@ import hashlib
 import base64
 import json
 import re
-import sqlite3
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from contextlib import contextmanager
 from typing import Any
 
 from .parsers import parse_content
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS documents (
-  document_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, source_id TEXT NOT NULL,
-  source_role TEXT NOT NULL, canonical_uri TEXT NOT NULL, title TEXT NOT NULL,
-  publisher TEXT NOT NULL, language TEXT NOT NULL, synthetic INTEGER NOT NULL,
-  created_at TEXT NOT NULL, UNIQUE(tenant_id, source_id, canonical_uri)
-);
-CREATE TABLE IF NOT EXISTS revisions (
-  document_revision_ref TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(document_id),
-  revision INTEGER NOT NULL, content_hash TEXT NOT NULL, title TEXT NOT NULL, published_at TEXT NOT NULL,
-  fetched_at TEXT NOT NULL, content_type TEXT NOT NULL, extracted_text TEXT NOT NULL,
-  warnings TEXT NOT NULL, publisher TEXT NOT NULL DEFAULT '', language TEXT NOT NULL DEFAULT 'ru',
-  UNIQUE(document_id, revision)
-);
-CREATE INDEX IF NOT EXISTS revisions_lookup ON revisions(document_id, fetched_at, revision);
-CREATE INDEX IF NOT EXISTS revisions_hash ON revisions(content_hash);
-CREATE TABLE IF NOT EXISTS evidence (
-  evidence_id TEXT PRIMARY KEY, document_revision_ref TEXT NOT NULL REFERENCES revisions(document_revision_ref),
-  ordinal INTEGER NOT NULL, locator TEXT NOT NULL, quote TEXT NOT NULL, content_hash TEXT NOT NULL,
-  UNIQUE(document_revision_ref, ordinal)
-);
-CREATE INDEX IF NOT EXISTS evidence_revision ON evidence(document_revision_ref);
-"""
-
+from .storage import Database
 
 def _aware(value: Any, field: str) -> str:
     if not isinstance(value, str):
@@ -97,40 +71,10 @@ class CorpusStore:
     def __init__(self, path: str | Path, *, clock=None):
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.path = str(path)
-        if self.path == ":memory:":
-            raise ValueError("CorpusStore requires a persistent SQLite path")
-        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as db:
-            db.executescript(SCHEMA)
-            # Serialize schema inspection and additive migration. Each initializer
-            # re-reads columns only after acquiring the write lock.
-            db.execute("CREATE TABLE IF NOT EXISTS document_provenance(document_revision_ref TEXT PRIMARY KEY, author TEXT NOT NULL, event_time TEXT, received_at TEXT NOT NULL, raw_sha256 TEXT NOT NULL)")
-            db.execute("BEGIN IMMEDIATE")
-            provenance_columns={row[1] for row in db.execute("PRAGMA table_info(document_provenance)")}
-            if "data_classification" not in provenance_columns:
-                db.execute("ALTER TABLE document_provenance ADD COLUMN data_classification TEXT NOT NULL DEFAULT 'confidential'")
-                db.execute("UPDATE document_provenance SET data_classification='synthetic' WHERE document_revision_ref IN (SELECT r.document_revision_ref FROM revisions r JOIN documents d USING(document_id) WHERE d.synthetic=1)")
-            revision_columns = {row[1] for row in db.execute("PRAGMA table_info(revisions)")}
-            if "publisher" not in revision_columns:
-                db.execute("ALTER TABLE revisions ADD COLUMN publisher TEXT NOT NULL DEFAULT ''")
-                db.execute("UPDATE revisions SET publisher=(SELECT publisher FROM documents WHERE documents.document_id=revisions.document_id)")
-            if "language" not in revision_columns:
-                db.execute("ALTER TABLE revisions ADD COLUMN language TEXT NOT NULL DEFAULT 'ru'")
-                db.execute("UPDATE revisions SET language=(SELECT language FROM documents WHERE documents.document_id=revisions.document_id)")
+        self.database = Database("corpus", path)
 
-    @contextmanager
     def _connect(self):
-        conn = sqlite3.connect(self.path, timeout=10)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys=ON")
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+        return self.database.connection()
 
     def ingest(self, document: dict) -> dict:
         required = ("tenant_id", "source_id", "source_role", "canonical_uri", "title", "content", "content_type", "published_at", "fetched_at", "synthetic")
@@ -184,33 +128,54 @@ class CorpusStore:
         language = str(document.get("language", "ru"))
         now = fetched_at
         with self._connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT * FROM documents WHERE tenant_id=? AND source_id=? AND canonical_uri=?", (tenant_id, source_id, canonical_uri)).fetchone()
+            db.lock(key="write")
+            row = db.execute("SELECT * FROM ai_corpus.documents WHERE tenant_id=%s AND source_id=%s AND canonical_uri=%s", (tenant_id, source_id, canonical_uri)).fetchone()
             if row:
                 if row["source_role"] != source_role or bool(row["synthetic"]) != document["synthetic"]:
                     raise ValueError("source_role and synthetic are immutable for a canonical URI")
                 doc_id = row["document_id"]
             else:
                 doc_id = "doc_" + _hash("\0".join((tenant_id, source_id, canonical_uri)))[:32]
-                db.execute("INSERT INTO documents VALUES(?,?,?,?,?,?,?,?,?,?)", (doc_id, tenant_id, source_id, source_role, canonical_uri, title, str(document.get("publisher", "")), str(document.get("language", "ru")), int(bool(document["synthetic"])), now))
-            previous = db.execute("SELECT revision, content_hash, title, published_at, fetched_at, content_type, publisher, language, (SELECT p.data_classification FROM document_provenance p WHERE p.document_revision_ref=revisions.document_revision_ref) AS data_classification FROM revisions WHERE document_id=? ORDER BY revision DESC LIMIT 1", (doc_id,)).fetchone()
+                db.execute("""INSERT INTO ai_corpus.documents
+                    (document_id,tenant_id,source_id,source_role,canonical_uri,title,publisher,language,synthetic,created_at)
+                    VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT(store_key,tenant_id,source_id,canonical_uri) DO NOTHING""",
+                    (doc_id, tenant_id, source_id, source_role, canonical_uri, title,
+                     str(document.get("publisher", "")), str(document.get("language", "ru")), int(bool(document["synthetic"])), now))
+            previous = db.execute("""SELECT revision, content_hash, title, published_at, fetched_at, content_type, publisher, language,
+                    (SELECT p.data_classification FROM ai_corpus.document_provenance p
+                     WHERE p.document_revision_ref=ai_corpus.revisions.document_revision_ref) AS data_classification
+                    FROM ai_corpus.revisions WHERE document_id=%s ORDER BY revision DESC LIMIT 1""", (doc_id,)).fetchone()
             if previous and (previous["content_hash"], previous["title"], previous["published_at"], previous["content_type"], previous["publisher"], previous["language"],previous["data_classification"]) == (content_hash, title, published_at, content_type, publisher, language,"synthetic" if document["synthetic"] else document.get("data_classification","confidential")):
                 ref = f"{doc_id}:{previous['revision']}"
-                duplicate = db.execute("SELECT d.document_id FROM revisions r JOIN documents d USING(document_id) WHERE r.content_hash=? AND d.document_id<>? AND d.tenant_id=? AND d.source_role=? ORDER BY r.fetched_at,d.document_id LIMIT 1", (content_hash, doc_id, tenant_id, source_role)).fetchone()
+                duplicate = db.execute("""SELECT d.document_id FROM ai_corpus.revisions r
+                    JOIN ai_corpus.documents d USING(store_key,document_id)
+                    WHERE r.content_hash=%s AND d.document_id<>%s AND d.tenant_id=%s AND d.source_role=%s
+                    ORDER BY r.fetched_at,d.document_id LIMIT 1""", (content_hash, doc_id, tenant_id, source_role)).fetchone()
                 self._save_original(document, ref, db)
-                return {"document_id": doc_id, "revision": previous["revision"], "document_revision_ref": ref, "content_hash": content_hash, "duplicate_of": duplicate["document_id"] if duplicate else None, "evidence_count": db.execute("SELECT count(*) FROM evidence WHERE document_revision_ref=?", (ref,)).fetchone()[0], "parse_warnings": list(parsed.warnings), "synthetic": bool(document["synthetic"])}
+                return {"document_id": doc_id, "revision": previous["revision"], "document_revision_ref": ref, "content_hash": content_hash, "duplicate_of": duplicate["document_id"] if duplicate else None, "evidence_count": db.execute("SELECT count(*) FROM ai_corpus.evidence WHERE document_revision_ref=%s", (ref,)).fetchone()[0], "parse_warnings": list(parsed.warnings), "synthetic": bool(document["synthetic"])}
             revision = (previous["revision"] + 1) if previous else 1
             ref = f"{doc_id}:{revision}"
             if previous and fetched_at <= previous["fetched_at"]:
                 prior_known_at = datetime.fromisoformat(previous["fetched_at"].replace("Z", "+00:00"))
                 fetched_at = (prior_known_at + timedelta(microseconds=1)).astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
-            duplicate = db.execute("SELECT d.document_id FROM revisions r JOIN documents d USING(document_id) WHERE r.content_hash=? AND d.document_id<>? AND d.tenant_id=? AND d.source_role=? ORDER BY r.fetched_at,d.document_id LIMIT 1", (content_hash, doc_id, tenant_id, source_role)).fetchone()
-            db.execute("INSERT INTO revisions(document_revision_ref,document_id,revision,content_hash,title,published_at,fetched_at,content_type,extracted_text,warnings,publisher,language) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (ref, doc_id, revision, content_hash, title, published_at, fetched_at, content_type, extracted, json.dumps(parsed.warnings), publisher, language))
+            duplicate = db.execute("""SELECT d.document_id FROM ai_corpus.revisions r
+                JOIN ai_corpus.documents d USING(store_key,document_id)
+                WHERE r.content_hash=%s AND d.document_id<>%s AND d.tenant_id=%s AND d.source_role=%s
+                ORDER BY r.fetched_at,d.document_id LIMIT 1""", (content_hash, doc_id, tenant_id, source_role)).fetchone()
+            db.execute("""INSERT INTO ai_corpus.revisions
+                (document_revision_ref,document_id,revision,content_hash,title,published_at,fetched_at,content_type,extracted_text,warnings,publisher,language)
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (ref, doc_id, revision, content_hash, title, published_at, fetched_at, content_type, extracted, json.dumps(parsed.warnings), publisher, language))
             self._save_original(document, ref, db)
             for ordinal, (locator, quote) in enumerate(_chunks(extracted)):
                 evidence_id = "ev_" + _hash(f"{ref}\0{ordinal}\0{quote}")[:40]
-                db.execute("INSERT INTO evidence VALUES(?,?,?,?,?,?)", (evidence_id, ref, ordinal, locator, quote, _hash(quote)))
-            count = db.execute("SELECT count(*) FROM evidence WHERE document_revision_ref=?", (ref,)).fetchone()[0]
+                db.execute("""INSERT INTO ai_corpus.evidence
+                    (evidence_id,document_revision_ref,ordinal,locator,quote,content_hash)
+                    VALUES(%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT(store_key,document_revision_ref,ordinal) DO NOTHING""",
+                    (evidence_id, ref, ordinal, locator, quote, _hash(quote)))
+            count = db.execute("SELECT count(*) FROM ai_corpus.evidence WHERE document_revision_ref=%s", (ref,)).fetchone()[0]
         return {"document_id": doc_id, "revision": revision, "document_revision_ref": ref, "content_hash": content_hash, "duplicate_of": duplicate["document_id"] if duplicate else None, "evidence_count": count, "parse_warnings": list(parsed.warnings), "synthetic": bool(document["synthetic"])}
 
     def search(self, *, tenant_id: str, source_ids: list[str], as_of: str, query: str, document_revision_refs: list[str] | None = None, role: str | None = None, limit: int = 8) -> list[dict]:
@@ -228,21 +193,23 @@ class CorpusStore:
         terms = list(dict.fromkeys(_tokens(query)))
         if not terms:
             return []
-        placeholders = ",".join("?" for _ in source_ids)
+        placeholders = ",".join("%s" for _ in source_ids)
         params: list[Any] = [tenant_id, *source_ids, as_of_value, as_of_value]
         sql = f"""SELECT e.*, d.document_id,d.tenant_id,d.source_id,d.source_role,r.title,r.publisher,r.language,d.canonical_uri,d.synthetic,
                          r.revision,r.document_revision_ref,r.published_at,r.fetched_at,p.author,p.event_time,p.received_at,p.raw_sha256,p.data_classification
-                  FROM evidence e JOIN revisions r USING(document_revision_ref) JOIN documents d USING(document_id) LEFT JOIN document_provenance p USING(document_revision_ref)
-                  WHERE d.tenant_id=? AND d.source_id IN ({placeholders}) AND d.source_role IN ('external','bank')
-                    AND r.fetched_at<=? AND r.published_at<=?"""
+                  FROM ai_corpus.evidence e JOIN ai_corpus.revisions r USING(store_key,document_revision_ref)
+                  JOIN ai_corpus.documents d USING(store_key,document_id)
+                  LEFT JOIN ai_corpus.document_provenance p USING(store_key,document_revision_ref)
+                  WHERE d.tenant_id=%s AND d.source_id IN ({placeholders}) AND d.source_role IN ('external','bank')
+                    AND r.fetched_at<=%s AND r.published_at<=%s"""
         if role:
-            sql += " AND d.source_role=?"
+            sql += " AND d.source_role=%s"
             params.append(role)
         if document_revision_refs is not None and (not isinstance(document_revision_refs, list) or len(document_revision_refs) > 500 or any(not isinstance(ref, str) or not ref or len(ref) > 512 for ref in document_revision_refs)):
             raise ValueError("document_revision_refs must be a list of non-empty strings")
         refs = list(dict.fromkeys(document_revision_refs or []))
         if refs:
-            sql += " AND r.document_revision_ref IN (" + ",".join("?" for _ in refs) + ")"
+            sql += " AND r.document_revision_ref IN (" + ",".join("%s" for _ in refs) + ")"
             params.extend(refs)
         with self._connect() as db:
             rows = db.execute(sql, params).fetchall()
@@ -252,10 +219,10 @@ class CorpusStore:
             # that revision produced no chunks; otherwise stale evidence could leak.
             with self._connect() as db:
                 latest_rows = db.execute(
-                    f"SELECT d.document_id, MAX(r.revision) AS revision FROM documents d "
-                    f"JOIN revisions r USING(document_id) WHERE d.tenant_id=? "
-                    f"AND d.source_id IN ({placeholders}) AND r.fetched_at<=? AND r.published_at<=? "
-                    + ("AND d.source_role=? " if role else "") + f"GROUP BY d.document_id",
+                    f"SELECT d.document_id, MAX(r.revision) AS revision FROM ai_corpus.documents d "
+                    f"JOIN ai_corpus.revisions r USING(store_key,document_id) WHERE d.tenant_id=%s "
+                    f"AND d.source_id IN ({placeholders}) AND r.fetched_at<=%s AND r.published_at<=%s "
+                    + ("AND d.source_role=%s " if role else "") + f"GROUP BY d.document_id",
                     [tenant_id, *source_ids, as_of_value, as_of_value] + ([role] if role else [])
                 ).fetchall()
             latest = {row["document_id"]: row["revision"] for row in latest_rows}
@@ -273,7 +240,7 @@ class CorpusStore:
             scored.append((score, row))
         # Exact reprints form one ranking group, so they cannot crowd the result by repetition.
         scored.sort(key=lambda pair: (-pair[0], pair[1]["fetched_at"], pair[1]["evidence_id"]))
-        selected: list[tuple[float, sqlite3.Row]] = []
+        selected: list[tuple[float, Any]] = []
         seen_content: set[tuple[str, str]] = set()
         for score, row in scored:
             dedup_key = (row["content_hash"], row["quote"] )
@@ -286,7 +253,7 @@ class CorpusStore:
         return [self._result(row, score) for score, row in selected]
 
     @staticmethod
-    def _result(row: sqlite3.Row, score: float) -> dict:
+    def _result(row: Any, score: float) -> dict:
         return {"evidence_id": row["evidence_id"], "document_id": row["document_id"], "document_revision_ref": row["document_revision_ref"], "source_id": row["source_id"], "source_role": row["source_role"], "title": row["title"], "canonical_uri": row["canonical_uri"], "published_at": row["published_at"], "fetched_at": row["fetched_at"], "locator": row["locator"], "quote": row["quote"][:1000], "content_hash": row["content_hash"], "synthetic": bool(row["synthetic"]), "score": float(score), "author":row["author"] or "", "event_time":row["event_time"], "received_at":row["received_at"], "raw_sha256":row["raw_sha256"],"data_classification":row["data_classification"] or "confidential"}
 
     def get_evidence(self, *, tenant_id: str, source_ids: list[str], as_of: str, evidence_id: str) -> dict | None:
@@ -297,14 +264,16 @@ class CorpusStore:
             raise ValueError("tenant_id/source_ids must be bounded non-empty strings (up to 500 sources)")
         if not source_ids:
             return None
-        marks = ",".join("?" for _ in source_ids)
+        marks = ",".join("%s" for _ in source_ids)
         with self._connect() as db:
             row = db.execute(f"""SELECT e.*,d.document_id,d.tenant_id,d.source_id,d.source_role,r.title,r.publisher,r.language,d.canonical_uri,d.synthetic,
                                       r.revision,r.document_revision_ref,r.published_at,r.fetched_at,p.author,p.event_time,p.received_at,p.raw_sha256,p.data_classification
-                               FROM evidence e JOIN revisions r USING(document_revision_ref) JOIN documents d USING(document_id) LEFT JOIN document_provenance p USING(document_revision_ref)
-                               WHERE e.evidence_id=? AND d.tenant_id=? AND d.source_id IN ({marks})
-                                 AND r.fetched_at<=? AND r.published_at<=?
-                                 AND r.revision=(SELECT MAX(r2.revision) FROM revisions r2 WHERE r2.document_id=d.document_id AND r2.fetched_at<=? AND r2.published_at<=?)""", (evidence_id, tenant_id, *source_ids, as_of_value, as_of_value, as_of_value, as_of_value)).fetchone()
+                               FROM ai_corpus.evidence e JOIN ai_corpus.revisions r USING(store_key,document_revision_ref)
+                               JOIN ai_corpus.documents d USING(store_key,document_id)
+                               LEFT JOIN ai_corpus.document_provenance p USING(store_key,document_revision_ref)
+                               WHERE e.evidence_id=%s AND d.tenant_id=%s AND d.source_id IN ({marks})
+                                 AND r.fetched_at<=%s AND r.published_at<=%s
+                                 AND r.revision=(SELECT MAX(r2.revision) FROM ai_corpus.revisions r2 WHERE r2.store_key=d.store_key AND r2.document_id=d.document_id AND r2.fetched_at<=%s AND r2.published_at<=%s)""", (evidence_id, tenant_id, *source_ids, as_of_value, as_of_value, as_of_value, as_of_value)).fetchone()
         if row is None:
             return None
         return self._result(row, 0.0)
@@ -338,19 +307,22 @@ class CorpusStore:
         if event_time: event_time = _aware(event_time, "event_time")
         classification="synthetic" if document["synthetic"] else document.get("data_classification","confidential")
         if classification not in {"public","synthetic","confidential"}: raise ValueError("invalid_data_classification")
-        db.execute("INSERT OR IGNORE INTO document_provenance(document_revision_ref,author,event_time,received_at,raw_sha256,data_classification) VALUES(?,?,?,?,?,?)", (ref, str(document.get("author", "")), event_time,
+        db.execute("""INSERT INTO ai_corpus.document_provenance
+            (document_revision_ref,author,event_time,received_at,raw_sha256,data_classification)
+            VALUES(%s,%s,%s,%s,%s,%s)
+            ON CONFLICT(store_key,document_revision_ref) DO NOTHING""", (ref, str(document.get("author", "")), event_time,
             self.clock().isoformat(), digest, classification))
 
     def list_documents(self, *, tenant_id, source_ids, as_of, policy=None, as_known=False):
         """Latest eligible versions, with policy exclusions applied before retrieval."""
         if not source_ids: return []
         instant = _aware(as_of, "as_of")
-        marks = ",".join("?" for _ in source_ids)
+        marks = ",".join("%s" for _ in source_ids)
         with self._connect() as db:
             rows = db.execute(f"""SELECT d.*,r.*,p.author,p.event_time,p.received_at,p.raw_sha256,p.data_classification
-                FROM documents d JOIN revisions r USING(document_id)
-                LEFT JOIN document_provenance p USING(document_revision_ref)
-                WHERE d.tenant_id=? AND d.source_id IN ({marks}) AND r.published_at<=? AND r.fetched_at<=?
+                FROM ai_corpus.documents d JOIN ai_corpus.revisions r USING(store_key,document_id)
+                LEFT JOIN ai_corpus.document_provenance p USING(store_key,document_revision_ref)
+                WHERE d.tenant_id=%s AND d.source_id IN ({marks}) AND r.published_at<=%s AND r.fetched_at<=%s
                 ORDER BY d.document_id,r.revision DESC""", (tenant_id,*source_ids,instant,instant)).fetchall()
         selected = {}
         cutoff = datetime.fromisoformat(instant.replace("Z", "+00:00"))

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import fcntl
 from decimal import Decimal
 from typing import Any, Literal, Mapping, Sequence
 from uuid import uuid4
@@ -44,16 +43,15 @@ class ExperimentLLM:
             raise ValueError("max_output_tokens is outside provider limit")
         estimate_text_tokens(messages)
         reserve = self.service.pricing.estimate(max_input_tokens, output_cap)
-        # Lock only the persisted count+reserve step so separate instances/processes
-        # cannot all pass the maximum-call check at once.
-        lock_path = self.ledger.path + ".experiment.lock"
-        with open(lock_path, "a+b") as lock_file:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-            state = self.ledger.summary(self.scope, self.currency)
-            if state["reservation_count"] >= self.max_calls:
-                raise ValueError("experiment maximum call count reached for this budget period")
-            reservation = self.ledger.reserve(self.scope, self.currency, self.daily_limit, reserve, request_id=str(uuid4()))
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        # The ledger reserves both monetary budget and the shared call ceiling
+        # atomically; no filesystem lock or DB transaction spans the request.
+        try:
+            reservation = self.ledger.reserve(self.scope, self.currency, self.daily_limit, reserve,
+                request_id=str(uuid4()), max_calls=self.max_calls)
+        except BudgetError as exc:
+            if "call limit" in str(exc):
+                raise ValueError("experiment maximum call count reached for this budget period") from None
+            raise
         try:
             result = self.service.complete(messages, max_input_tokens=max_input_tokens, max_output_tokens=max_output_tokens, json_mode=json_mode)
         except Exception as exc:

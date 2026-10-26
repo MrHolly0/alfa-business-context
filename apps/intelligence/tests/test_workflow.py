@@ -437,7 +437,10 @@ def test_onboarding_stores_private_company_configuration(tmp_path):
     assert result.configurations[0]["config_ref"]
     assert result.candidates == []
     private_path = instance.company_dir("tenant-a", "транссевер") / "company-analysts.sqlite3"
-    assert private_path.exists()
+    from intelligence.analysts import CompanyAnalystStore
+    saved=CompanyAnalystStore(private_path,instance.registry).get('tenant-a','транссевер')
+    assert saved['config_ref']==result.configurations[0]['config_ref']
+    assert not private_path.exists()  # this path is a logical PG identity, never a new SQLite file
 
 
 def test_event_and_candidate_are_never_visible_to_another_tenant(tmp_path):

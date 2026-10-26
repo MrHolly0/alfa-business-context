@@ -2,6 +2,8 @@
 
 Эта инструкция описывает границы интеграции для backend-команды. Symfony остается владельцем пользовательского запроса, авторизации, канонического профиля и бизнес-очереди. Python Intelligence исполняет ограниченную задачу по неизменяемому снимку. Контрактные JSON-примеры лежат в `apps/intelligence/examples/symfony/`.
 
+Рабочее состояние Python Intelligence хранится в отдельной PostgreSQL-базе `business_context_ai`, с отдельными app/migration roles и scoped `store_key`/RLS. Это внутреннее изменение persistence: поля `ai-job-v1`, `ai-result-v1`, HTTP-маршруты Worker и Core не меняются из-за перехода на PostgreSQL. Canonical profile, queue, budget allocation и publication по-прежнему принадлежат Symfony/Core; общих AI/Core SQL-таблиц нет. Локальный SQLite Core Stand остаётся только fixture. См. [роли, миграции и окружения](postgresql.md).
+
 ## Поток данных
 
 1. **Сохранение компании.** Symfony проверяет право пользователя менять компанию, сохраняет исходное описание и увеличивает `context_version`. Сохраняйте tenant/company scope, время `as_of`, классификацию и происхождение ввода. При первом заполнении вызовите `POST /internal/v1/company-context/from-description` с `DescriptionPrepareRequest` для быстрого детерминированного предложения либо поставьте `prepare_description` как обычный `ai-data-task-v1`, если разрешен настроенный генератор. Прямой HTTP endpoint не вызывает модель и не записывает канонический профиль; результат workflow-задачи является предложением в обычном result cache.
@@ -33,7 +35,7 @@ Symfony enqueue hook — бизнес-интеграция, а не Python API. 
 - **CAS и digest:** job привязан к версиям контекста, политики источников и конфигурации. Снимок, ожидаемая ревизия и содержимое защищены от подмены/устаревания. Передавайте новые версии новым job, не исправляйте payload уже выданной аренды.
 - **Idempotency:** `request_id` + тот же payload могут вернуть сохраненный результат; переиспользование ключа с другим digest дает conflict. Result с тем же digest для job может быть подтвержден как duplicate. Другое содержимое результата для уже принятой job — конфликт.
 - **409:** stale context/policy/config, generation mismatch или конфликт ключа означают, что надо получить актуальный снимок и создать новый job. Не отправляйте тот же устаревший результат снова. `401/403` требуют исправления credentials/scope; это не транспортная ошибка.
-- **Retry/quarantine:** Worker хранит точный envelope в локальном durable outbox и повторяет только ошибки доставки/неопределенный ACK с ограниченными попытками и backoff. Сверьте статус в Core при неизвестном ACK. После stale/authorization/conflict outbox quarantined; оператор исправляет причину или создает новую job. Не запускайте оплачиваемую работу повторно только из-за сетевого таймаута.
+- **Retry/quarantine:** Python хранит точный envelope в своём PostgreSQL artifacts outbox и повторяет только ошибки доставки/неопределенный ACK с ограниченными попытками и backoff. Сверьте статус job в Core при неизвестном ACK. После stale/authorization/conflict сообщение помещается в quarantine; оператор исправляет причину или создает новую job. Это не Core outbox и не очередь исполнения. Не запускайте оплачиваемую работу повторно только из-за сетевого таймаута.
 - **Cancel:** стандартный `CoreClient` не имеет публичного cancel вызова. В stand есть только fixture-admin cancel; это не пользовательский API. Symfony должен дать ACL-защищенный cancel Core hook, который помечает job отмененной, инвалидирует lease и не принимает поздний результат.
 
 ## Что подключить в продукте

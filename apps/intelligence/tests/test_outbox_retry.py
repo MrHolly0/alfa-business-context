@@ -1,10 +1,20 @@
 import sqlite3
 import threading
-from datetime import datetime, timedelta, timezone
 
 from intelligence.artifacts import ArtifactStore, canonical_json
+from intelligence.sqlite_import import import_database
 from intelligence.worker import Worker
 from test_worker_runtime import Core, job
+
+
+def _legacy_outbox(path, rows=()):
+    with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE outbox(message_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+        db.executemany("INSERT INTO outbox(message_id,job_id,payload) VALUES (?,?,?)", rows)
+
+
+def _import_legacy_outbox(path, store):
+    return import_database(path, "artifacts", store.path, confirm_quiesced=True)
 
 
 def test_unavailable_old_message_does_not_block_later_result_or_claim(tmp_path):
@@ -82,10 +92,10 @@ def test_exhausted_delivery_is_quarantined(tmp_path):
 def test_old_sqlite_outbox_migrates_without_changing_payload(tmp_path):
     path = tmp_path / "old.db"
     payload = {"message_id":"m", "tenant_scope":"tenant-a"}
-    with sqlite3.connect(path) as db:
-        db.execute("CREATE TABLE outbox(message_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
-        db.execute("INSERT INTO outbox(message_id,job_id,payload) VALUES (?,?,?)", ("m", "j", canonical_json(payload)))
+    _legacy_outbox(path, [("m", "j", canonical_json(payload))])
     store = ArtifactStore(path)
+    imported = _import_legacy_outbox(path, store)
+    assert imported["status"] == "imported"
     row = store.pending()[0]
     assert row["attempts"] == 0 and row["retry_deadline"] > 0
     assert row["payload"] == canonical_json(payload)
@@ -118,11 +128,11 @@ def test_parallel_workers_do_not_send_same_reserved_entry(tmp_path):
 
 
 def test_retry_deadline_moves_row_to_visible_quarantine(tmp_path):
-    path = tmp_path / "outbox.db"
-    store = ArtifactStore(path)
+    store = ArtifactStore(tmp_path / "outbox.db")
     store.enqueue("m1", "j1", {"message_id":"m1", "tenant_scope":"tenant-a"})
-    with sqlite3.connect(path) as db:
-        db.execute("UPDATE outbox SET retry_deadline=99 WHERE message_id='m1'")
+    with store._db() as db:
+        db.lock(key="write")
+        db.execute("UPDATE ai_artifacts.outbox SET retry_deadline=%s WHERE message_id=%s", (99, "m1"))
 
     class NoCall(Core):
         def __init__(self): super().__init__(None)
@@ -180,38 +190,43 @@ def test_expired_workers_cannot_overwrite_newer_claim(tmp_path):
     first = First()
     first_thread = threading.Thread(target=lambda:Worker(first,None,store,**opts).run_once())
     first_thread.start(); assert first_entered.wait(1)
-    with sqlite3.connect(store.path) as db:
-        stale_token = db.execute("SELECT claim_token FROM outbox WHERE message_id='m1'").fetchone()[0]
+    with store._db() as db:
+        stale_token = db.execute("SELECT claim_token FROM ai_artifacts.outbox WHERE message_id=%s", ("m1",)).fetchone()[0]
     now[0] = 161.0
     second = Second()
     second_thread = threading.Thread(target=lambda:Worker(second,None,store,**opts).run_once())
     second_thread.start(); assert second_entered.wait(1)
     active = store.pending()[0]
-    with sqlite3.connect(store.path) as db:
-        active_token, active_until = db.execute("SELECT claim_token,claim_until FROM outbox WHERE message_id='m1'").fetchone()
+    with store._db() as db:
+        active_token, active_until = db.execute(
+            "SELECT claim_token,claim_until FROM ai_artifacts.outbox WHERE message_id=%s", ("m1",)
+        ).fetchone()
     assert active_token != stale_token and active["attempts"] == 2
     release_first.set(); first_thread.join(1)
-    with sqlite3.connect(store.path) as db:
-        after_token, after_until = db.execute("SELECT claim_token,claim_until FROM outbox WHERE message_id='m1'").fetchone()
+    with store._db() as db:
+        after_token, after_until = db.execute(
+            "SELECT claim_token,claim_until FROM ai_artifacts.outbox WHERE message_id=%s", ("m1",)
+        ).fetchone()
     assert after_token == active_token
     assert after_until == active_until
     release_second.set(); second_thread.join(1)
     assert store.pending() == []
 
 
-def test_two_initializers_migrate_old_outbox_schema_safely(tmp_path):
+def test_two_concurrent_legacy_imports_and_initializers_are_idempotent(tmp_path):
     path = tmp_path / "old-concurrent.db"
-    with sqlite3.connect(path) as db:
-        db.execute("CREATE TABLE outbox(message_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
-        db.execute("INSERT INTO outbox(message_id,job_id,payload) VALUES ('m','j','{}')")
+    _legacy_outbox(path, [("m", "j", "{}")])
 
     stores = []
+    imports = []
     errors = []
     barrier = threading.Barrier(2)
     def initialize():
         try:
             barrier.wait(timeout=1)
-            stores.append(ArtifactStore(path))
+            store = ArtifactStore(path)
+            imports.append(_import_legacy_outbox(path, store))
+            stores.append(store)
         except Exception as exc:
             errors.append(exc)
     threads = [threading.Thread(target=initialize) for _ in range(2)]
@@ -219,7 +234,12 @@ def test_two_initializers_migrate_old_outbox_schema_safely(tmp_path):
     for thread in threads: thread.join(2)
     assert not errors
     assert len(stores) == 2
-    columns = {row[1] for row in sqlite3.connect(path).execute("PRAGMA table_info(outbox)")}
+    assert sorted(item["status"] for item in imports) == ["already_imported", "imported"]
+    with stores[0]._db() as db:
+        columns = {row["column_name"] for row in db.execute(
+            """SELECT column_name FROM information_schema.columns
+               WHERE table_schema='ai_artifacts' AND table_name='outbox'"""
+        )}
     assert {"attempts", "next_attempt_at", "retry_deadline", "claim_until", "claim_token", "last_error"} <= columns
     assert len(stores[0].pending()) == 1
 

@@ -14,7 +14,6 @@ import os
 import random
 import re
 import socket
-import sqlite3
 import ssl
 import urllib.parse
 import uuid
@@ -28,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from .corpus import CorpusStore
 from .parsers import parse_content
+from .storage import Database
 
 MAX_BODY_BYTES = 2_000_000
 MAX_RESPONSE_TEXT = 2_000_000
@@ -441,43 +441,13 @@ class NewsCollector:
     def __init__(self, store: CorpusStore, *, state_path: str | Path, fetcher: Any = None, raw_dir: str | Path | None = None):
         self.store = store
         self.state_path = str(state_path)
+        self.database = Database("collection", state_path)
         self.raw_dir = Path(raw_dir) if raw_dir is not None else Path(self.state_path).parent / "raw"
-        Path(self.state_path).parent.mkdir(parents=True, exist_ok=True)
         if self.raw_dir is not None:
             self.raw_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
             if os.name == "posix":
                 self.raw_dir.chmod(0o700)
         self.fetcher = fetcher or _PinnedHTTPSConnection.get
-        # Serialize additive schema migration across workers starting together.
-        with sqlite3.connect(self.state_path, timeout=10, isolation_level=None) as db:
-            db.execute("BEGIN IMMEDIATE")
-            try:
-                db.execute("""CREATE TABLE IF NOT EXISTS poll_state (
-              tenant_id TEXT NOT NULL, source_id TEXT NOT NULL, next_poll TEXT NOT NULL,
-              attempts INTEGER NOT NULL DEFAULT 0, etag TEXT, last_modified TEXT,
-              last_error TEXT, last_status INTEGER, lease_until TEXT, grant_fingerprint TEXT,
-              lease_generation INTEGER NOT NULL DEFAULT 0, lease_token TEXT,
-              PRIMARY KEY(tenant_id,source_id))""")
-                columns = {row[1] for row in db.execute("PRAGMA table_info(poll_state)")}
-                if "lease_until" not in columns:
-                    db.execute("ALTER TABLE poll_state ADD COLUMN lease_until TEXT")
-                if "grant_fingerprint" not in columns:
-                    db.execute("ALTER TABLE poll_state ADD COLUMN grant_fingerprint TEXT")
-                if "lease_generation" not in columns:
-                    db.execute("ALTER TABLE poll_state ADD COLUMN lease_generation INTEGER NOT NULL DEFAULT 0")
-                if "lease_token" not in columns:
-                    db.execute("ALTER TABLE poll_state ADD COLUMN lease_token TEXT")
-                db.execute("""CREATE TABLE IF NOT EXISTS raw_receipts (
-              tenant_id TEXT NOT NULL, source_id TEXT NOT NULL, canonical_uri TEXT NOT NULL,
-              raw_sha256 TEXT NOT NULL, raw_ref TEXT NOT NULL, content_type TEXT NOT NULL,
-              title TEXT, publisher TEXT, author TEXT, published_at TEXT, event_time TEXT,
-              language TEXT, document_revision_ref TEXT, fetched_at TEXT NOT NULL,
-              metadata_json TEXT NOT NULL,
-              PRIMARY KEY(tenant_id,source_id,canonical_uri,raw_sha256))""")
-                db.commit()
-            except Exception:
-                db.rollback()
-                raise
 
     @staticmethod
     def _check(checkpoint: Any, stage: str) -> None:
@@ -895,8 +865,18 @@ class NewsCollector:
 
     def _record_receipt(self, tenant_id: str, source_id: str, uri: str, raw_hash: str, raw_ref: str, content_type: str, info: dict[str, Any], revision_ref: str | None, fetched_at: datetime) -> None:
         metadata = {key: value for key, value in info.items() if key not in {"content", "preview_text"}}
-        with sqlite3.connect(self.state_path) as db:
-            db.execute("INSERT OR IGNORE INTO raw_receipts VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (tenant_id, source_id, uri, raw_hash, raw_ref, content_type, str(info.get("title") or "") or None, str(info.get("publisher") or "") or None, str(info.get("author") or "") or None, _iso(_aware(info.get("published_at"))), _iso(_aware(info.get("event_time"))), str(info.get("language") or "") or None, revision_ref, _iso(fetched_at), json.dumps(metadata, ensure_ascii=False, sort_keys=True, default=str)))
+        with self.database.connection() as db:
+            db.lock(key="write")
+            db.execute("""INSERT INTO ai_collection.raw_receipts
+                (tenant_id,source_id,canonical_uri,raw_sha256,raw_ref,content_type,title,publisher,author,
+                 published_at,event_time,language,document_revision_ref,fetched_at,metadata_json)
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT(store_key,tenant_id,source_id,canonical_uri,raw_sha256) DO NOTHING""",
+                (tenant_id, source_id, uri, raw_hash, raw_ref, content_type,
+                 str(info.get("title") or "") or None, str(info.get("publisher") or "") or None,
+                 str(info.get("author") or "") or None, _iso(_aware(info.get("published_at"))),
+                 _iso(_aware(info.get("event_time"))), str(info.get("language") or "") or None,
+                 revision_ref, _iso(fetched_at), json.dumps(metadata, ensure_ascii=False, sort_keys=True, default=str)))
 
     def _save_raw(self, tenant_id: str, digest: str, body: bytes) -> str:
         if self.raw_dir is None:
@@ -926,9 +906,11 @@ class NewsCollector:
         return str(target)
 
     def _state(self, tenant_id: str, source_id: str) -> dict[str, Any] | None:
-        with sqlite3.connect(self.state_path) as db:
-            row = db.execute("SELECT next_poll,attempts,etag,last_modified,last_error,last_status,lease_until,grant_fingerprint,lease_generation,lease_token FROM poll_state WHERE tenant_id=? AND source_id=?", (tenant_id, source_id)).fetchone()
-        return dict(zip(("next_poll", "attempts", "etag", "last_modified", "last_error", "last_status", "lease_until", "grant_fingerprint", "lease_generation", "lease_token"), row)) if row else None
+        with self.database.connection() as db:
+            row = db.execute("""SELECT next_poll,attempts,etag,last_modified,last_error,last_status,
+                lease_until,grant_fingerprint,lease_generation,lease_token FROM ai_collection.poll_state
+                WHERE tenant_id=%s AND source_id=%s""", (tenant_id, source_id)).fetchone()
+        return dict(row) if row else None
 
     @staticmethod
     def _grant_fingerprint(source: SourceGrant) -> str:
@@ -940,36 +922,35 @@ class NewsCollector:
     def _claim_poll(self, tenant_id: str, source: SourceGrant, now: datetime, *, force: bool) -> tuple[dict[str, Any] | None, str | None]:
         """Atomically reserve a source poll across processes before any network I/O."""
         fingerprint = self._grant_fingerprint(source)
-        with sqlite3.connect(self.state_path, timeout=10, isolation_level=None) as db:
-            db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT next_poll,attempts,etag,last_modified,last_error,last_status,lease_until,grant_fingerprint,lease_generation,lease_token FROM poll_state WHERE tenant_id=? AND source_id=?", (tenant_id, source.source_id)).fetchone()
-            state = dict(zip(("next_poll", "attempts", "etag", "last_modified", "last_error", "last_status", "lease_until", "grant_fingerprint", "lease_generation", "lease_token"), row)) if row else None
+        with self.database.connection() as db:
+            db.lock(key="write")
+            row = db.execute("""SELECT next_poll,attempts,etag,last_modified,last_error,last_status,
+                lease_until,grant_fingerprint,lease_generation,lease_token FROM ai_collection.poll_state
+                WHERE tenant_id=%s AND source_id=%s""", (tenant_id, source.source_id)).fetchone()
+            state = dict(row) if row else None
             if state and state.get("grant_fingerprint") != fingerprint:
                 # URI, parser/adapter, permission classification or limits changed.
                 # Drop validators and schedule state so the new grant is fetched now.
                 state.update(next_poll=_iso(now), attempts=0, etag=None, last_modified=None,
                              last_error=None, last_status=None, grant_fingerprint=fingerprint,
                              lease_until=None, lease_token=None)
-                db.execute("UPDATE poll_state SET next_poll=?,attempts=0,etag=NULL,last_modified=NULL,last_error=NULL,last_status=NULL,grant_fingerprint=?,lease_until=NULL,lease_token=NULL WHERE tenant_id=? AND source_id=?",
+                db.execute("UPDATE ai_collection.poll_state SET next_poll=%s,attempts=0,etag=NULL,last_modified=NULL,last_error=NULL,last_status=NULL,grant_fingerprint=%s,lease_until=NULL,lease_token=NULL WHERE tenant_id=%s AND source_id=%s",
                            (_iso(now), fingerprint, tenant_id, source.source_id))
             if state and state.get("lease_until") and (_aware(state["lease_until"]) or now) > now:
-                db.rollback()
                 return state, "already_running"
             due = _aware(state["next_poll"]) if state else None
             if not force and due and due > now:
-                db.rollback()
                 return state, "not_due"
             # Longer than the bounded HTTP timeout, leaving room for DNS/TLS setup.
             lease_until = now + timedelta(seconds=max(30, source.timeout_seconds + 10))
             generation = int(state.get("lease_generation", 0) if state else 0) + 1
             claim_token = uuid.uuid4().hex
             next_poll = state["next_poll"] if state else _iso(now)
-            db.execute("INSERT INTO poll_state(tenant_id,source_id,next_poll,attempts,etag,last_modified,last_error,last_status,lease_until,grant_fingerprint,lease_generation,lease_token) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,source_id) DO UPDATE SET lease_until=excluded.lease_until,grant_fingerprint=excluded.grant_fingerprint,lease_generation=excluded.lease_generation,lease_token=excluded.lease_token",
+            db.execute("INSERT INTO ai_collection.poll_state(tenant_id,source_id,next_poll,attempts,etag,last_modified,last_error,last_status,lease_until,grant_fingerprint,lease_generation,lease_token) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(store_key,tenant_id,source_id) DO UPDATE SET lease_until=excluded.lease_until,grant_fingerprint=excluded.grant_fingerprint,lease_generation=excluded.lease_generation,lease_token=excluded.lease_token",
                        (tenant_id, source.source_id, next_poll, state["attempts"] if state else 0,
                         state.get("etag") if state else None, state.get("last_modified") if state else None,
                         state.get("last_error") if state else None, state.get("last_status") if state else None,
                         _iso(lease_until), fingerprint, generation, claim_token))
-            db.commit()
             if state is None:
                 state = {"next_poll": next_poll, "attempts": 0, "etag": None, "last_modified": None,
                          "last_error": None, "last_status": None, "lease_until": _iso(lease_until),
@@ -988,32 +969,26 @@ class NewsCollector:
         headers = response.headers if response else {}
         attempts = 0 if success else (prior["attempts"] if prior else 0) + 1
         fingerprint = self._grant_fingerprint(source)
-        with sqlite3.connect(self.state_path, timeout=10, isolation_level=None) as db:
-            db.execute("BEGIN IMMEDIATE")
-            cursor = db.execute("""UPDATE poll_state SET next_poll=?,attempts=?,etag=?,last_modified=?,last_error=?,last_status=?,lease_until=NULL,lease_token=NULL
-              WHERE tenant_id=? AND source_id=? AND grant_fingerprint=? AND lease_generation=? AND lease_token=?""",
+        with self.database.connection() as db:
+            db.lock(key="write")
+            cursor = db.execute("""UPDATE ai_collection.poll_state SET next_poll=%s,attempts=%s,etag=%s,last_modified=%s,last_error=%s,last_status=%s,lease_until=NULL,lease_token=NULL
+              WHERE tenant_id=%s AND source_id=%s AND grant_fingerprint=%s AND lease_generation=%s AND lease_token=%s""",
               (_iso(next_poll), attempts, headers.get("etag") or prior.get("etag"),
                headers.get("last-modified") or prior.get("last_modified"), error,
                response.status if response else None, tenant_id, source.source_id,
                fingerprint, prior["lease_generation"], prior["lease_token"]))
             # The token fences expired owners and same-grant successors.
             if cursor.rowcount != 1:
-                db.rollback()
                 return
-            db.commit()
 
     def _release_poll_claim(self, tenant_id: str, source: SourceGrant, claim: dict[str, Any] | None) -> None:
         """Release only this exact poll lease, without changing retry state."""
         if not claim or not claim.get("lease_token"):
             return
-        with sqlite3.connect(self.state_path, timeout=10, isolation_level=None) as db:
-            db.execute("BEGIN IMMEDIATE")
-            cursor = db.execute("UPDATE poll_state SET lease_until=NULL,lease_token=NULL WHERE tenant_id=? AND source_id=? AND grant_fingerprint=? AND lease_generation=? AND lease_token=?",
+        with self.database.connection() as db:
+            db.lock(key="write")
+            cursor = db.execute("UPDATE ai_collection.poll_state SET lease_until=NULL,lease_token=NULL WHERE tenant_id=%s AND source_id=%s AND grant_fingerprint=%s AND lease_generation=%s AND lease_token=%s",
                 (tenant_id, source.source_id, self._grant_fingerprint(source), claim.get("lease_generation"), claim["lease_token"]))
-            if cursor.rowcount == 1:
-                db.commit()
-            else:
-                db.rollback()
 
     @staticmethod
     def _backoff(source: SourceGrant, state: dict[str, Any] | None, now: datetime, retry_after: str | None) -> datetime:

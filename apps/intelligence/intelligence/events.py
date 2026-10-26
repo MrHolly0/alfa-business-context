@@ -6,16 +6,14 @@ independence remains unknown unless independently established outside this store
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from difflib import SequenceMatcher
 from enum import StrEnum
 from contextlib import contextmanager
-import fcntl
 import hashlib
 import json
-import os
 import re
-import sqlite3
+import time
 import unicodedata
 from pathlib import Path
 from typing import Any, Mapping, Literal
@@ -24,6 +22,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from .llm.service import estimate_text_tokens
+from .storage import Database
 
 EVENT_STORE_VERSION = "event-store-v1"
 CLAIM_PROMPT_VERSION = "event-claims-v2"
@@ -33,6 +32,8 @@ NEAR_DUPLICATE_THRESHOLD = 0.965
 MAX_CLAIMS = 32
 MAX_EXTRACTOR_TEXT_BYTES = 10_000
 MAX_EXTRACTOR_INPUT_TOKENS = 24_000
+CLAIM_RESERVATION_LEASE = timedelta(minutes=3)
+CLAIM_RESERVATION_WAIT_SECONDS = 5.0
 
 
 def _hash(value: str) -> str:
@@ -192,101 +193,104 @@ class ImpactPackage(BaseModel):
     created_at: str
 
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS events (
-  tenant_id TEXT NOT NULL, event_id TEXT NOT NULL, created_at TEXT NOT NULL,
-  PRIMARY KEY(tenant_id,event_id)
-);
-CREATE TABLE IF NOT EXISTS publications (
-  tenant_id TEXT NOT NULL, publication_id TEXT NOT NULL, event_id TEXT NOT NULL,
-  source_id TEXT NOT NULL, source_role TEXT NOT NULL, canonical_uri TEXT NOT NULL,
-  origin_group_id TEXT NOT NULL, created_at TEXT NOT NULL,
-  PRIMARY KEY(tenant_id,publication_id), UNIQUE(tenant_id,source_id,canonical_uri),
-  FOREIGN KEY(tenant_id,event_id) REFERENCES events(tenant_id,event_id)
-);
-CREATE INDEX IF NOT EXISTS publications_event ON publications(tenant_id,event_id,source_id);
-CREATE TABLE IF NOT EXISTS publication_versions (
-  tenant_id TEXT NOT NULL, publication_id TEXT NOT NULL, version INTEGER NOT NULL,
-  title TEXT NOT NULL, content TEXT NOT NULL, content_hash TEXT NOT NULL,
-  published_at TEXT NOT NULL, fetched_at TEXT NOT NULL, event_time TEXT,
-  content_type TEXT NOT NULL, publisher TEXT NOT NULL, author TEXT NOT NULL,
-  language TEXT NOT NULL, synthetic INTEGER NOT NULL, document_revision_ref TEXT,
-  created_at TEXT NOT NULL, PRIMARY KEY(tenant_id,publication_id,version),
-  FOREIGN KEY(tenant_id,publication_id) REFERENCES publications(tenant_id,publication_id)
-);
-CREATE INDEX IF NOT EXISTS publication_hash ON publication_versions(tenant_id,content_hash);
-CREATE TABLE IF NOT EXISTS event_revisions (
-  tenant_id TEXT NOT NULL, event_id TEXT NOT NULL, revision INTEGER NOT NULL,
-  snapshot_hash TEXT NOT NULL, created_at TEXT NOT NULL,
-  PRIMARY KEY(tenant_id,event_id,revision),
-  FOREIGN KEY(tenant_id,event_id) REFERENCES events(tenant_id,event_id)
-);
-CREATE TABLE IF NOT EXISTS event_revision_publications (
-  tenant_id TEXT NOT NULL, event_id TEXT NOT NULL, event_revision INTEGER NOT NULL,
-  publication_id TEXT NOT NULL, publication_revision INTEGER NOT NULL,
-  PRIMARY KEY(tenant_id,event_id,event_revision,publication_id),
-  FOREIGN KEY(tenant_id,event_id,event_revision) REFERENCES event_revisions(tenant_id,event_id,revision),
-  FOREIGN KEY(tenant_id,publication_id,publication_revision)
-    REFERENCES publication_versions(tenant_id,publication_id,version)
-);
-CREATE TABLE IF NOT EXISTS impact_packages (
-  tenant_id TEXT NOT NULL, package_id TEXT NOT NULL, event_id TEXT NOT NULL,
-  revision INTEGER NOT NULL, source_policy_id TEXT NOT NULL, policy_version TEXT NOT NULL,
-  allowed_sources_hash TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL,
-  PRIMARY KEY(tenant_id,package_id),
-  FOREIGN KEY(tenant_id,event_id,revision) REFERENCES event_revisions(tenant_id,event_id,revision)
-);
-CREATE TABLE IF NOT EXISTS claim_extractions (
-  tenant_id TEXT NOT NULL, event_id TEXT NOT NULL, source_policy_id TEXT NOT NULL,
-  policy_version TEXT NOT NULL, allowed_sources_hash TEXT NOT NULL,
-  semantic_signature TEXT NOT NULL, model_version TEXT NOT NULL, prompt_version TEXT NOT NULL,
-  claims_json TEXT NOT NULL, metadata_json TEXT NOT NULL, created_at TEXT NOT NULL,
-  PRIMARY KEY(tenant_id,event_id,source_policy_id,policy_version,allowed_sources_hash,
-              semantic_signature,model_version,prompt_version)
-);
-CREATE TABLE IF NOT EXISTS claim_extraction_reservations (
-  tenant_id TEXT NOT NULL, reservation_id TEXT NOT NULL, status TEXT NOT NULL,
-  created_at TEXT NOT NULL, PRIMARY KEY(tenant_id,reservation_id)
-);
-"""
-
-
 class EventStore:
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, *, namespace: str | None = None):
         self.path = str(path)
-        if self.path == ":memory:":
-            raise ValueError("EventStore requires a persistent SQLite path")
-        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as db:
-            db.executescript(SCHEMA)
-            db.execute("BEGIN IMMEDIATE")
-            columns={row[1] for row in db.execute("PRAGMA table_info(publication_versions)")}
-            if "data_classification" not in columns:
-                db.execute("ALTER TABLE publication_versions ADD COLUMN data_classification TEXT NOT NULL DEFAULT 'confidential'")
-                db.execute("UPDATE publication_versions SET data_classification='synthetic' WHERE synthetic=1")
-            db.commit()
-
-    def _connect(self):
-        db = sqlite3.connect(self.path, timeout=30, isolation_level=None)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA busy_timeout=30000")
-        db.execute("PRAGMA foreign_keys=ON")
-        db.execute("PRAGMA journal_mode=WAL")
-        return db
+        self.database = Database("events", self.path, namespace=namespace)
+        self.namespace = self.database.namespace
 
     @contextmanager
-    def _file_lock(self, namespace: str, key: str):
-        """Cross-process singleflight; wait without holding a SQLite transaction."""
-        lock_dir = Path(self.path + ".locks")
-        lock_dir.mkdir(parents=True, exist_ok=True)
-        lock_path = lock_dir / f"{namespace}-{_hash(key)}.lock"
-        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
-            yield
-        finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-            os.close(fd)
+    def _connect(self):
+        with self.database.connection() as db:
+            yield db
+
+    def clone_snapshot(self, namespace: str, tenant_id: str) -> "EventStore":
+        """Freeze one tenant's event graph under a new logical namespace."""
+        target=EventStore(self.path,namespace=namespace)
+        if target.namespace==self.namespace:
+            raise ValueError("historical_snapshot_requires_distinct_namespace")
+        table_names=("events","publications","publication_versions","event_revisions",
+            "event_revision_publications","impact_packages","claim_extractions",
+            "claim_extraction_reservations","snapshot_markers")
+
+        def rows_for(db):
+            return {
+                "events":db.execute("SELECT tenant_id,event_id,created_at FROM events WHERE tenant_id=%s ORDER BY event_id",(tenant_id,)).fetchall(),
+                "publications":db.execute("SELECT tenant_id,publication_id,event_id,source_id,source_role,canonical_uri,origin_group_id,created_at FROM publications WHERE tenant_id=%s ORDER BY publication_id",(tenant_id,)).fetchall(),
+                "versions":db.execute("SELECT tenant_id,publication_id,version,title,content,content_hash,published_at,fetched_at,event_time,content_type,publisher,author,language,synthetic,document_revision_ref,created_at,data_classification FROM publication_versions WHERE tenant_id=%s ORDER BY publication_id,version",(tenant_id,)).fetchall(),
+                "revisions":db.execute("SELECT tenant_id,event_id,revision,snapshot_hash,created_at FROM event_revisions WHERE tenant_id=%s ORDER BY event_id,revision",(tenant_id,)).fetchall(),
+                "links":db.execute("SELECT tenant_id,event_id,event_revision,publication_id,publication_revision FROM event_revision_publications WHERE tenant_id=%s ORDER BY event_id,event_revision,publication_id",(tenant_id,)).fetchall(),
+                "packages":db.execute("SELECT tenant_id,package_id,event_id,revision,source_policy_id,policy_version,allowed_sources_hash,payload_json,created_at FROM impact_packages WHERE tenant_id=%s ORDER BY package_id",(tenant_id,)).fetchall(),
+                "claims":db.execute("SELECT tenant_id,event_id,source_policy_id,policy_version,allowed_sources_hash,semantic_signature,model_version,prompt_version,claims_json,metadata_json,created_at FROM claim_extractions WHERE tenant_id=%s ORDER BY event_id,source_policy_id,policy_version,semantic_signature,model_version,prompt_version",(tenant_id,)).fetchall(),
+            }
+
+        def snapshot_hash(snapshot):
+            return _hash(json.dumps({key:[tuple(row.values()) for row in value]
+                for key,value in snapshot.items()},ensure_ascii=False,separators=(",",":"),default=str))
+
+        def table_counts(db):
+            return {table:db.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+                for table in table_names}
+
+        # A marked namespace is already frozen. Reuse its contents even when the
+        # live source has advanced, but reject edits to the frozen copy itself.
+        with target._connect() as db:
+            db.lock(key="snapshot:"+tenant_id)
+            prior=db.execute("SELECT snapshot_hash FROM snapshot_markers WHERE tenant_id=%s",(tenant_id,)).fetchone()
+            if prior:
+                if snapshot_hash(rows_for(db))!=prior["snapshot_hash"]:
+                    raise ValueError("historical_snapshot_namespace_conflict")
+                return target
+
+            # A pre-existing historical SQLite file can already have been
+            # imported into this mapped namespace. Accept only an importer
+            # manifest whose complete target row counts still match.
+            imports=db.execute("SELECT manifest FROM ai_meta.imports WHERE component=%s AND store_key=%s",
+                ("events",target.namespace)).fetchall()
+            if imports:
+                if len(imports)!=1:
+                    raise ValueError("historical_snapshot_namespace_conflict")
+                manifest=imports[0]["manifest"]
+                manifest=json.loads(manifest) if isinstance(manifest,str) else manifest
+                expected=manifest.get("target_rows_by_table") if isinstance(manifest,dict) else None
+                if not isinstance(expected,dict) or expected!=table_counts(db):
+                    raise ValueError("historical_snapshot_import_conflict")
+                frozen_hash=snapshot_hash(rows_for(db))
+                db.execute("INSERT INTO snapshot_markers(tenant_id,snapshot_hash,created_at) VALUES(%s,%s,%s)",
+                    (tenant_id,frozen_hash,datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00","Z")))
+                return target
+            if any(table_counts(db).values()):
+                raise ValueError("historical_snapshot_namespace_conflict")
+
+        with self._connect() as source:
+            source.lock(key="tenant:"+tenant_id)
+            snapshot=rows_for(source)
+        frozen_hash=snapshot_hash(snapshot)
+        with target._connect() as db:
+            db.lock(key="snapshot:"+tenant_id)
+            prior=db.execute("SELECT snapshot_hash FROM snapshot_markers WHERE tenant_id=%s",(tenant_id,)).fetchone()
+            if prior:
+                if prior["snapshot_hash"]!=frozen_hash or snapshot_hash(rows_for(db))!=prior["snapshot_hash"]:
+                    raise ValueError("historical_snapshot_namespace_conflict")
+                return target
+            if any(table_counts(db).values()):
+                raise ValueError("historical_snapshot_namespace_conflict")
+            for key,table,columns in (
+                ("events","events","tenant_id,event_id,created_at"),
+                ("publications","publications","tenant_id,publication_id,event_id,source_id,source_role,canonical_uri,origin_group_id,created_at"),
+                ("versions","publication_versions","tenant_id,publication_id,version,title,content,content_hash,published_at,fetched_at,event_time,content_type,publisher,author,language,synthetic,document_revision_ref,created_at,data_classification"),
+                ("revisions","event_revisions","tenant_id,event_id,revision,snapshot_hash,created_at"),
+                ("links","event_revision_publications","tenant_id,event_id,event_revision,publication_id,publication_revision"),
+                ("packages","impact_packages","tenant_id,package_id,event_id,revision,source_policy_id,policy_version,allowed_sources_hash,payload_json,created_at"),
+                ("claims","claim_extractions","tenant_id,event_id,source_policy_id,policy_version,allowed_sources_hash,semantic_signature,model_version,prompt_version,claims_json,metadata_json,created_at"),
+            ):
+                rows=snapshot[key]
+                if not rows: continue
+                placeholders=",".join(["%s"]*len(rows[0]))
+                db.executemany(f"INSERT INTO {table}({columns}) VALUES({placeholders})",[tuple(row.values()) for row in rows])
+            db.execute("INSERT INTO snapshot_markers(tenant_id,snapshot_hash,created_at) VALUES(%s,%s,%s)",
+                       (tenant_id,frozen_hash,datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00","Z")))
+        return target
 
     @staticmethod
     def _input(value: PublicationInput | Mapping[str, Any]) -> PublicationInput:
@@ -307,10 +311,11 @@ class EventStore:
         tenant, uri = item.tenant_id, item.canonical_uri
         content_hash = _hash(item.content)
         now = datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
-        db = self._connect()
-        try:
-            db.execute("BEGIN IMMEDIATE")
-            pub = db.execute("SELECT * FROM publications WHERE tenant_id=? AND source_id=? AND canonical_uri=?",
+        with self._connect() as db:
+            # Serialize matching + append per tenant, including cases where the
+            # same event is concurrently ingested through different source URLs.
+            db.lock(key="tenant:" + tenant)
+            pub = db.execute("SELECT * FROM publications WHERE tenant_id=%s AND source_id=%s AND canonical_uri=%s",
                              (tenant,item.source_id,uri)).fetchone()
             grouping = "canonical_url"
             if pub:
@@ -320,10 +325,11 @@ class EventStore:
                 match = None
                 if normalized:
                     recent = db.execute("""SELECT p.event_id,v.content,v.title,v.published_at FROM publications p JOIN publication_versions v
-                        ON (v.tenant_id,v.publication_id)=(p.tenant_id,p.publication_id)
-                        WHERE p.tenant_id=? AND v.version=(SELECT MAX(v2.version) FROM publication_versions v2
-                          WHERE v2.tenant_id=p.tenant_id AND v2.publication_id=p.publication_id)
-                          AND abs(julianday(v.published_at)-julianday(?))<=7""", (tenant, item.published_at)).fetchall()
+                        ON (v.store_key,v.tenant_id,v.publication_id)=(p.store_key,p.tenant_id,p.publication_id)
+                        WHERE p.tenant_id=%s AND v.version=(SELECT MAX(v2.version) FROM publication_versions v2
+                          WHERE v2.store_key=p.store_key AND v2.tenant_id=p.tenant_id AND v2.publication_id=p.publication_id)
+                          AND v.published_at BETWEEN %s::timestamptz - INTERVAL '7 days' AND %s::timestamptz + INTERVAL '7 days'""",
+                        (tenant, item.published_at, item.published_at)).fetchall()
                     for row in recent:
                         # Opposing reports about the same named incident can have
                         # different bodies. Group exact, specific same-day titles
@@ -349,29 +355,28 @@ class EventStore:
                     if grouping!="matching_title_review_group":grouping="near_duplicate_review_group"
                 else:
                     event_id, grouping = "evt_" + uuid4().hex, "new_event"
-                    db.execute("INSERT INTO events(tenant_id,event_id,created_at) VALUES(?,?,?)", (tenant, event_id, now))
+                    db.execute("INSERT INTO events(tenant_id,event_id,created_at) VALUES(%s,%s,%s)", (tenant, event_id, now))
                 # A source may legitimately reuse a canonical article URL with
                 # another source grant. Keep each receipt distinct in the event.
                 publication_id = "pub_" + _hash(tenant + "\0" + item.source_id + "\0" + uri)[:32]
                 origin = item.origin_group_id or (urlsplit(uri).hostname or item.source_id).lower()
                 db.execute("""INSERT INTO publications(tenant_id,publication_id,event_id,source_id,source_role,
-                    canonical_uri,origin_group_id,created_at) VALUES(?,?,?,?,?,?,?,?)""",
+                    canonical_uri,origin_group_id,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)""",
                     (tenant, publication_id, event_id, item.source_id, item.source_role, uri, origin, now))
             # A corpus revision is immutable. Replaying an older as-of snapshot
             # must not append its old contents as a new current publication.
             if item.document_revision_ref:
-                known=db.execute("SELECT * FROM publication_versions WHERE tenant_id=? AND publication_id=? AND document_revision_ref=? ORDER BY version LIMIT 1",
+                known=db.execute("SELECT * FROM publication_versions WHERE tenant_id=%s AND publication_id=%s AND document_revision_ref=%s ORDER BY version LIMIT 1",
                                  (tenant,publication_id,item.document_revision_ref)).fetchone()
                 if known:
                     if known["content_hash"]!=content_hash or known["title"]!=item.title:
                         raise ValueError("immutable_document_revision_conflict")
-                    prior=db.execute("SELECT MIN(event_revision) FROM event_revision_publications WHERE tenant_id=? AND event_id=? AND publication_id=? AND publication_revision=?",
+                    prior=db.execute("SELECT MIN(event_revision) FROM event_revision_publications WHERE tenant_id=%s AND event_id=%s AND publication_id=%s AND publication_revision=%s",
                                      (tenant,event_id,publication_id,known["version"])).fetchone()[0]
-                    db.commit()
                     return {"tenant_id":tenant,"event_id":event_id,"revision":prior,
                         "publication_id":publication_id,"publication_revision":known["version"],
                         "content_hash":content_hash,"grouping":"existing_revision","changed":False}
-            old = db.execute("SELECT * FROM publication_versions WHERE tenant_id=? AND publication_id=? ORDER BY version DESC LIMIT 1",
+            old = db.execute("SELECT * FROM publication_versions WHERE tenant_id=%s AND publication_id=%s ORDER BY version DESC LIMIT 1",
                              (tenant, publication_id)).fetchone()
             unchanged_metadata = old and (
                 old["published_at"] == item.published_at
@@ -382,60 +387,53 @@ class EventStore:
                 and old["data_classification"] == ("synthetic" if item.synthetic else item.data_classification)
             )
             if old and old["content_hash"] == content_hash and old["title"] == item.title and unchanged_metadata:
-                db.commit()
-                current_event_revision = db.execute("SELECT MAX(revision) FROM event_revisions WHERE tenant_id=? AND event_id=?", (tenant,event_id)).fetchone()[0]
+                current_event_revision = db.execute("SELECT MAX(revision) FROM event_revisions WHERE tenant_id=%s AND event_id=%s", (tenant,event_id)).fetchone()[0]
                 return {"tenant_id": tenant, "event_id": event_id, "revision": current_event_revision,
                         "publication_id": publication_id, "publication_revision": old["version"],
                         "content_hash": content_hash, "grouping": "unchanged", "changed": False}
             version = 1 if old is None else old["version"] + 1
             db.execute("""INSERT INTO publication_versions(tenant_id,publication_id,version,title,content,content_hash,
                 published_at,fetched_at,event_time,content_type,publisher,author,language,synthetic,document_revision_ref,created_at)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (tenant,publication_id,version,item.title,item.content,content_hash,item.published_at,item.fetched_at,
                  item.event_time,item.content_type,item.publisher,item.author,item.language,int(item.synthetic),
                  item.document_revision_ref,now))
-            db.execute("UPDATE publication_versions SET data_classification=? WHERE tenant_id=? AND publication_id=? AND version=?",
+            db.execute("UPDATE publication_versions SET data_classification=%s WHERE tenant_id=%s AND publication_id=%s AND version=%s",
                        ("synthetic" if item.synthetic else item.data_classification,tenant,publication_id,version))
             snapshot_rows = db.execute("""SELECT p.publication_id,v.version,v.content_hash FROM publications p
-                JOIN publication_versions v ON (v.tenant_id,v.publication_id)=(p.tenant_id,p.publication_id)
-                WHERE p.tenant_id=? AND p.event_id=? AND v.version=(SELECT MAX(v2.version) FROM publication_versions v2
-                  WHERE v2.tenant_id=p.tenant_id AND v2.publication_id=p.publication_id) ORDER BY p.publication_id""",
+                JOIN publication_versions v ON (v.store_key,v.tenant_id,v.publication_id)=(p.store_key,p.tenant_id,p.publication_id)
+                WHERE p.tenant_id=%s AND p.event_id=%s AND v.version=(SELECT MAX(v2.version) FROM publication_versions v2
+                  WHERE v2.store_key=p.store_key AND v2.tenant_id=p.tenant_id AND v2.publication_id=p.publication_id) ORDER BY p.publication_id""",
                 (tenant,event_id)).fetchall()
-            snapshot_hash = _hash(json.dumps([tuple(row) for row in snapshot_rows], separators=(",", ":")))
-            latest_rev = db.execute("SELECT revision,snapshot_hash FROM event_revisions WHERE tenant_id=? AND event_id=? ORDER BY revision DESC LIMIT 1",
+            snapshot_hash = _hash(json.dumps([tuple(row.values()) for row in snapshot_rows], separators=(",", ":")))
+            latest_rev = db.execute("SELECT revision,snapshot_hash FROM event_revisions WHERE tenant_id=%s AND event_id=%s ORDER BY revision DESC LIMIT 1",
                                     (tenant,event_id)).fetchone()
             if latest_rev and latest_rev["snapshot_hash"] == snapshot_hash:
                 revision = latest_rev["revision"]
             else:
                 revision = 1 if latest_rev is None else latest_rev["revision"] + 1
-                db.execute("INSERT INTO event_revisions VALUES(?,?,?,?,?)", (tenant,event_id,revision,snapshot_hash,now))
+                db.execute("INSERT INTO event_revisions(tenant_id,event_id,revision,snapshot_hash,created_at) VALUES(%s,%s,%s,%s,%s)",
+                           (tenant,event_id,revision,snapshot_hash,now))
                 db.execute("""INSERT INTO event_revision_publications(tenant_id,event_id,event_revision,publication_id,publication_revision)
-                    SELECT p.tenant_id,p.event_id,?,p.publication_id,v.version FROM publications p JOIN publication_versions v
-                    ON (v.tenant_id,v.publication_id)=(p.tenant_id,p.publication_id)
-                    WHERE p.tenant_id=? AND p.event_id=? AND v.version=(SELECT MAX(v2.version) FROM publication_versions v2
-                      WHERE v2.tenant_id=p.tenant_id AND v2.publication_id=p.publication_id)""",
+                    SELECT p.tenant_id,p.event_id,%s,p.publication_id,v.version FROM publications p JOIN publication_versions v
+                    ON (v.store_key,v.tenant_id,v.publication_id)=(p.store_key,p.tenant_id,p.publication_id)
+                    WHERE p.tenant_id=%s AND p.event_id=%s AND v.version=(SELECT MAX(v2.version) FROM publication_versions v2
+                      WHERE v2.store_key=p.store_key AND v2.tenant_id=p.tenant_id AND v2.publication_id=p.publication_id)""",
                     (revision,tenant,event_id))
-            db.commit()
             return {"tenant_id": tenant, "event_id": event_id, "revision": revision,
                     "publication_id": publication_id, "publication_revision": version,
                     "content_hash": content_hash, "grouping": grouping, "changed": True}
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
 
     def get_event(self, tenant_id: str, event_id: str, *, source_policy_id: str,
                   policy_version: str, allowed_source_ids: list[str], revision: int | None = None, allowed_document_revision_refs: list[str] | None = None) -> dict[str, Any] | None:
         allowed = self._allowed(tenant_id, source_policy_id, policy_version, allowed_source_ids)
-        db = self._connect()
-        try:
-            marks = ",".join("?" for _ in allowed)
+        with self._connect() as db:
+            marks = ",".join("%s" for _ in allowed)
             if revision is None:
-                rev = db.execute("SELECT revision FROM event_revisions WHERE tenant_id=? AND event_id=? ORDER BY revision DESC LIMIT 1",
+                rev = db.execute("SELECT revision FROM event_revisions WHERE tenant_id=%s AND event_id=%s ORDER BY revision DESC LIMIT 1",
                                  (tenant_id,event_id)).fetchone()
             else:
-                rev = db.execute("SELECT revision FROM event_revisions WHERE tenant_id=? AND event_id=? AND revision=?",
+                rev = db.execute("SELECT revision FROM event_revisions WHERE tenant_id=%s AND event_id=%s AND revision=%s",
                                  (tenant_id,event_id,revision)).fetchone()
             if rev is None:
                 return None
@@ -446,19 +444,17 @@ class EventStore:
             if not rows:
                 return None
             return self._snapshot(tenant_id,event_id,rev["revision"],rows,source_policy_id,policy_version,len(allowed))
-        finally:
-            db.close()
 
     @staticmethod
     def _source_rows(db, tenant_id, event_id, revision, allowed):
-        marks = ",".join("?" for _ in allowed)
+        marks = ",".join("%s" for _ in allowed)
         return db.execute(f"""SELECT p.publication_id,p.source_id,p.source_role,p.canonical_uri,p.origin_group_id,
             v.version,v.title,v.content,v.content_hash,v.published_at,v.fetched_at,v.event_time,v.publisher,v.author,
             v.language,v.synthetic,v.document_revision_ref,v.data_classification FROM publications p JOIN publication_versions v
-            ON (v.tenant_id,v.publication_id)=(p.tenant_id,p.publication_id)
-            WHERE p.tenant_id=? AND p.event_id=? AND p.source_id IN ({marks})
-              AND EXISTS(SELECT 1 FROM event_revision_publications rp WHERE rp.tenant_id=p.tenant_id
-                AND rp.event_id=p.event_id AND rp.event_revision=? AND rp.publication_id=p.publication_id
+            ON (v.store_key,v.tenant_id,v.publication_id)=(p.store_key,p.tenant_id,p.publication_id)
+            WHERE p.tenant_id=%s AND p.event_id=%s AND p.source_id IN ({marks})
+              AND EXISTS(SELECT 1 FROM event_revision_publications rp WHERE rp.store_key=p.store_key AND rp.tenant_id=p.tenant_id
+                AND rp.event_id=p.event_id AND rp.event_revision=%s AND rp.publication_id=p.publication_id
                 AND rp.publication_revision=v.version)
             ORDER BY v.published_at,p.publication_id""", (tenant_id,event_id,*allowed,revision)).fetchall()
 
@@ -506,26 +502,24 @@ class EventStore:
 
     def _cached_claims(self, tenant_id, event_id, policy_id, policy_version,
                        allowed_hash, semantic_signature, model_version):
-        db=self._connect()
-        try:
+        with self._connect() as db:
             row=db.execute("""SELECT claims_json,metadata_json FROM claim_extractions
-                WHERE tenant_id=? AND event_id=? AND source_policy_id=? AND policy_version=?
-                  AND allowed_sources_hash=? AND semantic_signature=? AND model_version=? AND prompt_version=?""",
+                WHERE tenant_id=%s AND event_id=%s AND source_policy_id=%s AND policy_version=%s
+                  AND allowed_sources_hash=%s AND semantic_signature=%s AND model_version=%s AND prompt_version=%s""",
                 (tenant_id,event_id,policy_id,policy_version,allowed_hash,semantic_signature,
                  model_version,CLAIM_PROMPT_VERSION)).fetchone()
             if row is None:return None
             return ([Claim.model_validate(item) for item in json.loads(row["claims_json"])],
                     json.loads(row["metadata_json"]))
-        finally:db.close()
 
     def _save_claims(self, tenant_id, event_id, policy_id, policy_version,
                      allowed_hash, semantic_signature, model_version, claims, metadata):
         now=datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00","Z")
         with self._connect() as db:
-            db.execute("""INSERT OR IGNORE INTO claim_extractions(
+            db.execute("""INSERT INTO claim_extractions(
                 tenant_id,event_id,source_policy_id,policy_version,allowed_sources_hash,
                 semantic_signature,model_version,prompt_version,claims_json,metadata_json,created_at)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(store_key,tenant_id,event_id,source_policy_id,policy_version,allowed_sources_hash,semantic_signature,model_version,prompt_version) DO NOTHING""",
                 (tenant_id,event_id,policy_id,policy_version,allowed_hash,semantic_signature,
                  model_version,CLAIM_PROMPT_VERSION,
                  json.dumps([claim.model_dump(mode="json") for claim in claims],ensure_ascii=False,separators=(",",":")),
@@ -602,7 +596,9 @@ class EventStore:
         key = "\0".join((tenant_id,event_id,source_policy_id,policy_version,allowed_hash,
                           semantic_signature,model_version,CLAIM_PROMPT_VERSION))
         reservation_id = _hash(key)
-        with self._file_lock("claims",key):
+        owner_token=uuid4().hex
+        deadline=time.monotonic()+CLAIM_RESERVATION_WAIT_SECONDS
+        while True:
             cached = self._cached_claims(tenant_id,event_id,source_policy_id,policy_version,
                 allowed_hash,semantic_signature,model_version)
             if cached is not None:
@@ -611,23 +607,28 @@ class EventStore:
                 if all(claim.publication_id in permitted and
                        claim.quote in permitted[claim.publication_id]["content"] for claim in cached_claims):
                     return cached_claims,cached_meta
-            now = datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00","Z")
+            now_dt=datetime.now(timezone.utc)
+            now=now_dt.isoformat(timespec="microseconds").replace("+00:00","Z")
+            owner=False
+            uncertain=False
+            active=False
             with self._connect() as db:
-                db.execute("BEGIN IMMEDIATE")
-                existing = db.execute("SELECT status FROM claim_extraction_reservations WHERE tenant_id=? AND reservation_id=?",
+                db.lock(key=f"claim:{tenant_id}:{reservation_id}")
+                existing = db.execute("SELECT status,lease_until FROM claim_extraction_reservations WHERE tenant_id=%s AND reservation_id=%s",
                                       (tenant_id,reservation_id)).fetchone()
                 if existing is None:
-                    db.execute("INSERT INTO claim_extraction_reservations VALUES(?,?,?,?)",
-                               (tenant_id,reservation_id,"started",now))
-                    db.commit()
+                    lease_until=(now_dt+CLAIM_RESERVATION_LEASE).isoformat(timespec="microseconds").replace("+00:00","Z")
+                    db.execute("INSERT INTO claim_extraction_reservations(tenant_id,reservation_id,status,created_at,lease_until,owner_token) VALUES(%s,%s,'started',%s,%s,%s)",
+                               (tenant_id,reservation_id,now,lease_until,owner_token))
                     owner = True
-                    uncertain = False
+                elif existing["status"]=="uncertain":
+                    uncertain=True
+                elif datetime.fromisoformat(existing["lease_until"].replace("Z","+00:00"))<=now_dt:
+                    db.execute("UPDATE claim_extraction_reservations SET status='uncertain' WHERE tenant_id=%s AND reservation_id=%s AND status='started' AND lease_until<=%s",
+                               (tenant_id,reservation_id,now))
+                    uncertain=True
                 else:
-                    db.execute("UPDATE claim_extraction_reservations SET status='uncertain' WHERE tenant_id=? AND reservation_id=?",
-                               (tenant_id,reservation_id))
-                    db.commit()
-                    owner = False
-                    uncertain = True
+                    active=True
             if uncertain:
                 # A previous process may have sent the paid request and died
                 # before persisting its response. Do not blindly spend again.
@@ -635,21 +636,31 @@ class EventStore:
                     policy_version=policy_version,allowed_source_ids=allowed,revision=revision,llm=None,
                     allowed_document_revision_refs=allowed_document_revision_refs,
                     _model_version_override=model_version,_uncertain_recovery=True)
+            if active:
+                if time.monotonic() < deadline:
+                    time.sleep(0.05)
+                    continue
+                return self._extract_claims_impl(tenant_id,event_id,source_policy_id=source_policy_id,
+                    policy_version=policy_version,allowed_source_ids=allowed,revision=revision,llm=None,
+                    allowed_document_revision_refs=allowed_document_revision_refs,
+                    _model_version_override=model_version,_uncertain_recovery=True,_save_cache=False)
             result = self._extract_claims_impl(tenant_id,event_id,source_policy_id=source_policy_id,
                 policy_version=policy_version,allowed_source_ids=allowed,revision=revision,llm=llm,
                 allowed_document_revision_refs=allowed_document_revision_refs,
                 _model_version_override=model_version)
             if owner:
                 with self._connect() as db:
-                    db.execute("DELETE FROM claim_extraction_reservations WHERE tenant_id=? AND reservation_id=?",
-                               (tenant_id,reservation_id))
+                    db.lock(key=f"claim:{tenant_id}:{reservation_id}")
+                    db.execute("DELETE FROM claim_extraction_reservations WHERE tenant_id=%s AND reservation_id=%s AND owner_token=%s",
+                               (tenant_id,reservation_id,owner_token))
             return result
 
     def _extract_claims_impl(self, tenant_id: str, event_id: str, *, source_policy_id: str,
                        policy_version: str, allowed_source_ids: list[str], revision: int | None = None,
                        llm=None, allowed_document_revision_refs: list[str] | None = None,
                        _model_version_override: str | None = None,
-                       _uncertain_recovery: bool = False) -> tuple[list[Claim], dict[str, Any]]:
+                       _uncertain_recovery: bool = False,
+                       _save_cache: bool = True) -> tuple[list[Claim], dict[str, Any]]:
         snapshot = self.get_event(tenant_id,event_id,source_policy_id=source_policy_id,
             policy_version=policy_version,allowed_source_ids=allowed_source_ids,revision=revision,allowed_document_revision_refs=allowed_document_revision_refs)
         if snapshot is None:
@@ -799,8 +810,9 @@ class EventStore:
         metadata={"model_version":model_version,"prompt_version":CLAIM_PROMPT_VERSION,
                   "extraction_mode":extraction_mode,"semantic":semantic,
                   "model_error":model_error,"limitations":list(dict.fromkeys(limitations))}
-        self._save_claims(tenant_id,event_id,source_policy_id,policy_version,allowed_hash,
-                          semantic_signature,model_version,claims,metadata)
+        if _save_cache:
+            self._save_claims(tenant_id,event_id,source_policy_id,policy_version,allowed_hash,
+                              semantic_signature,model_version,claims,metadata)
         return claims, metadata
 
     def build_impact_package(self, tenant_id: str, event_id: str, *, source_policy_id: str,
@@ -818,12 +830,10 @@ class EventStore:
         allowed_hash = _hash(json.dumps([allowed,sorted(allowed_document_revision_refs) if allowed_document_revision_refs is not None else None],separators=(",",":")))
         package_id = "pkg_"+_hash("\0".join((tenant_id,event_id,str(snapshot["revision"]),source_policy_id,
             policy_version,allowed_hash,model,IMPACT_PROMPT_VERSION,IMPACT_CACHE_SEMANTICS_VERSION)))[:32]
-        db=self._connect()
-        try:
-            row=db.execute("SELECT payload_json FROM impact_packages WHERE tenant_id=? AND package_id=?",(tenant_id,package_id)).fetchone()
+        with self._connect() as db:
+            row=db.execute("SELECT payload_json FROM impact_packages WHERE tenant_id=%s AND package_id=%s",(tenant_id,package_id)).fetchone()
             if row:
                 return ImpactPackage.model_validate_json(row["payload_json"])
-        finally: db.close()
         claims, claim_meta = self.extract_claims(tenant_id,event_id,source_policy_id=source_policy_id,
             policy_version=policy_version,allowed_source_ids=allowed,revision=snapshot["revision"],llm=llm,allowed_document_revision_refs=allowed_document_revision_refs)
         sources=[SourceReference(publication_id=s["publication_id"],source_id=s["source_id"],source_role=s["source_role"],
@@ -847,15 +857,10 @@ class EventStore:
             model_version=model,prompt_version=IMPACT_PROMPT_VERSION,policy_version=policy_version,
             created_at=datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00","Z"))
         payload=package.model_dump_json()
-        db=self._connect()
-        try:
-            db.execute("BEGIN IMMEDIATE")
+        with self._connect() as db:
+            db.lock(key=f"impact-package:{tenant_id}:{package_id}")
             # Recheck latest package key and persist a stable shared result once.
-            db.execute("INSERT OR IGNORE INTO impact_packages VALUES(?,?,?,?,?,?,?,?,?)",
+            db.execute("INSERT INTO impact_packages(tenant_id,package_id,event_id,revision,source_policy_id,policy_version,allowed_sources_hash,payload_json,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(store_key,tenant_id,package_id) DO NOTHING",
                 (tenant_id,package_id,event_id,snapshot["revision"],source_policy_id,policy_version,allowed_hash,payload,package.created_at))
-            row=db.execute("SELECT payload_json FROM impact_packages WHERE tenant_id=? AND package_id=?",(tenant_id,package_id)).fetchone()
-            db.commit()
+            row=db.execute("SELECT payload_json FROM impact_packages WHERE tenant_id=%s AND package_id=%s",(tenant_id,package_id)).fetchone()
             return ImpactPackage.model_validate_json(row["payload_json"])
-        except Exception:
-            db.rollback(); raise
-        finally: db.close()

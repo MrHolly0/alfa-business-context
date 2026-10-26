@@ -13,27 +13,45 @@ React demo доступен на http://localhost:4173, порт опублик�
 ## Python, тесты и offline demo
 
 ```sh
-docker compose run --build --rm intelligence demo
-docker compose run --build --rm intelligence demo-data
-docker compose run --build --rm intelligence demo-personalization
-docker compose run --build --rm intelligence evaluate --mode baseline
-docker compose run --build --rm intelligence-test
-docker compose run --build --rm web-test
+docker compose --profile tools run --build --rm intelligence demo
+docker compose --profile tools run --build --rm intelligence demo-data
+docker compose --profile tools run --build --rm intelligence demo-personalization
+docker compose --profile tools run --build --rm intelligence evaluate --mode baseline
+docker compose --profile test run --build --rm intelligence-test
+docker compose --profile test run --build --rm web-test
 ```
 
-`demo-data` выполняет отдельный полный локальный Python поток на синтетической RSS-фикстуре, без HTTP и внешнего LLM. `demo-personalization` сравнивает три синтетические компании на одном наборе событий и выводит полный JSON в терминал; его сигналы — эвристики, не вероятности. Эти команды не подменяют действия в React UI. `evaluate` проверяет функциональные cases, а не реальную точность модели. Test containers запускаются с `network_mode: none`.
+PostgreSQL 17 хранит рабочие данные Python Intelligence в отдельной базе `business_context_ai`; Compose автоматически запускает `intelligence-migrate` перед CLI/API/worker. `--profile tools` включает этот поток. Тестовый профиль использует отдельную `business_context_ai_test` и выполняет `intelligence-test-migrate` до тестов. Роли и DSN описаны в [руководстве PostgreSQL](../docs/postgresql.md).
 
-Хостовый эквивалент, из каталога `apps/intelligence`:
+`demo-data` выполняет отдельный полный локальный Python поток на синтетической RSS-фикстуре, без внешнего HTTP и LLM. `demo-personalization` сравнивает три синтетические компании на одном наборе событий и выводит полный JSON в терминал; его сигналы — эвристики, не вероятности. Эти команды не подменяют действия в React UI. `evaluate` проверяет функциональные cases, а не реальную точность модели. Тестовый сервис получает отдельную PostgreSQL test-базу и не получает provider credentials.
+
+Для хостовых команд из корня сначала запустите PostgreSQL, затем перейдите в `apps/intelligence`:
 
 ```sh
+docker compose --profile database up -d --wait postgres
+cd apps/intelligence
 uv sync --frozen
+export INTELLIGENCE_DATABASE_URL='postgresql://intelligence_app:local-ai-only@127.0.0.1:55483/business_context_ai'
+INTELLIGENCE_MIGRATION_DATABASE_URL='postgresql://intelligence_migrator:local-migration-only@127.0.0.1:55483/business_context_ai' \
+  uv run --frozen python -m intelligence db migrate
+uv run --frozen python -m intelligence db check
 uv run --frozen python -m intelligence demo-data --state-dir /tmp/alfa-demo
 uv run --frozen python -m intelligence run-task --mode baseline \
   --input examples/data-task.json --state-dir /tmp/alfa-task
-uv run --frozen python -m pytest -q -p no:cacheprovider tests
 ```
 
 `run-task` исполняет переданный `ai-data-task-v1` snapshot локально. Рабочая очередь и публикация бизнес-результата должны появиться на стороне Core; PHP Core в текущем Compose отсутствует.
+
+Для тестов из корня выполните миграции test DB, затем задайте обе test DSN и запустите хостовый pytest:
+
+```sh
+docker compose --profile test up -d --wait postgres
+docker compose --profile test run --build --rm intelligence-test-migrate
+cd apps/intelligence
+INTELLIGENCE_DATABASE_URL='postgresql://intelligence_app:local-ai-only@127.0.0.1:55483/business_context_ai_test' \
+INTELLIGENCE_MIGRATION_DATABASE_URL='postgresql://intelligence_migrator:local-migration-only@127.0.0.1:55483/business_context_ai_test' \
+  uv run --frozen python -m pytest -q -p no:cacheprovider tests
+```
 
 ## Внутренний Python API
 
@@ -58,9 +76,9 @@ docker compose --profile worker up --build intelligence-worker
 
 ## Volumes и остановка
 
-`intelligence-api`, CLI `intelligence` и worker используют named volume `alfa-business-context-intelligence-state` под `/app/.state`: corpus, events, budgets, workflow state, results/outbox и private raw blobs. Обычный `docker compose down` сохраняет данные. Удаление volume через `docker compose down -v` необратимо удаляет этот локальный state; выполняйте его только если хотите очистить demo.
+Private raw blobs и файловые артефакты хранятся в `alfa-business-context-intelligence-state`; рабочие таблицы — в PostgreSQL volume `alfa-business-context-postgres`. Обычный `docker compose down` сохраняет оба volume. Удаление через `docker compose down -v` удаляет и БД, и private filesystem; это очистка локального стенда.
 
-Хостовый запуск с `--state-dir /tmp/...` хранится отдельно от Docker. Настройки provider монтируются read-only: по умолчанию `apps/intelligence/examples/providers.template.json`; другой config path задаётся оператором через `INTELLIGENCE_CONFIG_FILE`. Тестовые containers не получают provider credentials.
+Хостовый запуск использует ту базу/namespace, которые заданы DSN и `INTELLIGENCE_STORAGE_NAMESPACE`; `--state-dir` формирует logical namespace и путь файлового хранилища. Настройки provider монтируются read-only: по умолчанию `apps/intelligence/examples/providers.template.json`; другой config path задаётся оператором через `INTELLIGENCE_CONFIG_FILE`. Тестовые containers не получают provider credentials.
 
 ## Модель и изменения зависимостей
 
@@ -77,6 +95,6 @@ uv export --frozen --only-group dev --no-emit-project -o requirements-dev.lock
 После этого выполните Docker test и schema check, прежде чем считать сборку воспроизводимой. Составная архитектура и внешние зависимости описаны в [architecture](../docs/architecture.md), [contracts](../contracts/intelligence/README.md) и [readiness matrix](../docs/ai-scope-and-readiness.md).
 
 
-Профиль с несколькими направлениями и локальными источниками проверяется командой `docker compose run --build --rm intelligence demo-business`. Сравнение одинаковых событий по зависимостям: `docker compose run --build --rm intelligence demo-personalization` (JSON выводится в терминал). На хосте из `apps/intelligence` используйте `uv run --frozen python -m intelligence demo-personalization --output /tmp/personalization-comparison.json`. По умолчанию эти команды не вызывают модель. Для модели нужен явный `--mode model`, проверенный provider config и прежний общий ledger в named volume; новый state path не даёт нового разрешения на расходы. Описание и границы персонализации: [docs/personalization.md](../docs/personalization.md).
+Профиль с несколькими направлениями и локальными источниками проверяется командой `docker compose --profile tools run --build --rm intelligence demo-business`. Сравнение одинаковых событий по зависимостям: `docker compose --profile tools run --build --rm intelligence demo-personalization` (JSON выводится в терминал). На хосте из `apps/intelligence` используйте `uv run --frozen python -m intelligence demo-personalization --output /tmp/personalization-comparison.json`. По умолчанию эти команды не вызывают модель. Для модели нужен явный `--mode model`, проверенный provider config и общая PostgreSQL budget storage scope; новый logical path не создаёт нового разрешения на расходы. Описание и границы персонализации: [docs/personalization.md](../docs/personalization.md).
 
-Дополнительный пример без внешней сети/модели: `docker compose run --build --rm intelligence demo-research`. Он проверяет получение промежуточных документов и ограничения покрытия; реальные выводы модели и турнир описаны [отдельно](../docs/research-and-tournament-checks.md).
+Дополнительный пример без внешней сети/модели: `docker compose --profile tools run --build --rm intelligence demo-research`. Он проверяет получение промежуточных документов и ограничения покрытия; реальные выводы модели и турнир описаны [отдельно](../docs/research-and-tournament-checks.md).

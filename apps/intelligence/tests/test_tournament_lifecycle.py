@@ -160,14 +160,14 @@ def test_generated_candidate_refines_rechecks_holds_shadow_promotes_runs_and_rol
     assert report["shadow_validation"]["grounded_evidence_preserved"] is True
     with arena.store._db() as db:
         cells=[json.loads(row[0]) for row in db.execute(
-            "SELECT payload FROM cells WHERE run_id=? AND state='complete'",("generation-3-cycle",))]
+            "SELECT payload FROM cells WHERE run_id=%s AND state='complete'",("generation-3-cycle",))]
     assert any(cell.get("split")=="train_refined" and cell.get("passed") is True for cell in cells)
     assert sum(cell.get("split")=="holdout" for cell in cells)==2
     assert sum(cell.get("split")=="shadow" for cell in cells)==4
 
     pack = arena.store.review_pack("generation-3-cycle")
     with arena.store._db() as db:
-        manifest=json.loads(db.execute("SELECT manifest FROM runs WHERE run_id=?",("generation-3-cycle",)).fetchone()[0])
+        manifest=json.loads(db.execute("SELECT manifest FROM runs WHERE run_id=%s",("generation-3-cycle",)).fetchone()[0])
     ratings={item["blind_id"]:next(label for label,ref in manifest["review_label_map"][item["blind_id"]].items()
                                     if ref==winner) for item in pack}
     reviewed=arena.store.review("generation-3-cycle",reviewer="release-reviewer",ratings=ratings)

@@ -2,11 +2,11 @@
 from __future__ import annotations
 import hashlib
 import json
-import sqlite3
+from .storage import Database
 import threading
-import fcntl
+import time
+from uuid import uuid4
 import os
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -27,7 +27,7 @@ from .description_context import DescriptionPrepareRequest, DescriptionProposal,
 class WorkflowNotStarted(ValueError):
     """Capacity/lock refusal before analysis begins; safe to retry this owner."""
     def __init__(self, code):
-        if code not in {"capacity_exhausted", "request_in_progress"}:
+        if code not in {"capacity_exhausted", "request_in_progress", "execution_recovery_required"}:
             raise ValueError("invalid_not_started_code")
         self.code = code
         super().__init__(code)
@@ -156,16 +156,8 @@ class DataResult(StrictModel):
 class WorkflowState:
     def __init__(self,path):
         self.path=str(path)
-        with self.db() as db:
-            db.executescript('''CREATE TABLE IF NOT EXISTS workflow_stages(tenant TEXT,request TEXT,digest TEXT,stage TEXT,payload TEXT,PRIMARY KEY(tenant,request,stage));
-            CREATE TABLE IF NOT EXISTS workflow_analyses(tenant TEXT,company TEXT,event TEXT,signature TEXT,payload TEXT,PRIMARY KEY(tenant,company,event));
-            CREATE TABLE IF NOT EXISTS workflow_results(tenant TEXT,request TEXT,digest TEXT,payload TEXT,PRIMARY KEY(tenant,request));
-            CREATE TABLE IF NOT EXISTS workflow_context_heads(tenant TEXT,company TEXT,version INTEGER NOT NULL,digest TEXT NOT NULL,PRIMARY KEY(tenant,company));
-            CREATE TABLE IF NOT EXISTS workflow_policy_heads(tenant TEXT,company TEXT,policy TEXT,version INTEGER NOT NULL,digest TEXT,PRIMARY KEY(tenant,company,policy));''')
-            db.execute('BEGIN IMMEDIATE')
-            if 'digest' not in {row[1] for row in db.execute('PRAGMA table_info(workflow_policy_heads)')}:
-                db.execute('ALTER TABLE workflow_policy_heads ADD COLUMN digest TEXT')
-    def db(self): return sqlite3.connect(self.path,timeout=15)
+        self.database=Database('workflow',path)
+    def db(self): return self.database.connection()
 
     def observe_snapshot(self, task, *, advance=False, db=None):
         # These are artifact fences, not an authoritative copy of Core profiles.
@@ -174,45 +166,45 @@ class WorkflowState:
             return
         if db is None:
             with self.db() as connection:
-                connection.execute('BEGIN IMMEDIATE')
+                connection.lock()
                 return self.observe_snapshot(task, advance=advance, db=connection)
         for business in task.businesses:
             company = business.company.model_dump(mode='json')
             company.pop('role', None)
             digest = payload_hash({'company': company,
                 'dependency_graph': [edge.model_dump(mode='json') for edge in business.dependency_graph]})
-            row = db.execute('SELECT version,digest FROM workflow_context_heads WHERE tenant=? AND company=?',
+            row = db.execute('SELECT version,digest FROM workflow_context_heads WHERE tenant=%s AND company=%s',
                 (task.tenant_id, business.company_id)).fetchone()
             if row and (row[0] > business.context_version or
                         (row[0] == business.context_version and row[1] != digest)):
                 raise WorkflowSnapshotConflict('stale_or_conflicting_company_context')
             if advance and (row is None or row[0] < business.context_version):
-                db.execute('INSERT INTO workflow_context_heads VALUES(?,?,?,?) ON CONFLICT(tenant,company) DO UPDATE SET version=excluded.version,digest=excluded.digest',
+                db.execute('INSERT INTO workflow_context_heads VALUES(%s,%s,%s,%s) ON CONFLICT(store_key,tenant,company) DO UPDATE SET version=excluded.version,digest=excluded.digest',
                     (task.tenant_id, business.company_id, business.context_version, digest))
         policy=task.source_policy.model_dump(mode='json')
         for key in ('issued_at','user_excluded_source_ids','user_excluded_publishers','user_excluded_document_uris'):policy.pop(key,None)
         policy_digest=payload_hash(policy)
         for company_id in {task.company_id, *(item.company_id for item in task.businesses)}:
-            row = db.execute('SELECT version,digest FROM workflow_policy_heads WHERE tenant=? AND company=? AND policy=?',
+            row = db.execute('SELECT version,digest FROM workflow_policy_heads WHERE tenant=%s AND company=%s AND policy=%s',
                 (task.tenant_id, company_id, task.source_policy.policy_id)).fetchone()
             if row and (row[0] > task.source_policy_version or
                         (row[0]==task.source_policy_version and row[1] is not None and row[1]!=policy_digest)):
                 raise WorkflowSnapshotConflict('stale_or_conflicting_source_policy')
             if advance and (row is None or row[0] < task.source_policy_version or row[1] is None):
-                db.execute('INSERT INTO workflow_policy_heads VALUES(?,?,?,?,?) ON CONFLICT(tenant,company,policy) DO UPDATE SET version=excluded.version,digest=excluded.digest',
+                db.execute('INSERT INTO workflow_policy_heads VALUES(%s,%s,%s,%s,%s) ON CONFLICT(store_key,tenant,company,policy) DO UPDATE SET version=excluded.version,digest=excluded.digest',
                     (task.tenant_id, company_id, task.source_policy.policy_id, task.source_policy_version,policy_digest))
     def stage(self,task,name,payload):
-        with self.db() as db: db.execute('INSERT OR REPLACE INTO workflow_stages VALUES(?,?,?,?,?)',(task.tenant_id,task.request_id,payload_hash(task.model_dump(mode='json')),name,canonical_json(payload)))
+        with self.db() as db: db.execute('INSERT INTO workflow_stages VALUES(%s,%s,%s,%s,%s) ON CONFLICT(store_key,tenant,request,stage) DO UPDATE SET digest=excluded.digest,payload=excluded.payload,stage_order=DEFAULT',(task.tenant_id,task.request_id,payload_hash(task.model_dump(mode='json')),name,canonical_json(payload)))
     def prior(self,tenant,company,event):
-        with self.db() as db: row=db.execute('SELECT payload FROM workflow_analyses WHERE tenant=? AND company=? AND event=?',(tenant,company,event)).fetchone()
+        with self.db() as db: row=db.execute('SELECT payload FROM workflow_analyses WHERE tenant=%s AND company=%s AND event=%s',(tenant,company,event)).fetchone()
         return json.loads(row[0]) if row else None
     def save_analysis(self,tenant,company,event,signature,payload,*,task=None):
         # Period candidates are research artifacts, not the current monitoring cursor.
         if task is not None and task.operation == 'period': return
         with self.db() as db:
-            db.execute('BEGIN IMMEDIATE')
+            db.lock()
             if task is not None: self.observe_snapshot(task, db=db)
-            prior=db.execute('SELECT payload FROM workflow_analyses WHERE tenant=? AND company=? AND event=?',
+            prior=db.execute('SELECT payload FROM workflow_analyses WHERE tenant=%s AND company=%s AND event=%s',
                 (tenant,company,event)).fetchone()
             if prior:
                 old=json.loads(prior[0]).get('candidate',{}).get('versions',{})
@@ -220,16 +212,55 @@ class WorkflowState:
                 if (old.get('as_of') and new.get('as_of') and
                     datetime.fromisoformat(old['as_of'])>datetime.fromisoformat(new['as_of'])):
                     raise WorkflowSnapshotConflict('stale_analysis_as_of')
-            db.execute('INSERT OR REPLACE INTO workflow_analyses VALUES(?,?,?,?,?)',(tenant,company,event,signature,canonical_json(payload)))
+            db.execute('INSERT INTO workflow_analyses VALUES(%s,%s,%s,%s,%s) ON CONFLICT(store_key,tenant,company,event) DO UPDATE SET signature=excluded.signature,payload=excluded.payload',(tenant,company,event,signature,canonical_json(payload)))
     def cached(self,task):
-        with self.db() as db: row=db.execute('SELECT digest,payload FROM workflow_results WHERE tenant=? AND request=?',(task.tenant_id,task.request_id)).fetchone()
+        with self.db() as db: row=db.execute('SELECT digest,payload FROM workflow_results WHERE tenant=%s AND request=%s',(task.tenant_id,task.request_id)).fetchone()
         if row and row[0]!=payload_hash(task.model_dump(mode='json')): raise ValueError('idempotency_conflict')
         return DataResult.model_validate_json(row[1]) if row else None
     def save_result(self,task,result):
         with self.db() as db:
-            db.execute('BEGIN IMMEDIATE')
+            db.lock()
             self.observe_snapshot(task, db=db)
-            db.execute('INSERT INTO workflow_results VALUES(?,?,?,?)',(task.tenant_id,task.request_id,payload_hash(task.model_dump(mode='json')),result.model_dump_json()))
+            digest=payload_hash(task.model_dump(mode='json'))
+            prior=db.execute('SELECT digest FROM workflow_results WHERE tenant=%s AND request=%s',
+                (task.tenant_id,task.request_id)).fetchone()
+            if prior and prior[0]!=digest:raise ValueError('idempotency_conflict')
+            db.execute('INSERT INTO workflow_results VALUES(%s,%s,%s,%s) ON CONFLICT(store_key,tenant,request) DO NOTHING',
+                (task.tenant_id,task.request_id,digest,result.model_dump_json()))
+
+    def claim_execution(self,task,owner,capacity,ttl=120):
+        digest=payload_hash(task.model_dump(mode='json'))
+        with self.db() as db:
+            db.lock()
+            old=db.execute('SELECT digest,state,lease_until>clock_timestamp() AS active FROM workflow_executions WHERE tenant=%s AND request=%s',(task.tenant_id,task.request_id)).fetchone()
+            if old and old['digest']!=digest:raise ValueError('idempotency_conflict')
+            if old and old['state']=='running' and old['active']:raise WorkflowNotStarted('request_in_progress')
+            if old and old['state'] in {'running','uncertain'}:raise WorkflowNotStarted('execution_recovery_required')
+            db.execute('DELETE FROM workflow_slots WHERE lease_until<=clock_timestamp()')
+            occupied={row[0] for row in db.execute('SELECT slot FROM workflow_slots')}
+            slot=next((value for value in range(capacity) if value not in occupied),None)
+            if slot is None:raise WorkflowNotStarted('capacity_exhausted')
+            db.execute('INSERT INTO workflow_slots VALUES(%s,%s,clock_timestamp()+make_interval(secs=>%s))',(slot,owner,ttl))
+            db.execute("INSERT INTO workflow_executions VALUES(%s,%s,%s,%s,'running',clock_timestamp()+make_interval(secs=>%s)) ON CONFLICT(store_key,tenant,request) DO UPDATE SET owner=excluded.owner,state='running',lease_until=excluded.lease_until",(task.tenant_id,task.request_id,digest,owner,ttl))
+    def renew_execution(self,task,owner,ttl=120):
+        with self.db() as db:
+            db.lock()
+            updated=db.execute("UPDATE workflow_executions SET lease_until=clock_timestamp()+make_interval(secs=>%s) WHERE tenant=%s AND request=%s AND owner=%s AND state='running' AND lease_until>clock_timestamp()",(ttl,task.tenant_id,task.request_id,owner)).rowcount
+            db.execute('UPDATE workflow_slots SET lease_until=clock_timestamp()+make_interval(secs=>%s) WHERE owner=%s AND lease_until>clock_timestamp()',(ttl,owner))
+            return bool(updated)
+    def release_execution(self,task,owner,success):
+        with self.db() as db:
+            db.lock()
+            db.execute("UPDATE workflow_executions SET state=%s WHERE tenant=%s AND request=%s AND owner=%s",('complete' if success else 'uncertain',task.tenant_id,task.request_id,owner))
+            db.execute('DELETE FROM workflow_slots WHERE owner=%s',(owner,))
+    def recover_execution(self,tenant,request):
+        with self.db() as db:
+            db.lock()
+            row=db.execute('SELECT owner,lease_until>clock_timestamp() AS active FROM workflow_executions WHERE tenant=%s AND request=%s',(tenant,request)).fetchone()
+            if row and row['active']:raise ValueError('execution_lease_still_active')
+            if row:
+                db.execute('DELETE FROM workflow_slots WHERE owner=%s',(row['owner'],))
+                db.execute('DELETE FROM workflow_executions WHERE tenant=%s AND request=%s',(tenant,request))
 
 class _TaskRoleLLM:
     def __init__(self,session,service):
@@ -296,46 +327,34 @@ class DataWorkflow:
         self.registry=analyst_registry or PromptRegistry(self.state_dir/'analysts.sqlite3')
         self.collector=collector or NewsCollector(self.store,state_path=self.state_dir/'collection.sqlite3',raw_dir=self.state_dir/'raw'/'collection')
         self.max_concurrency=max(1,min(4,max_concurrency))
-        self.slots=threading.BoundedSemaphore(self.max_concurrency)
-        self.execution_locks=self.state_dir/'execution-locks'
-        self.execution_locks.mkdir(parents=True,exist_ok=True)
     def run(self,task,checkpoint=None):
         task=task if isinstance(task,DataTask) else DataTask.model_validate(task)
-        check=checkpoint or (lambda stage:None); check('before_workflow')
-        slot_lock=self._acquire_slot_lock()
-        if slot_lock is None:raise WorkflowNotStarted('capacity_exhausted')
-        request_key=hashlib.sha256(f'{task.tenant_id}\0{task.request_id}'.encode()).hexdigest()
-        request_lock=None
-        local_slot=False
+        original_check=checkpoint or (lambda stage:None);original_check('before_workflow')
+        self.assert_current(task)
+        cached=self.state.cached(task)
+        if cached is not None:
+            self.assert_current(task);return cached
+        owner=uuid4().hex;self.state.claim_execution(task,owner,self.max_concurrency)
+        stopping=threading.Event();lost=threading.Event();success=False;safe_boundary=False
+        def heartbeat():
+            while not stopping.wait(20):
+                try:
+                    if not self.state.renew_execution(task,owner):lost.set();return
+                except Exception:lost.set();return
+        thread=threading.Thread(target=heartbeat,daemon=True);thread.start()
+        def check(stage):
+            if lost.is_set():raise WorkflowSnapshotConflict('execution_lease_lost')
+            nonlocal safe_boundary
+            try:original_check(stage)
+            except BaseException:
+                safe_boundary=stage in {'personal_complete','before_result_cache','collection_complete'}
+                raise
         try:
-            request_lock=self._lock_file(self.execution_locks/f'request-{request_key}.lock')
-            if request_lock is None:raise WorkflowNotStarted('request_in_progress')
-            local_slot=self.slots.acquire(blocking=False)
-            if not local_slot:raise WorkflowNotStarted('capacity_exhausted')
-            return self._run(task,check)
+            result=self._run(task,check);success=True;return result
         finally:
-            if local_slot:self.slots.release()
-            if request_lock is not None:self._release_file_lock(request_lock)
-            self._release_file_lock(slot_lock)
+            stopping.set();thread.join(timeout=6)
+            self.state.release_execution(task,owner,success or safe_boundary)
 
-    def _acquire_slot_lock(self):
-        for index in range(self.max_concurrency):
-            handle=self._lock_file(self.execution_locks/f'slot-{index}.lock')
-            if handle is not None:return handle
-        return None
-
-    @staticmethod
-    def _lock_file(path):
-        handle=open(path,'a+b')
-        try:fcntl.flock(handle.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
-        except BlockingIOError:
-            handle.close();return None
-        return handle
-
-    @staticmethod
-    def _release_file_lock(handle):
-        try:fcntl.flock(handle.fileno(),fcntl.LOCK_UN)
-        finally:handle.close()
     def assert_current(self, task):
         self.state.observe_snapshot(task)
 
@@ -640,25 +659,9 @@ class DataWorkflow:
         """Materialize research in an isolated artifact snapshot, never current events."""
         signature=payload_hash({'tenant':task.tenant_id,'policy':task.source_policy.model_dump(mode='json'),
             'refs':sorted(refs),'as_of':as_of.isoformat(),'runtime':self.runtime_fingerprint})
-        folder=self.state_dir/'historical-events'
-        folder.mkdir(parents=True,exist_ok=True)
-        target=folder/(signature+'.sqlite3')
-        # Lock only local snapshot creation; no model or HTTP work is inside it.
-        with (folder/(signature+'.lock')).open('a+b') as handle:
-            fcntl.flock(handle.fileno(),fcntl.LOCK_EX)
-            try:
-                if not target.exists():
-                    fd,temporary=tempfile.mkstemp(prefix='snapshot-',suffix='.sqlite3',dir=folder)
-                    os.close(fd)
-                    try:
-                        with sqlite3.connect(self.events.path) as source,sqlite3.connect(temporary) as destination:
-                            source.backup(destination,pages=256,progress=lambda *_:check('historical_snapshot_copy'))
-                        os.replace(temporary,target)
-                    finally:
-                        Path(temporary).unlink(missing_ok=True)
-            finally:
-                fcntl.flock(handle.fileno(),fcntl.LOCK_UN)
-        return EventStore(target),'historical:'+signature
+        check('historical_snapshot_copy')
+        snapshot=self.events.clone_snapshot(self.events.database.namespace+':history:'+signature,task.tenant_id)
+        return snapshot,'historical:'+signature
 
     def _ordered_events(self,task,events,event_refs,docs,as_of,*,businesses=None):
         from .relevance import rank_events

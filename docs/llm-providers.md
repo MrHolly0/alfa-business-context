@@ -17,7 +17,7 @@ OPENROUTER_API_KEY=ваш_ключ
 Живой анализ учебной новости:
 
 ```sh
-docker compose run --build --rm intelligence analyze \
+docker compose --profile tools run --build --rm intelligence analyze \
   --input /app/examples/analysis-request.json --mode model \
   --config /config/providers.json --profile openrouter
 ```
@@ -44,7 +44,7 @@ INTELLIGENCE_CONFIG_FILE=./apps/intelligence/examples/providers.paid.template.js
 
 `input_per_million` и `output_per_million` в платном шаблоне — именно верхние тарифы выбора провайдера; фактическая цена может быть ниже. Локальный лимит действует для процессов с одним файлом журнала и scope `alfa-openrouter-paid-tests`; другие приложения с тем же ключом в него не входят. Не создавайте новые scopes, чтобы обходить расход этого ключа.
 
-Посмотреть расход: `docker compose run --rm intelligence llm budget --config /config/providers.json --profile openrouter`. Для возврата к бесплатному режиму выберите исходный `providers.template.json` в `.env`.
+Посмотреть расход: `docker compose --profile tools run --rm intelligence llm budget --config /config/providers.json --profile openrouter`. Для возврата к бесплатному режиму выберите исходный `providers.template.json` в `.env`.
 
 ## Хакатонный шлюз
 
@@ -67,13 +67,13 @@ HACKATHON_API_KEY=ваш_ключ
 
 Расходы USD и RUB разделены. Флаг `--compare-hackathon` у `analyze`/`evaluate` считает те же token counts по явно заданным тарифам хакатона; модели должны совпадать. Поле `projected_hackathon_cost_rub` — оценка, а не реальное списание шлюза и не конвертация USD. Для бесплатной модели фактическая стоимость может быть 0, расчётная хакатонная — больше 0.
 
-Все процессы, использующие один SQLite-файл и `budget_scope`, видят общий локальный расход. Другой компьютер или приложение с тем же внешним ключом в этот счётчик не входит. Docker и хост имеют разные журналы; внешний общий остаток сверяется с оператором шлюза.
+Журнал резервов и расходов хранится в PostgreSQL `ai_budget`; процессы видят общий локальный счётчик только когда подключены к той же базе и используют тот же storage namespace. Отдельные Docker/host DSN или namespace дают отдельные учётные области. Это не заменяет внешний баланс шлюза, который сверяется с его оператором.
 
 Посмотреть счётчик или отдельно проверить адаптер:
 
 ```sh
-docker compose run --rm intelligence llm budget --config /config/providers.json --profile openrouter
-docker compose run --rm intelligence llm validate --config /config/providers.json --profile openrouter
+docker compose --profile tools run --rm intelligence llm budget --config /config/providers.json --profile openrouter
+docker compose --profile tools run --rm intelligence llm validate --config /config/providers.json --profile openrouter
 ```
 
 Команда `llm run` — низкоуровневый одиночный запрос для диагностики. Она обходит бизнес-анализ и выбирает модель из своего явного конфига. Для одиночного текста используйте `analyze`, для полного потока со снимком источников и компаний — `run-task` либо Core worker.

@@ -31,12 +31,12 @@ docker compose up --build --wait
 Отдельно запустите сквозной пример анализа без внешней сети и моделей:
 
 ```sh
-docker compose run --build --rm intelligence demo-data
+docker compose --profile tools run --build --rm intelligence demo-data
 ```
 
 Пример читает локальную RSS-ленту и учебную аналитическую заметку, сохраняет документы, объединяет публикации в события и готовит результаты для двух вымышленных компаний. В терминале появится JSON: **два события и четыре кандидата анализа**, со ссылками на основания, вопросами и ограничениями. Режим `baseline` проверяет работу потока; он не строит полноценную модельную интерпретацию.
 
-Остановка: `docker compose down`. Сохранённые данные Python остаются в Docker volume.
+Остановка: `docker compose down`. PostgreSQL и private filesystem Intelligence сохраняются в отдельных Docker volumes. Подробности запуска ролей и баз — [PostgreSQL](docs/postgresql.md).
 
 ## Как проходит анализ
 
@@ -52,13 +52,13 @@ docker compose run --build --rm intelligence demo-data
 ## Проверки и ограничения
 
 ```sh
-docker compose run --build --rm web-test
-docker compose run --build --rm intelligence-test
+docker compose --profile test run --build --rm web-test
+docker compose --profile test run --build --rm intelligence-test
 ```
 
-25 октября 2026 на хосте и в Docker прошли **439 тестов Python и 11 subtests**. Последняя проверка интерфейса 24 октября — **37 тестов**. Отдельно проверены реальный RSS ЦБ и вызовы Gemma, Qwen и GLM через OpenRouter. Регрессии и исправления — в [отчёте ревью](docs/ai-review-and-fixes.md); живые прогоны и расходы — в [отчёте моделей](docs/ai-live-checks.md).
+Python-тесты используют отдельную PostgreSQL test-базу; Compose запускает миграции до тестового сервиса. [Результаты перехода и конкурентных проверок](docs/postgresql-checks.md). Живые проверки моделей и их границы описаны отдельно в [отчёте](docs/ai-live-checks.md); эти прогоны не подтверждают работу PHP Core или всей production-системы.
 
-Новый смешанный сценарий: `docker compose run --build --rm intelligence demo-business`; он использует локальные RSS. Сравнение персональных сигналов для двух компаний одной отрасли и смешанного бизнеса: `docker compose run --build --rm intelligence demo-personalization`; JSON содержит одинаковые события, поисковые запросы и результаты. Сигнал — эвристический приоритет, не вероятность. Подробности и ограничения: [персонализация](docs/personalization.md), [отчёт сравнения](docs/checks/personalization-comparison-2026-10-25.json). Итоговые [проверки и расходы](docs/research-and-tournament-checks.md) включают реальные Qwen, Gemma и GLM.
+Новый смешанный сценарий: `docker compose --profile tools run --build --rm intelligence demo-business`; он использует локальные RSS. Сравнение персональных сигналов для двух компаний одной отрасли и смешанного бизнеса: `docker compose --profile tools run --build --rm intelligence demo-personalization`; JSON содержит одинаковые события, поисковые запросы и результаты. Сигнал — эвристический приоритет, не вероятность. Подробности и ограничения: [персонализация](docs/personalization.md), [отчёт сравнения](docs/checks/personalization-comparison-2026-10-25.json). Итоговые [проверки и расходы](docs/research-and-tournament-checks.md) включают реальные Qwen, Gemma и GLM.
 
 Смысловое качество и выигрыш от турнира пока не подтверждены независимой разметкой. Реальные банковские CSV/PDF не включены в репозиторий. Генерация через шлюз Альфы ожидает подтверждения тарифов; настроенные адаптеры не означают проверенную генерацию через этот шлюз. Источники, ограничения и статус каждого требования описаны в [матрице готовности](docs/ai-scope-and-readiness.md).
 
@@ -68,6 +68,7 @@ docker compose run --build --rm intelligence-test
 
 - [Установка и команды на хосте](docs/development.md)
 - [Python-модуль](apps/intelligence/README.md)
+- [PostgreSQL: роли, миграции и изоляция](docs/postgresql.md)
 - [Подключение Core и интерфейса](docs/ai-integration.md)
 - [Профиль и персонализация](docs/personalization.md)
 - [Работа с репозиторием](CONTRIBUTING.md)

@@ -19,6 +19,7 @@ from intelligence.collection import (
     _public_addresses,
 )
 from intelligence.corpus import CorpusStore
+from intelligence.sqlite_import import import_database
 
 
 NOW = datetime(2026, 10, 24, tzinfo=timezone.utc)
@@ -297,14 +298,29 @@ class CollectionTests(unittest.TestCase):
             as_of=(NOW + timedelta(minutes=1)).isoformat())
         self.assertEqual(stored[0]["data_classification"], "confidential")
 
-    def test_poll_state_additive_migration_is_serialized_and_adds_fingerprint(self):
-        legacy_path = self.root / "legacy-poll.sqlite"
-        with sqlite3.connect(legacy_path) as db:
-            db.execute("CREATE TABLE poll_state (tenant_id TEXT NOT NULL, source_id TEXT NOT NULL, next_poll TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, etag TEXT, last_modified TEXT, last_error TEXT, last_status INTEGER, PRIMARY KEY(tenant_id,source_id))")
-        NewsCollector(self.store, state_path=legacy_path, fetcher=FakeFetcher())
-        with sqlite3.connect(legacy_path) as db:
-            cols = {row[1] for row in db.execute("PRAGMA table_info(poll_state)")}
+    def test_legacy_poll_state_import_preserves_values_and_adds_target_fields(self):
+        source_path = self.root / "legacy-poll.sqlite"
+        with sqlite3.connect(source_path) as db:
+            db.executescript("""
+                CREATE TABLE poll_state (
+                    tenant_id TEXT NOT NULL, source_id TEXT NOT NULL, next_poll TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0, etag TEXT, last_modified TEXT,
+                    last_error TEXT, last_status INTEGER, PRIMARY KEY(tenant_id,source_id));
+                INSERT INTO poll_state VALUES (
+                    'tenant-a','news','2026-10-25T10:00:00Z',4,'"old"','yesterday',NULL,304);
+            """)
+        import_database(source_path, "collection", self.collector_state, confirm_quiesced=True)
+        collector = NewsCollector(self.store, state_path=self.collector_state, fetcher=FakeFetcher())
+        with collector.database.connection() as db:
+            cols = {row["column_name"] for row in db.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_schema='ai_collection' AND table_name='poll_state'")}
         self.assertTrue({"lease_until", "grant_fingerprint", "lease_generation", "lease_token"}.issubset(cols))
+        state = collector._state("tenant-a", "news")
+        self.assertEqual(4, state["attempts"])
+        self.assertEqual('"old"', state["etag"])
+        self.assertEqual("yesterday", state["last_modified"])
+        self.assertEqual(304, state["last_status"])
+        self.assertEqual(0, state["lease_generation"])
 
     def test_html_probe_detects_metadata_but_does_not_invent_missing_date(self):
         html = '<html><head><title>Заголовок</title><meta property="og:site_name" content="Издание"></head><body><article><p>Текст статьи.</p></article></body></html>'.encode()

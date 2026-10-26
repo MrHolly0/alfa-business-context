@@ -6,7 +6,6 @@ import json
 import secrets
 import re
 import unicodedata
-import sqlite3
 import tempfile
 import time
 from contextlib import contextmanager
@@ -19,6 +18,7 @@ from typing import Any, Callable
 from .analysts import PromptRegistry
 from .corpus import CorpusStore
 from .schemas import AnalysisRequest, CandidateAssessment
+from .storage import Database
 
 
 def _json(value: Any) -> str:
@@ -58,37 +58,19 @@ def _case_groups(case):
 
 
 class TournamentStore:
-    """SQLite persistence; interrupted reservations stay unavailable."""
-    def __init__(self, path: str | Path):
+    """PostgreSQL persistence; interrupted reservations stay unavailable."""
+    def __init__(self, path: str | Path, *, namespace: str | None = None):
         self.path = str(path)
-        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        with self._db() as db:
-            db.executescript("""
-                CREATE TABLE IF NOT EXISTS runs(run_id TEXT PRIMARY KEY, manifest TEXT NOT NULL, report TEXT);
-                CREATE TABLE IF NOT EXISTS holdout_exposures(group_hash TEXT NOT NULL,run_id TEXT NOT NULL,
-                    PRIMARY KEY(group_hash,run_id));
-                CREATE TABLE IF NOT EXISTS shadow_exposures(group_hash TEXT NOT NULL,run_id TEXT NOT NULL,
-                    PRIMARY KEY(group_hash,run_id));
-                CREATE TABLE IF NOT EXISTS cells(cell_key TEXT PRIMARY KEY, run_id TEXT NOT NULL,
-                    state TEXT NOT NULL, payload TEXT, reserved_at REAL NOT NULL);
-            """)
+        self.database = Database("tournaments", self.path, namespace=namespace)
 
     @contextmanager
     def _db(self):
-        db = sqlite3.connect(self.path, timeout=30)
-        db.row_factory = sqlite3.Row
-        try:
+        with self.database.connection() as db:
             yield db
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
 
     def get(self, run_id: str) -> dict:
         with self._db() as db:
-            row = db.execute("SELECT report FROM runs WHERE run_id=?", (run_id,)).fetchone()
+            row = db.execute("SELECT report FROM runs WHERE run_id=%s", (run_id,)).fetchone()
         if not row or row["report"] is None:
             raise ValueError("tournament_report_not_found")
         return json.loads(row["report"])
@@ -98,21 +80,21 @@ class TournamentStore:
         # is expected between independent future holdouts, so track event groups.
         groups={group for case in cases for group in _case_groups(case) if not group.startswith("company:")}
         with self._db() as db:
-            db.execute("BEGIN IMMEDIATE")
+            db.lock(key="holdout-exposures")
             prior=set()
             for group in groups:
-                prior.update(row[0] for row in db.execute("SELECT run_id FROM holdout_exposures WHERE group_hash=? AND run_id!=?",(group,run_id)))
-                db.execute("INSERT OR IGNORE INTO holdout_exposures VALUES(?,?)",(group,run_id))
+                prior.update(row[0] for row in db.execute("SELECT run_id FROM holdout_exposures WHERE group_hash=%s AND run_id!=%s",(group,run_id)))
+                db.execute("INSERT INTO holdout_exposures(group_hash,run_id) VALUES(%s,%s) ON CONFLICT(store_key,group_hash,run_id) DO NOTHING",(group,run_id))
         return {"fresh_for_selection":not prior,"prior_run_count":len(prior)}
 
     def expose_shadow(self, run_id, cases):
         groups={group for case in cases for group in _case_groups(case) if not group.startswith("company:")}
         with self._db() as db:
-            db.execute("BEGIN IMMEDIATE")
+            db.lock(key="shadow-exposures")
             prior=set()
             for group in groups:
-                prior.update(row[0] for row in db.execute("SELECT run_id FROM shadow_exposures WHERE group_hash=? AND run_id!=?",(group,run_id)))
-                db.execute("INSERT OR IGNORE INTO shadow_exposures VALUES(?,?)",(group,run_id))
+                prior.update(row[0] for row in db.execute("SELECT run_id FROM shadow_exposures WHERE group_hash=%s AND run_id!=%s",(group,run_id)))
+                db.execute("INSERT INTO shadow_exposures(group_hash,run_id) VALUES(%s,%s) ON CONFLICT(store_key,group_hash,run_id) DO NOTHING",(group,run_id))
         return {"fresh":not prior,"prior_run_count":len(prior)}
 
     def review_pack(self, run_id: str) -> list[dict]:
@@ -121,22 +103,24 @@ class TournamentStore:
 
     def _reserve(self, run_id: str, key: str):
         with self._db() as db:
-            db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT state,payload FROM cells WHERE cell_key=?", (key,)).fetchone()
+            db.lock(key="cell:" + key)
+            row = db.execute("SELECT state,payload FROM cells WHERE cell_key=%s", (key,)).fetchone()
             if row:
                 if row["state"] == "complete": return json.loads(row["payload"])
                 raise ValueError("cell_interrupted_or_in_progress; explicit operator recovery required")
-            db.execute("INSERT INTO cells VALUES(?,?, 'reserved',NULL,?)", (key, run_id, time.time()))
+            db.execute("INSERT INTO cells(cell_key,run_id,state,payload,reserved_at) VALUES(%s,%s,'reserved',NULL,%s)", (key, run_id, time.time()))
         return None
 
     def _complete(self, key: str, value: dict):
         with self._db() as db:
-            if db.execute("UPDATE cells SET state='complete',payload=? WHERE cell_key=? AND state='reserved'", (_json(value), key)).rowcount != 1:
+            db.lock(key="cell:" + key)
+            if db.execute("UPDATE cells SET state='complete',payload=%s WHERE cell_key=%s AND state='reserved'", (_json(value), key)).rowcount != 1:
                 raise ValueError("cell_reservation_lost")
 
     def review(self, run_id: str, *, reviewer: str, ratings: dict) -> dict:
         with self._db() as db:
-            row = db.execute("SELECT manifest,report FROM runs WHERE run_id=?", (run_id,)).fetchone()
+            db.lock(key="run:" + run_id)
+            row = db.execute("SELECT manifest,report FROM runs WHERE run_id=%s", (run_id,)).fetchone()
             if not row or not row["report"]: raise ValueError("tournament_report_not_found")
             manifest, report = json.loads(row["manifest"]), json.loads(row["report"])
             if _digest({k:v for k,v in report.items() if k not in {"human_review","report_hash","promotion_eligible"}}) != manifest.get("frozen_report_hash"):
@@ -165,7 +149,7 @@ class TournamentStore:
                                 and report["holdout"]["passed"] and not report["hard_failures"]
                 and report["training"][ref]["wins"] > report["training"][ref]["losses"])
             report["report_hash"] = _digest({k:v for k,v in report.items() if k != "report_hash"})
-            db.execute("UPDATE runs SET report=? WHERE run_id=?", (_json(report), run_id))
+            db.execute("UPDATE runs SET report=%s WHERE run_id=%s", (_json(report), run_id))
         return report
 
 
@@ -349,13 +333,13 @@ class TournamentRunner:
         # Provider identities may contain Decimal tariffs; compare their persisted JSON form.
         manifest=json.loads(_json(manifest))
         with self.store._db() as db:
-            db.execute("BEGIN IMMEDIATE")
-            prior=db.execute("SELECT manifest,report FROM runs WHERE run_id=?",(run_id,)).fetchone()
+            db.lock(key="run:" + run_id)
+            prior=db.execute("SELECT manifest,report FROM runs WHERE run_id=%s",(run_id,)).fetchone()
             if prior:
                 saved=json.loads(prior["manifest"])
                 if saved.get("input_manifest")!=manifest: raise ValueError("run_id_manifest_conflict")
                 if prior["report"]: return json.loads(prior["report"])
-            else: db.execute("INSERT INTO runs VALUES(?,?,NULL)",(run_id,_json({"input_manifest":manifest})))
+            else: db.execute("INSERT INTO runs(run_id,manifest,report) VALUES(%s,%s,NULL)",(run_id,_json({"input_manifest":manifest})))
         outputs={ref:{"train":[self._run_case(run_id,case,config,"train",execution_identity or {},mode,shadow) for case in train]} for ref,config in configs.items()}
         scores={ref:{"wins":0,"losses":0,"ties":0} for ref in candidate_refs}; pairings={}
         base=outputs[baseline_ref]
@@ -507,6 +491,7 @@ class TournamentRunner:
                 "human_review":{"approved":False,"reviewer":None,"ratings":None,"pack":pack},"promotion_eligible":False}
         report["report_hash"]=_digest(report)
         with self.store._db() as db:
-            saved=json.loads(db.execute("SELECT manifest FROM runs WHERE run_id=?",(run_id,)).fetchone()[0]); saved.update({"input_manifest":manifest,"frozen_report_hash":_digest({k:v for k,v in report.items() if k not in {"human_review","report_hash","promotion_eligible"}}),"review_label_map":label_map})
-            db.execute("UPDATE runs SET manifest=?,report=? WHERE run_id=?",(_json(saved),_json(report),run_id))
+            db.lock(key="run:" + run_id)
+            saved=json.loads(db.execute("SELECT manifest FROM runs WHERE run_id=%s",(run_id,)).fetchone()[0]); saved.update({"input_manifest":manifest,"frozen_report_hash":_digest({k:v for k,v in report.items() if k not in {"human_review","report_hash","promotion_eligible"}}),"review_label_map":label_map})
+            db.execute("UPDATE runs SET manifest=%s,report=%s WHERE run_id=%s",(_json(saved),_json(report),run_id))
         return report
