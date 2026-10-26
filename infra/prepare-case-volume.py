@@ -272,7 +272,7 @@ def prepare_case_volumes(case_root: Path, pinned_path: Path, case_target: Path, 
     if approval_path is not None and approval_path.exists():
         if not approval_path.is_file():
             raise CaseVolumeError("approval_source_unsafe")
-        _validate_approval(approval_path, case_target / CASE_BUNDLE)
+        _validate_approval(approval_path, (case_target / CASE_BUNDLE) if (case_target / CASE_BUNDLE).exists() else (case_root / CASE_BUNDLE))
         size, digest = _hash_file(approval_path, MAX_JSON_BYTES)
         _copy_verified(approval_path, approval_target / "model-approval.json", size=size, sha256=digest,
                        mode=0o400, uid=uid, gid=gid, max_bytes=MAX_JSON_BYTES)
